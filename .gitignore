@@ -1,3 +1,78 @@
+# The directory Mix will write compiled artifacts to.
+_build/
+symphony/_build/
+
+# If you run "mix test --cover", coverage assets end up here.
+cover/
+symphony/cover/
+
+# The directory Mix downloads your dependencies sources to.
+deps/
+symphony/deps/
+
+# Where third-party dependencies like ExDoc output generated docs.
+doc/
+symphony/doc/
+
+# Temporary files, for example, from tests.
+tmp/
+symphony/tmp/
+
+# Generated browser assets.
+priv/static/assets/
+assets/node_modules/
+assets/dist/
+symphony/priv/static/assets/
+symphony/priv/static/index.html
+symphony/assets/node_modules/
+symphony/assets/dist/
+symphony/legacy_test/
+
+# Local runtime logs.
+log/
+logs/
+.symphony/
+symphony/log/
+symphony/logs/
+symphony/.symphony/
+
+# If the VM crashes, it generates a dump, let's ignore it too.
+erl_crash.dump
+
+# Elixir language server and tooling.
+.elixir_ls/
+.fetch/
+symphony/.elixir_ls/
+symphony/.fetch/
+
+# Editor / OS temporary files.
+.DS_Store
+*.swp
+*.swo
+*~
+
+# IDE folders.
+.idea/
+.vscode/
+bin/
+symphony/bin/
+
+# Local environment and auth artifacts.
+.env
+.env.*
+!.env.example
+!symphony/.env.example
+.secrets
+.credentials
+status.txt
+.codex/original-user-prompt.txt
+
+# Also ignore archive artifacts (built via "mix archive.build").
+*.ez
+
+# Ignore package tarball (built via "mix hex.build").
+symphony_elixir-*.tar
+
+# Local archived upstream checkout.
 *.zip
 symphony-main
-.DS_Store
