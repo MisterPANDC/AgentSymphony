@@ -15,7 +15,7 @@ Native Symphony implementation without Linear, specialized for long-horizon agen
 
 ## 主要改进
 
-### 1. 简化平台依赖
+### 1. 简化平台依赖（gitlab_spec.md）
 
 当前 Symphony 的实现完全依赖 Linear 平台作为 Issue 控制面板来管理整个仓库。一个开发项目可能形成 `Symphony -> GitHub -> Linear` 的多平台关系，这种依赖显得冗余，也会带来团队费用和维护成本。
 
