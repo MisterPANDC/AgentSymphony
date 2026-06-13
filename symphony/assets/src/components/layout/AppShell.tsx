@@ -17,25 +17,27 @@ export function AppShell() {
 
   return (
     <div className="app-grid">
+      <header className="topbar">
+        <div className="topbar-search">
+          <CommandPalette />
+        </div>
+        <div className="topbar-status flex shrink-0 items-center gap-2">
+          <SyncStatusBadge />
+          <span className="status-pill" title="Active runs">
+            <CircleDot size={12} className="mr-1" />
+            {active} active
+          </span>
+          {blocked > 0 && (
+            <span className="status-pill blocked" title="Run Monitor needs attention">
+              <AlertTriangle size={12} className="mr-1" />
+              {blocked} blocked
+            </span>
+          )}
+          <UserMenu />
+        </div>
+      </header>
       <Sidebar />
       <section className="main-region">
-        <header className="topbar">
-          <CommandPalette />
-          <div className="topbar-status ml-auto flex shrink-0 items-center gap-2">
-            <SyncStatusBadge />
-            <span className="status-pill" title="Active runs">
-              <CircleDot size={12} className="mr-1" />
-              {active} active
-            </span>
-            {blocked > 0 && (
-              <span className="status-pill blocked" title="Run Monitor needs attention">
-                <AlertTriangle size={12} className="mr-1" />
-                {blocked} blocked
-              </span>
-            )}
-            <UserMenu />
-          </div>
-        </header>
         <main className="content">
           {tokenMissing && (
             <div className="token-banner">

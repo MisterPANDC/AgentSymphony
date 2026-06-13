@@ -21,6 +21,8 @@
   --active: #e7e8ec;
   --focus: #9ca3af;
   --shadow-soft: 0 1px 1px rgba(17, 24, 39, 0.04), 0 12px 24px rgba(17, 24, 39, 0.03);
+  --sidebar-width: 216px;
+  --chrome-bg: var(--sidebar-bg);
 }
 
 * {
@@ -48,23 +50,17 @@ textarea {
 .app-grid {
   display: grid;
   min-height: 100vh;
-  grid-template-columns: 216px minmax(0, 1fr);
-  background: var(--app-bg);
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-rows: 50px minmax(0, 1fr);
+  background: var(--chrome-bg);
 }
 
 .sidebar {
-  border-right: 1px solid var(--border);
-  background: var(--sidebar-bg);
+  grid-column: 1;
+  grid-row: 1 / -1;
+  min-height: 0;
+  background: var(--chrome-bg);
   padding: 12px 8px;
-}
-
-.sidebar-brand {
-  display: flex;
-  min-width: 190px;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 14px;
-  padding: 0 6px;
 }
 
 .sidebar-logo {
@@ -88,10 +84,175 @@ textarea {
   line-height: 18px;
 }
 
-.sidebar-subtitle {
+.project-switcher {
+  position: relative;
+  min-width: 190px;
+  margin-bottom: 14px;
+}
+
+.project-switcher-trigger {
+  display: grid;
+  width: 100%;
+  min-height: 40px;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  padding: 6px;
+  color: var(--text);
+  text-align: left;
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.project-switcher-trigger:hover,
+.project-switcher-trigger.is-open {
+  background: rgba(255, 255, 255, 0.68);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.03);
+}
+
+.project-switcher-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.project-switcher-current {
+  min-width: 0;
+  overflow: hidden;
   color: var(--muted);
   font-size: 11px;
   line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-switcher-chevron {
+  color: var(--muted);
+}
+
+.project-switcher-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  width: 336px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 42px rgba(17, 24, 39, 0.13);
+}
+
+.project-switcher-menu-header {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 7px 8px 7px 12px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.project-switcher-search {
+  display: flex;
+  height: 36px;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0 12px;
+  color: var(--muted);
+}
+
+.project-switcher-search input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.project-switcher-list {
+  max-height: min(58vh, 360px);
+  overflow: auto;
+}
+
+.project-switcher-row {
+  display: grid;
+  width: 100%;
+  min-height: 48px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: #ffffff;
+  padding: 8px 10px 8px 12px;
+  color: var(--text);
+  text-align: left;
+}
+
+.project-switcher-row:last-child {
+  border-bottom: 0;
+}
+
+.project-switcher-row:hover,
+.project-switcher-row.is-selected {
+  background: var(--hover);
+}
+
+.project-switcher-row:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.project-switcher-row svg {
+  flex: 0 0 auto;
+  color: #636772;
+}
+
+.project-switcher-row-main {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.project-switcher-row-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 620;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-switcher-row-path {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-switcher-row-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.project-switcher-row-meta svg {
+  color: #40625d;
 }
 
 .sidebar-nav {
@@ -134,24 +295,44 @@ textarea {
 }
 
 .main-region {
+  grid-column: 2;
+  grid-row: 2;
   min-width: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--app-bg);
 }
 
 .topbar {
+  position: relative;
+  z-index: 20;
+  grid-column: 2;
+  grid-row: 1;
   height: 50px;
   min-width: 0;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
-  border-bottom: 1px solid var(--border);
   padding: 0 16px;
-  background: rgba(251, 251, 252, 0.92);
+  background: var(--chrome-bg);
   backdrop-filter: blur(16px);
 }
 
+.topbar-search {
+  position: fixed;
+  top: 11px;
+  left: calc(50vw - var(--sidebar-width));
+  width: min(520px, calc(100vw - 620px));
+  min-width: 280px;
+  transform: translateX(-50%);
+}
+
+.topbar-search .command-trigger {
+  width: 100%;
+}
+
 .topbar-status {
+  position: relative;
+  z-index: 1;
   min-width: 0;
 }
 
@@ -985,12 +1166,14 @@ textarea {
 @media (max-width: 860px) {
   .app-grid {
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
   }
 
   .sidebar {
+    grid-column: 1;
+    grid-row: 2;
     position: sticky;
-    top: 0;
+    top: 52px;
     z-index: 10;
     display: flex;
     align-items: center;
@@ -999,7 +1182,6 @@ textarea {
     overflow-x: auto;
     scrollbar-width: none;
     border-right: 0;
-    border-bottom: 1px solid var(--border);
     padding: 8px 10px;
   }
 
@@ -1007,10 +1189,17 @@ textarea {
     display: none;
   }
 
-  .sidebar-brand {
-    flex: 0 0 auto;
-    min-width: 154px;
+  .project-switcher {
+    flex: 0 0 206px;
+    min-width: 206px;
     margin-bottom: 0;
+  }
+
+  .project-switcher-menu {
+    position: fixed;
+    top: 108px;
+    left: 10px;
+    width: min(360px, calc(100vw - 20px));
   }
 
   .sidebar-nav {
@@ -1024,13 +1213,29 @@ textarea {
     white-space: nowrap;
   }
 
+  .main-region {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
   .topbar {
+    grid-column: 1;
+    grid-row: 1;
+    position: sticky;
+    top: 0;
     min-height: 52px;
     height: auto;
     gap: 6px;
     overflow-x: auto;
     padding: 10px 12px;
     scrollbar-width: none;
+  }
+
+  .topbar-search {
+    position: static;
+    width: auto;
+    min-width: 0;
+    transform: none;
   }
 
   .topbar::-webkit-scrollbar {

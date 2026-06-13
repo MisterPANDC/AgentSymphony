@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { Bot, Columns3, GitBranch, History, LayoutDashboard, MonitorDot, Settings } from "lucide-react";
+import { ProjectSwitcher } from "./ProjectSwitcher";
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -14,13 +15,7 @@ const links = [
 export function Sidebar() {
   return (
     <aside className="sidebar">
-      <div className="sidebar-brand">
-        <div className="sidebar-logo">S</div>
-        <div>
-          <div className="sidebar-title">Symphony</div>
-          <div className="sidebar-subtitle">GitLab control</div>
-        </div>
-      </div>
+      <ProjectSwitcher />
       <nav className="sidebar-nav">
         {links.map(({ to, label, icon: Icon }) => (
           <NavLink

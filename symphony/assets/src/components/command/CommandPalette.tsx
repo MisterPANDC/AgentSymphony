@@ -46,7 +46,7 @@ export function CommandPalette() {
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Trigger asChild>
-        <button className="command-trigger text-button min-w-0 flex-1 justify-start text-[#686b73] sm:max-w-[360px]" title="Command palette">
+        <button className="command-trigger text-button min-w-0 justify-start text-[#686b73]" title="Command palette">
           <Search size={15} />
           <span className="command-trigger-label truncate">Search issues, runs, settings</span>
           <span className="command-trigger-shortcut ml-auto mono text-[11px] text-[#8a8d96]">⌘K</span>
