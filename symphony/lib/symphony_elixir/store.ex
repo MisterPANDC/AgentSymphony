@@ -82,8 +82,9 @@ defmodule SymphonyElixir.Store do
   @spec issue_to_tracker(map()) :: SymphonyElixir.Tracker.Issue.t()
   def issue_to_tracker(issue), do: backend().issue_to_tracker(issue)
 
-  @spec list_candidate_tracker_issues([String.t()]) :: [SymphonyElixir.Tracker.Issue.t()]
-  def list_candidate_tracker_issues(required_labels), do: backend().list_candidate_tracker_issues(required_labels)
+  @spec list_candidate_tracker_issues([String.t()], [String.t()]) :: [SymphonyElixir.Tracker.Issue.t()]
+  def list_candidate_tracker_issues(required_labels, active_states),
+    do: backend().list_candidate_tracker_issues(required_labels, active_states)
 
   @spec tracker_issues_by_ids([String.t()]) :: [SymphonyElixir.Tracker.Issue.t()]
   def tracker_issues_by_ids(issue_ids), do: backend().tracker_issues_by_ids(issue_ids)

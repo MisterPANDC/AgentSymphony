@@ -19,6 +19,24 @@ defmodule SymphonyElixir.Store.WorkflowTest do
     assert in_progress.status == "in_progress"
     assert in_progress.claimed_by == "agent-1"
 
+    assert {:ok, review} = Store.transition_workflow(issue.id, "review", reason: "ready for review")
+    assert review.status == "review"
+
+    assert {:ok, rework} = Store.transition_workflow(issue.id, "rework", reason: "changes requested")
+    assert rework.status == "rework"
+
+    assert {:ok, in_progress_again} = Store.transition_workflow(issue.id, "in_progress", reason: "addressing feedback")
+    assert in_progress_again.status == "in_progress"
+
+    assert {:ok, review_again} = Store.transition_workflow(issue.id, "review", reason: "ready again")
+    assert review_again.status == "review"
+
+    assert {:ok, merging} = Store.transition_workflow(issue.id, "merging", reason: "approved")
+    assert merging.status == "merging"
+
+    assert {:ok, done} = Store.transition_workflow(issue.id, "done", reason: "merged")
+    assert done.status == "done"
+
     assert {:error, :invalid_transition} = Store.transition_workflow(issue.id, "triage")
   end
 

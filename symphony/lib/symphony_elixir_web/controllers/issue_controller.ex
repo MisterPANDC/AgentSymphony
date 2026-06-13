@@ -72,6 +72,7 @@ defmodule SymphonyElixirWeb.IssueController do
              actor: "local_operator",
              reason: params["reason"]
            ),
+         :ok <- maybe_close_done_issue(issue.id, status),
          %{} = updated <- Store.get_issue(issue.id) do
       json(conn, %{issue: DTO.issue(updated)})
     else
@@ -100,6 +101,14 @@ defmodule SymphonyElixirWeb.IssueController do
   defp maybe_filter(filters, _key, nil), do: filters
   defp maybe_filter(filters, _key, ""), do: filters
   defp maybe_filter(filters, key, value), do: [{key, value} | filters]
+
+  defp maybe_close_done_issue(issue_id, status) do
+    if normalize_status(status) == "done", do: Tracker.close_issue(issue_id), else: :ok
+    :ok
+  end
+
+  defp normalize_status(status) when is_binary(status), do: status |> String.trim() |> String.downcase()
+  defp normalize_status(_status), do: ""
 
   defp error(conn, status, code, message) do
     conn |> put_status(status) |> json(%{error: %{code: code, message: message}})

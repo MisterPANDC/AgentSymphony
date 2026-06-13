@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { updateIssueWorkflow } from "../../api/issues";
 import type { WorkflowStatus } from "../../types/issue";
 
-const statuses: WorkflowStatus[] = ["triage", "todo", "in_progress", "blocked", "review", "done", "canceled"];
+const statuses: WorkflowStatus[] = ["triage", "todo", "in_progress", "blocked", "review", "merging", "rework", "done", "canceled"];
 
 export function StatusSelect({ issueId, value }: { issueId: string; value: WorkflowStatus }) {
   const queryClient = useQueryClient();

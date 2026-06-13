@@ -2,12 +2,12 @@ defmodule SymphonyElixirWeb.WorkflowController do
   use Phoenix.Controller, formats: [:json]
 
   alias Plug.Conn
-  alias SymphonyElixir.Store
+  alias SymphonyElixir.{Store, Tracker}
   alias SymphonyElixirWeb.DTO
 
-  @statuses ~w(triage todo in_progress blocked review done canceled)
+  @statuses ~w(triage todo in_progress blocked review merging rework done canceled)
   @priorities ~w(none low medium high urgent)
-  @dispatch_candidate_statuses ~w(todo)
+  @dispatch_candidate_statuses ~w(todo in_progress merging rework)
 
   @spec statuses(Conn.t(), map()) :: Conn.t()
   def statuses(conn, _params) do
@@ -23,6 +23,7 @@ defmodule SymphonyElixirWeb.WorkflowController do
              actor: "local_operator",
              reason: params["reason"]
            ),
+         :ok <- maybe_close_done_issue(issue.id, status),
          %{} = updated <- Store.get_issue(issue.id) do
       json(conn, %{issue: DTO.issue(updated)})
     else
@@ -68,6 +69,14 @@ defmodule SymphonyElixirWeb.WorkflowController do
   end
 
   defp find_issue(id), do: Store.get_issue(id) || Store.get_issue_by_iid(id) || Store.get_issue_by_identifier(id)
+
+  defp maybe_close_done_issue(issue_id, status) do
+    if normalize_status(status) == "done", do: Tracker.close_issue(issue_id), else: :ok
+    :ok
+  end
+
+  defp normalize_status(status) when is_binary(status), do: status |> String.trim() |> String.downcase()
+  defp normalize_status(_status), do: ""
 
   defp error(conn, status, code, message) do
     conn |> put_status(status) |> json(%{error: %{code: code, message: message}})

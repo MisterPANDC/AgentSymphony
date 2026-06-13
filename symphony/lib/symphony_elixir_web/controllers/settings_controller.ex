@@ -48,8 +48,8 @@ defmodule SymphonyElixirWeb.SettingsController do
 
     json(conn, %{
       workflow: %{
-        statuses: ~w(triage todo in_progress blocked review done canceled),
-        dispatchCandidateStatuses: ~w(todo),
+        statuses: ~w(triage todo in_progress blocked review merging rework done canceled),
+        dispatchCandidateStatuses: ~w(todo in_progress merging rework),
         requiredGitlabLabels: settings.tracker.required_labels,
         maxConcurrentAgents: settings.agent.max_concurrent_agents,
         syncIntervalMs: sync_interval(),

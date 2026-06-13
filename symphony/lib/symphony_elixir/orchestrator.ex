@@ -127,7 +127,7 @@ defmodule SymphonyElixir.Orchestrator do
 
       issue_id ->
         {running_entry, state} = pop_running_entry(state, issue_id)
-        state = record_session_completion_totals(state, running_entry)
+        state = record_session_runtime_totals(state, running_entry)
         session_id = running_entry_session_id(running_entry)
 
         state = handle_agent_down(reason, state, issue_id, running_entry, session_id)
@@ -203,17 +203,9 @@ defmodule SymphonyElixir.Orchestrator do
     if input_required_blocker?(running_entry) do
       block_input_required_agent_down(state, issue_id, running_entry, session_id, :normal)
     else
-      Logger.info("Agent task completed for issue_id=#{issue_id} session_id=#{session_id}; scheduling active-state continuation check")
+      Logger.info("Agent task completed for issue_id=#{issue_id} session_id=#{session_id}; finalizing workflow handoff")
 
-      state
-      |> complete_issue(issue_id)
-      |> schedule_issue_retry(issue_id, 1, %{
-        identifier: running_entry.identifier,
-        issue_url: running_entry.issue.url,
-        delay_type: :continuation,
-        worker_host: Map.get(running_entry, :worker_host),
-        workspace_path: Map.get(running_entry, :workspace_path)
-      })
+      complete_successful_issue(state, issue_id, running_entry)
     end
   end
 
@@ -221,6 +213,7 @@ defmodule SymphonyElixir.Orchestrator do
     if input_required_blocker?(running_entry) do
       block_input_required_agent_down(state, issue_id, running_entry, session_id, reason)
     else
+      persist_run_finished(running_entry, "failed", exit_reason: "agent exited: #{inspect(reason)}")
       retry_agent_down(state, issue_id, running_entry, session_id, reason)
     end
   end
@@ -401,6 +394,13 @@ defmodule SymphonyElixir.Orchestrator do
     select_worker_host(state, preferred_worker_host)
   end
 
+  @doc false
+  @spec handle_agent_down_for_test(term(), %State{}, String.t(), map(), String.t() | nil) :: %State{}
+  def handle_agent_down_for_test(reason, %State{} = state, issue_id, running_entry, session_id \\ nil)
+      when is_binary(issue_id) and is_map(running_entry) do
+    handle_agent_down(reason, state, issue_id, running_entry, session_id)
+  end
+
   defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state
 
   defp reconcile_running_issue_states([issue | rest], state, active_states, terminal_states) do
@@ -551,7 +551,8 @@ defmodule SymphonyElixir.Orchestrator do
         release_issue_claim(state, issue_id)
 
       %{pid: pid, ref: ref, identifier: identifier} = running_entry ->
-        state = record_session_completion_totals(state, running_entry)
+        state = record_session_runtime_totals(state, running_entry)
+        persist_run_finished(running_entry, "canceled", exit_reason: "canceled by issue-state reconciliation")
         worker_host = Map.get(running_entry, :worker_host)
 
         if cleanup_workspace do
@@ -613,7 +614,7 @@ defmodule SymphonyElixir.Orchestrator do
         Logger.warning("Issue blocked: issue_id=#{issue_id} issue_identifier=#{identifier} session_id=#{session_id} elapsed_ms=#{elapsed_ms}; #{error}")
 
         state
-        |> record_session_completion_totals(running_entry)
+        |> record_session_runtime_totals(running_entry)
         |> stop_and_block_issue(issue_id, running_entry, error)
       else
         Logger.warning("Issue stalled: issue_id=#{issue_id} issue_identifier=#{identifier} session_id=#{session_id} elapsed_ms=#{elapsed_ms}; restarting with backoff")
@@ -1108,32 +1109,36 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
-  defp persist_issue_completed(issue_id) do
-    Store.transition_workflow(
-      issue_id,
-      "review",
-      source: "agent",
-      actor: "orchestrator",
-      reason: "agent run completed"
-    )
-  rescue
-    _ -> :ok
-  end
+  defp persist_run_finished(running_entry, status, attrs \\ [])
 
-  defp persist_run_finished(%{run_id: run_id}, status) when is_binary(run_id) do
-    Store.update_run(run_id, %{
-      status: status,
-      finished_at: DateTime.utc_now(),
-      last_heartbeat_at: DateTime.utc_now()
-    })
+  defp persist_run_finished(%{run_id: run_id}, status, attrs) when is_binary(run_id) do
+    now = DateTime.utc_now()
 
-    event_type = if status == "succeeded", do: "succeeded", else: "failed"
+    run_attrs =
+      attrs
+      |> Map.new()
+      |> Map.merge(%{
+        status: status,
+        finished_at: now,
+        last_heartbeat_at: now
+      })
+
+    Store.update_run(run_id, run_attrs)
+
+    event_type = run_finished_event_type(status)
     Store.add_run_event(run_id, event_type, "Agent run #{status}", %{})
   rescue
-    _ -> :ok
+    error ->
+      Logger.warning("Failed to persist run terminal status=#{status}: #{Exception.message(error)}")
+      :ok
   end
 
-  defp persist_run_finished(_running_entry, _status), do: :ok
+  defp persist_run_finished(_running_entry, _status, _attrs), do: :ok
+
+  defp run_finished_event_type("succeeded"), do: "succeeded"
+  defp run_finished_event_type("blocked"), do: "blocked"
+  defp run_finished_event_type("canceled"), do: "canceled"
+  defp run_finished_event_type(_status), do: "failed"
 
   defp revalidate_issue_for_dispatch(%Issue{id: issue_id}, issue_fetcher, terminal_states)
        when is_binary(issue_id) and is_function(issue_fetcher, 1) do
@@ -1155,9 +1160,55 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp revalidate_issue_for_dispatch(issue, _issue_fetcher, _terminal_states), do: {:ok, issue}
 
-  defp complete_issue(%State{} = state, issue_id) do
-    persist_issue_completed(issue_id)
+  defp complete_successful_issue(%State{} = state, issue_id, running_entry) do
+    case current_workflow_status(issue_id) do
+      "done" ->
+        persist_run_finished(running_entry, "succeeded")
+        release_completed_issue(state, issue_id)
 
+      "review" ->
+        persist_run_finished(running_entry, "succeeded")
+        release_completed_issue(state, issue_id)
+
+      "blocked" ->
+        persist_run_finished(running_entry, "blocked", blocked_reason: "agent completed with blocked workflow status")
+        release_issue_claim(state, issue_id)
+
+      active_status when active_status in ["todo", "in_progress", "merging", "rework"] ->
+        persist_run_finished(running_entry, "succeeded")
+
+        state
+        |> mark_issue_completed(issue_id)
+        |> schedule_issue_retry(issue_id, 1, %{
+          identifier: running_entry.identifier,
+          issue_url: running_entry.issue.url,
+          delay_type: :continuation,
+          worker_host: Map.get(running_entry, :worker_host),
+          workspace_path: Map.get(running_entry, :workspace_path)
+        })
+
+      other ->
+        Logger.info("Agent completed with non-active workflow status: issue_id=#{issue_id} status=#{inspect(other)}")
+        persist_run_finished(running_entry, "succeeded")
+        release_completed_issue(state, issue_id)
+    end
+  end
+
+  defp current_workflow_status(issue_id) do
+    case Store.get_issue(issue_id) do
+      %{workflow_status: status} when is_binary(status) -> normalize_issue_state(status)
+      %{"workflow_status" => status} when is_binary(status) -> normalize_issue_state(status)
+      _ -> nil
+    end
+  end
+
+  defp release_completed_issue(%State{} = state, issue_id) do
+    state
+    |> mark_issue_completed(issue_id)
+    |> release_issue_claim(issue_id)
+  end
+
+  defp mark_issue_completed(%State{} = state, issue_id) do
     %{
       state
       | completed: MapSet.put(state.completed, issue_id),
@@ -1715,9 +1766,7 @@ defmodule SymphonyElixir.Orchestrator do
     {Map.get(state.running, issue_id), %{state | running: Map.delete(state.running, issue_id)}}
   end
 
-  defp record_session_completion_totals(state, running_entry) when is_map(running_entry) do
-    persist_run_finished(running_entry, "succeeded")
-
+  defp record_session_runtime_totals(state, running_entry) when is_map(running_entry) do
     runtime_seconds = running_seconds(running_entry.started_at, DateTime.utc_now())
 
     codex_totals =
@@ -1734,7 +1783,7 @@ defmodule SymphonyElixir.Orchestrator do
     %{state | codex_totals: codex_totals}
   end
 
-  defp record_session_completion_totals(state, _running_entry), do: state
+  defp record_session_runtime_totals(state, _running_entry), do: state
 
   defp refresh_runtime_config(%State{} = state) do
     config = Config.settings!()

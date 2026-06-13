@@ -51,7 +51,7 @@ defmodule SymphonyElixir.Config.Schema do
       field(:project_slug, :string)
       field(:assignee, :string)
       field(:required_labels, {:array, :string}, default: [])
-      field(:active_states, {:array, :string}, default: ["todo"])
+      field(:active_states, {:array, :string}, default: ["todo", "in_progress", "merging", "rework"])
       field(:terminal_states, {:array, :string}, default: ["done", "canceled"])
     end
 

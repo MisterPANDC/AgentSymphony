@@ -56,7 +56,7 @@ defmodule SymphonyElixir.Codex.DynamicTool do
           "properties" => %{
             "status" => %{
               "type" => "string",
-              "enum" => ["triage", "todo", "in_progress", "blocked", "review", "done", "canceled"]
+              "enum" => ["triage", "todo", "in_progress", "blocked", "review", "merging", "rework", "done", "canceled"]
             },
             "reason" => %{"type" => ["string", "null"]}
           }
@@ -103,6 +103,7 @@ defmodule SymphonyElixir.Codex.DynamicTool do
              actor: "agent",
              reason: reason || "agent tool update"
            ) do
+      maybe_close_done_issue(issue_id, status)
       success_response(%{workflow: workflow})
     else
       {:error, reason} -> failure_response(%{error: %{message: inspect(reason)}})
@@ -130,6 +131,14 @@ defmodule SymphonyElixir.Codex.DynamicTool do
   end
 
   defp workflow_status(_arguments), do: {:error, :missing_workflow_status}
+
+  defp maybe_close_done_issue(issue_id, status) do
+    if normalize_workflow_status(status) == "done", do: Tracker.close_issue(issue_id), else: :ok
+    :ok
+  end
+
+  defp normalize_workflow_status(status) when is_binary(status), do: status |> String.trim() |> String.downcase()
+  defp normalize_workflow_status(_status), do: ""
 
   defp unsupported_tool_response(other) do
     failure_response(%{

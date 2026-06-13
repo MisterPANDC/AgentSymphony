@@ -33,7 +33,7 @@ export function IssueList() {
             <div className="text-button">
               <Filter size={14} />
               <select className="bg-transparent outline-none" value={status} onChange={(event) => setStatus(event.target.value as WorkflowStatus | "all")}>
-                {["all", "triage", "todo", "in_progress", "blocked", "review", "done", "canceled"].map((item) => (
+                {["all", "triage", "todo", "in_progress", "blocked", "review", "merging", "rework", "done", "canceled"].map((item) => (
                   <option key={item} value={item}>
                     {item.replace("_", " ")}
                   </option>

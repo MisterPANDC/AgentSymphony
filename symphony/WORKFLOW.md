@@ -4,6 +4,9 @@ tracker:
   required_labels: []
   active_states:
     - todo
+    - in_progress
+    - merging
+    - rework
   terminal_states:
     - done
     - canceled
@@ -73,4 +76,10 @@ Instructions:
    - `update_current_issue_state`
 3. Do not read or ask for GitLab tokens. Symphony owns GitLab API access on the server side.
 4. If blocked by missing permissions, secrets, approval, or external service failure, stop with a concise blocker summary so Symphony can surface it in Run Monitor.
-5. When implementation appears ready, summarize the result and set the internal status to `review` unless the workflow explicitly requires `done`.
+5. Follow the internal workflow status:
+   - `todo`: move to `in_progress` before active work.
+   - `in_progress`: implement, validate, publish/attach merge request evidence, then set status to `review`.
+   - `review`: wait for human review or approval; do not continue implementation unless feedback requires it.
+   - `merging`: perform the merge/land flow until the merge request is merged, then set status to `done`.
+   - `rework`: address reviewer feedback, revalidate, and return to `review`.
+6. Set `done` only after the merge/land flow is complete.

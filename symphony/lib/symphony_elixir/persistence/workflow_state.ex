@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Persistence.WorkflowState do
 
   alias SymphonyElixir.Persistence.Issue
 
-  @statuses ~w(triage todo in_progress blocked review done canceled)
+  @statuses ~w(triage todo in_progress blocked review merging rework done canceled)
   @priorities ~w(none low medium high urgent)
 
   @primary_key {:id, :binary_id, autogenerate: true}

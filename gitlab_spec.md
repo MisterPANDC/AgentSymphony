@@ -46,7 +46,7 @@ A conforming implementation MUST satisfy all of the following goals:
    - Symphony MUST authenticate to GitLab from the server side only.
 
 5. **Maintain Symphony workflow state internally**
-   - Symphony workflow statuses such as `triage`, `todo`, `in_progress`, `blocked`, `review`, `done`, and `canceled` MUST be stored in the Symphony database.
+   - Symphony workflow statuses such as `triage`, `todo`, `in_progress`, `blocked`, `review`, `merging`, `rework`, `done`, and `canceled` MUST be stored in the Symphony database.
    - Blocker/dependency relationships MUST be stored in the Symphony database.
    - Dashboard ordering, run state, dispatch state, blocked/operator-input state, and sync cursors MUST be stored in the Symphony database.
    - GitLab paid workflow/blocker/status features MUST NOT be required for the core workflow.
@@ -591,6 +591,8 @@ todo
 in_progress
 blocked
 review
+merging
+rework
 done
 canceled
 ```
@@ -874,10 +876,12 @@ When GitLab fields change externally:
 |---|---|---|
 | `triage` | Synced from GitLab and not yet accepted into work queue. | No |
 | `todo` | Ready for Agent work. | Yes |
-| `in_progress` | Claimed by an active or recently active Agent run. | No |
+| `in_progress` | Implementation actively underway. | Yes |
 | `blocked` | Cannot proceed because dependency or operator input is required. | No |
-| `review` | Agent believes implementation is ready for human review or merge. | No |
-| `done` | Work is complete. | No |
+| `review` | Implementation is validated and waiting for human review or merge approval. | No |
+| `merging` | Human approved the change; Agent should run the merge/land flow. | Yes |
+| `rework` | Reviewer requested changes; Agent should restart the implementation/review loop. | Yes |
+| `done` | Merge is complete and work is terminal. | No |
 | `canceled` | Work is intentionally stopped. | No |
 
 ### 9.2 Status transitions
@@ -892,12 +896,18 @@ todo -> in_progress
 todo -> blocked
 in_progress -> blocked
 in_progress -> review
-in_progress -> done
 in_progress -> todo
 blocked -> todo
 blocked -> canceled
 review -> todo
-review -> done
+review -> merging
+review -> rework
+merging -> done
+merging -> blocked
+merging -> review
+rework -> in_progress
+rework -> blocked
+rework -> review
 any non-terminal -> canceled
 ```
 
@@ -946,7 +956,7 @@ A dispatch candidate MUST satisfy:
 
 ```text
 gitlab_issues.gitlab_state = "opened"
-issue_workflow_states.status in ["todo"]
+issue_workflow_states.status in ["todo", "in_progress", "merging", "rework"]
 no unresolved dependency blocker
 no active agent run for the same issue
 required labels satisfied when configured
@@ -1020,14 +1030,39 @@ Unlike the original prototype, blocked state MUST survive orchestrator restart.
 When the Agent completes successfully:
 
 - `agent_runs.status` MUST become `succeeded`.
-- The issue workflow status SHOULD transition to `review` unless the workflow explicitly closes the issue as `done`.
+- The issue workflow status MUST be re-read after completion.
 - A GitLab issue note SHOULD be posted with a concise run summary when write permission is available.
 - Run Monitor MUST show the final status and run summary.
+
+For GitLab-backed internal workflow state, this completion rule is the GitLab
+mapping of upstream Symphony's tracker-state handoff semantics:
+
+- Agent tools are the preferred way to move an issue between `in_progress`,
+  `review`, `merging`, `rework`, `done`, and `blocked`.
+- If the Agent exits normally and the current internal workflow status is still
+  an active status (`todo`, `in_progress`, `merging`, or `rework`), the
+  orchestrator MUST keep the upstream continuation behavior and schedule a
+  short continuation retry.
+- If the Agent exits normally and the current internal workflow status is
+  `review`, the orchestrator MUST release its claim and wait for human review
+  or approval.
+- If the Agent exits normally and the current internal workflow status is
+  `done`, the orchestrator MUST preserve `done`.
+- If the Agent exits normally and the current internal workflow status is
+  `blocked`, the orchestrator MUST preserve `blocked` and surface the block in
+  Run Monitor.
+
+Internal `review` MUST NOT automatically close the GitLab issue. Internal
+`done` means the merge/land flow has completed; when an issue enters `done`,
+Symphony SHOULD close the GitLab issue through the server-side GitLab client.
+GitLab close failures MUST be recorded as events and MUST NOT corrupt the
+internal workflow status.
 
 When the Agent fails:
 
 - `agent_runs.status` MUST become `failed`.
-- The issue workflow status SHOULD transition to `todo` or `blocked` based on failure type.
+- The issue workflow status SHOULD remain unchanged for retryable active-state failures.
+- The issue workflow status SHOULD transition to `blocked` when the failure is caused by missing permissions, secrets, required tools, approval, or operator input.
 - Failure details MUST be visible in Run Monitor.
 
 ---
@@ -1515,6 +1550,8 @@ export type WorkflowStatus =
   | "in_progress"
   | "blocked"
   | "review"
+  | "merging"
+  | "rework"
   | "done"
   | "canceled";
 

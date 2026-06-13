@@ -4,6 +4,8 @@ export type WorkflowStatus =
   | "in_progress"
   | "blocked"
   | "review"
+  | "merging"
+  | "rework"
   | "done"
   | "canceled";
 

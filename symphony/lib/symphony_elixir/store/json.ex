@@ -11,7 +11,7 @@ defmodule SymphonyElixir.Store.Json do
 
   alias SymphonyElixir.Tracker.Issue
 
-  @workflow_statuses ~w(triage todo in_progress blocked review done canceled)
+  @workflow_statuses ~w(triage todo in_progress blocked review merging rework done canceled)
   @priorities ~w(none low medium high urgent)
   @run_statuses ~w(queued starting running blocked succeeded failed canceled stale)
   @block_types ~w(operator_input approval_required mcp_elicitation sandbox_rejection external_failure blocked_by_dependency)
@@ -82,8 +82,9 @@ defmodule SymphonyElixir.Store.Json do
   @spec issue_to_tracker(map()) :: Issue.t()
   def issue_to_tracker(issue), do: call({:issue_to_tracker, issue})
 
-  @spec list_candidate_tracker_issues([String.t()]) :: [Issue.t()]
-  def list_candidate_tracker_issues(required_labels), do: call({:list_candidate_tracker_issues, required_labels})
+  @spec list_candidate_tracker_issues([String.t()], [String.t()]) :: [Issue.t()]
+  def list_candidate_tracker_issues(required_labels, active_states),
+    do: call({:list_candidate_tracker_issues, required_labels, active_states})
 
   @spec tracker_issues_by_ids([String.t()]) :: [Issue.t()]
   def tracker_issues_by_ids(ids), do: call({:tracker_issues_by_ids, ids})
@@ -222,7 +223,9 @@ defmodule SymphonyElixir.Store.Json do
     {:reply, tracker_issue(state, undecorate(issue)), state}
   end
 
-  def handle_call({:list_candidate_tracker_issues, required_labels}, _from, state) do
+  def handle_call({:list_candidate_tracker_issues, required_labels, active_states}, _from, state) do
+    active_statuses = MapSet.new(active_states || [], &normalize_status/1)
+
     issues =
       state.issue_order
       |> Enum.map(&Map.get(state.issues, &1))
@@ -230,7 +233,7 @@ defmodule SymphonyElixir.Store.Json do
       |> Enum.filter(fn issue ->
         workflow = Map.get(state.workflow_states, issue.id, %{})
 
-        issue.gitlab_state == "opened" and workflow.status == "todo" and
+        issue.gitlab_state == "opened" and MapSet.member?(active_statuses, workflow.status) and
           not unresolved_dependency?(state, issue.id) and labels_satisfy?(issue.labels, required_labels) and
           no_active_run?(state, issue.id)
       end)
@@ -779,9 +782,11 @@ defmodule SymphonyElixir.Store.Json do
   defp allowed_transition?(_from, "canceled"), do: true
   defp allowed_transition?("triage", "todo"), do: true
   defp allowed_transition?("todo", status), do: status in ["in_progress", "blocked"]
-  defp allowed_transition?("in_progress", status), do: status in ["blocked", "review", "done", "todo"]
+  defp allowed_transition?("in_progress", status), do: status in ["blocked", "review", "todo"]
   defp allowed_transition?("blocked", status), do: status in ["todo", "canceled"]
-  defp allowed_transition?("review", status), do: status in ["todo", "done"]
+  defp allowed_transition?("review", status), do: status in ["todo", "merging", "rework"]
+  defp allowed_transition?("merging", status), do: status in ["done", "blocked", "review"]
+  defp allowed_transition?("rework", status), do: status in ["in_progress", "blocked", "review"]
   defp allowed_transition?(_from, _to), do: false
 
   defp blocker_dtos(state, issue_id) do

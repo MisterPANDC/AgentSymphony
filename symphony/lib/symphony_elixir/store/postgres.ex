@@ -140,9 +140,12 @@ defmodule SymphonyElixir.Store.Postgres do
   @spec issue_to_tracker(map()) :: Tracker.Issue.t()
   def issue_to_tracker(issue), do: tracker_issue(undecorate(issue))
 
-  @spec list_candidate_tracker_issues([String.t()]) :: [Tracker.Issue.t()]
-  def list_candidate_tracker_issues(required_labels) do
-    list_issues(status: "todo", gitlab_state: "opened")
+  @spec list_candidate_tracker_issues([String.t()], [String.t()]) :: [Tracker.Issue.t()]
+  def list_candidate_tracker_issues(required_labels, active_states) do
+    active_statuses = MapSet.new(active_states || [], &normalize_status/1)
+
+    list_issues(gitlab_state: "opened")
+    |> Enum.filter(&MapSet.member?(active_statuses, &1.workflow_status))
     |> Enum.reject(&unresolved_dependency?(&1.id))
     |> Enum.filter(&labels_satisfy?(&1.labels, required_labels))
     |> Enum.reject(&active_run_id(&1.id))
@@ -821,9 +824,11 @@ defmodule SymphonyElixir.Store.Postgres do
   defp allowed_transition?(_from, "canceled"), do: true
   defp allowed_transition?("triage", "todo"), do: true
   defp allowed_transition?("todo", status), do: status in ["in_progress", "blocked"]
-  defp allowed_transition?("in_progress", status), do: status in ["blocked", "review", "done", "todo"]
+  defp allowed_transition?("in_progress", status), do: status in ["blocked", "review", "todo"]
   defp allowed_transition?("blocked", status), do: status in ["todo", "canceled"]
-  defp allowed_transition?("review", status), do: status in ["todo", "done"]
+  defp allowed_transition?("review", status), do: status in ["todo", "merging", "rework"]
+  defp allowed_transition?("merging", status), do: status in ["done", "blocked", "review"]
+  defp allowed_transition?("rework", status), do: status in ["in_progress", "blocked", "review"]
   defp allowed_transition?(_from, _to), do: false
 
   defp priority_rank("urgent"), do: 1

@@ -148,7 +148,9 @@ textarea {
 }
 
 .status-pill.todo,
-.status-pill.in_progress {
+.status-pill.in_progress,
+.status-pill.merging,
+.status-pill.rework {
   border-color: #bbd6c2;
   color: #1f5f3b;
   background: #effaf3;
