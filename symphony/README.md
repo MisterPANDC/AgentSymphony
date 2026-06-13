@@ -4,7 +4,7 @@ GitLab-native 的 Symphony 运行时，用 Elixir/Phoenix 提供本地调度服�
 
 ## 亮点
 
-- **GitLab 原生集成**：支持 GitLab project API URL、project path / numeric id、issue 同步、note 同步和必要的 GitLab 写入。
+- **GitLab 原生集成**：支持本地单项目 token 模式，也支持云端 GitLab OIDC 登录、多用户选择已加入 repo、issue 同步、note 同步和必要的 GitLab 写入。
 - **内部工作流**：`triage`、`todo`、`in_progress`、`review`、`merging`、`rework`、`done`、`canceled` 等阶段存储在 Symphony 数据库中；依赖阻塞和人工介入作为 issue/run 的阻塞状态单独记录，不依赖 GitLab 付费工作流能力。
 - **持久化运行态**：agent runs、run events、runtime blocks、operator-input、sync cursors 均可落库，重启后可恢复观察。
 - **Linear 风格控制台**：高密度 issue dashboard、issue drawer、blocker editor、agent controls、run history、settings 和 Run Monitor。
@@ -12,7 +12,7 @@ GitLab-native 的 Symphony 运行时，用 Elixir/Phoenix 提供本地调度服�
 
 ## 快速开始
 
-准备好 Elixir/Mix、Node.js/npm，以及一个具备 GitLab API 权限的 token 后：
+本地单项目模式下，准备好 Elixir/Mix、Node.js/npm，以及一个具备 GitLab API 权限的 token 后：
 
 ```bash
 cd symphony
@@ -32,7 +32,7 @@ cp .env.example .env.local
 | Elixir / Mix | 后端运行时、任务、escript 构建 |
 | Node.js / npm | React 前端依赖安装和构建 |
 | PostgreSQL | 生产/规范持久化后端 |
-| GitLab token | 访问项目、issue 和 note API |
+| GitLab token / Project Access Token | 本地模式访问 GitLab API；云端 OIDC 模式中由每个项目在设置页保存 Project Access Token |
 
 项目提供 `mise.toml` 固定 Erlang/Elixir 版本。Linux 或 CI 环境推荐在镜像/主机初始化层预装依赖，再运行项目 setup。
 
@@ -108,7 +108,37 @@ SYMPHONY_STORE_BACKEND=postgres
 SYMPHONY_DATABASE_URL=postgres://postgres:postgres@localhost:5432/symphony_dev
 ```
 
-`GITLAB_TOKEN` 只在服务端使用，不会发送给浏览器；settings 和 monitor API 只返回脱敏状态。
+`GITLAB_TOKEN` 只用于本地单项目模式，不会发送给浏览器；settings 和 monitor API 只返回脱敏状态。
+
+启用 GitLab OIDC 登录：
+
+```env
+SYMPHONY_AUTH_MODE=gitlab_oidc
+SYMPHONY_PUBLIC_URL=https://symphony.example.com
+SYMPHONY_SESSION_SECRET=replace-with-a-stable-random-secret-at-least-64-bytes
+
+GITLAB_OIDC_ISSUER=https://gitlab.example.com
+GITLAB_OIDC_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+GITLAB_OIDC_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+GITLAB_OIDC_SCOPES=openid profile email api
+# 可选；未设置时会复用 SYMPHONY_SESSION_SECRET / SECRET_KEY_BASE
+SYMPHONY_TOKEN_ENCRYPTION_SECRET=replace-with-a-stable-random-secret
+```
+
+在自建 GitLab 创建 OAuth application，redirect URI 填：
+
+```text
+https://symphony.example.com/auth/gitlab/callback
+```
+
+登录后，Symphony 会通过用户 OAuth 拉取该用户加入的 repo 列表。用户选择 repo 后，Symphony 按该用户在 GitLab 上的 project membership 计算权限：Reporter 及以上可访问只读页面，Developer 及以上可执行用户发起的写操作，Maintainer 及以上可进入运维/设置操作。用户在 Symphony 中发起的 issue 编辑、评论、workflow 完成后关闭 GitLab issue 等操作，全部使用当前登录用户的 OAuth token 调 GitLab；Symphony 不会让用户在界面中执行超过其 GitLab 账号权限的写操作。
+
+云端 OIDC 模式下，每个 repo 还需要在 `Settings -> GitLab` 填写一次 GitLab Project Access Token。这个 token 保存后会加密落库，前端和 API 只显示 `configured` / `missing` 状态，不再回显明文。如果当前项目未设置 Project Access Token，控制台会提示进入设置页填写。后台同步 GitLab 数据以及 Agent 对 GitLab 的写操作全部使用该项目的 Project Access Token，不使用任何一个登录用户的 OAuth token。
+
+需要明确的权限边界：
+
+1. Agent 写 GitLab 时使用 Project Access Token，因此 Agent 可能执行当前登录用户自身没有权限执行的 GitLab 写操作。Project Access Token 的权限应按项目维度最小化配置，并只授予 Symphony/Agent 确实需要的能力。
+2. 罕见情况下，如果 Agent 或后台同步通过 Project Access Token 读取到了某个当前用户没有 GitLab 权限直接读取的数据，该数据可能已经进入 Symphony 数据库，用户可能通过 Symphony 数据库或后续页面间接看到。当前实现主要按 repo membership 做访问控制，绝大多数 issue/note 信息不涉及更细粒度权限；这个细粒度数据可见性风险暂不额外处理。
 
 ## 初始化脚本
 
@@ -151,7 +181,7 @@ mix ecto.create
 mix ecto.migrate
 ```
 
-未配置 `SYMPHONY_DATABASE_URL` / `DATABASE_URL` 时，应用使用 JSON fallback。生产环境建议显式配置 PostgreSQL。
+未配置 `SYMPHONY_DATABASE_URL` / `DATABASE_URL` 时，应用使用 JSON fallback。JSON fallback 只适合本地试用；云端多用户、多 repo、OIDC token 和 Project Access Token 场景建议显式配置 PostgreSQL。
 
 ## 开发命令
 

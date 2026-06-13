@@ -252,11 +252,11 @@ defmodule SymphonyElixir.Orchestrator do
       choose_issues(issues, state)
     else
       {:error, :missing_gitlab_config} ->
-        Logger.error("GitLab configuration missing. Set GITLAB_PROJECT_API_URL and GITLAB_TOKEN.")
+        Logger.error(gitlab_config_hint())
         state
 
       {:error, :missing_gitlab_token} ->
-        Logger.error("GitLab token missing. Set GITLAB_TOKEN.")
+        Logger.error(gitlab_token_hint())
         state
 
       {:error, :missing_tracker_kind} ->
@@ -291,6 +291,22 @@ defmodule SymphonyElixir.Orchestrator do
 
       false ->
         state
+    end
+  end
+
+  defp gitlab_config_hint do
+    if System.get_env("SYMPHONY_AUTH_MODE") == "gitlab_oidc" do
+      "GitLab project missing. Sign in, choose a repository, then configure its Project Access Token in Symphony settings."
+    else
+      "GitLab configuration missing. Set GITLAB_PROJECT_API_URL and GITLAB_TOKEN."
+    end
+  end
+
+  defp gitlab_token_hint do
+    if System.get_env("SYMPHONY_AUTH_MODE") == "gitlab_oidc" do
+      "GitLab Project Access Token missing. Configure the current repository token in Symphony settings."
+    else
+      "GitLab token missing. Set GITLAB_TOKEN."
     end
   end
 

@@ -22,6 +22,9 @@ defmodule SymphonyElixir.Store.Json do
     :path,
     :started_at,
     :project,
+    identities: %{},
+    oauth_tokens: %{},
+    project_memberships: %{},
     issues: %{},
     issue_order: [],
     issue_by_iid: %{},
@@ -65,6 +68,32 @@ defmodule SymphonyElixir.Store.Json do
 
   @spec project() :: map() | nil
   def project, do: call(:project)
+
+  @spec projects() :: [map()]
+  def projects, do: call(:projects)
+
+  @spec project_by_id(String.t()) :: map() | nil
+  def project_by_id(id), do: call({:project_by_id, id})
+
+  @spec upsert_gitlab_identity(map()) :: map()
+  def upsert_gitlab_identity(attrs), do: call({:upsert_gitlab_identity, attrs})
+
+  @spec upsert_oauth_token(String.t(), map()) :: map()
+  def upsert_oauth_token(identity_id, attrs), do: call({:upsert_oauth_token, identity_id, attrs})
+
+  @spec oauth_token(String.t()) :: map() | nil
+  def oauth_token(identity_id), do: call({:oauth_token, identity_id})
+
+  @spec upsert_project_membership(String.t(), String.t(), map()) :: map()
+  def upsert_project_membership(identity_id, project_setting_id, attrs),
+    do: call({:upsert_project_membership, identity_id, project_setting_id, attrs})
+
+  @spec put_project_access_token(String.t(), String.t(), String.t() | nil) :: {:ok, map()} | {:error, term()}
+  def put_project_access_token(project_setting_id, token, identity_id \\ nil),
+    do: call({:put_project_access_token, project_setting_id, token, identity_id})
+
+  @spec project_access_token(map() | String.t()) :: {:ok, String.t()} | {:error, term()}
+  def project_access_token(project_or_id), do: call({:project_access_token, project_or_id})
 
   @spec upsert_issue(map()) :: map()
   def upsert_issue(attrs), do: call({:upsert_issue, attrs})
@@ -174,16 +203,131 @@ defmodule SymphonyElixir.Store.Json do
     now = now()
     project = normalize_project(attrs, state.project, now)
     state = persist(%{state | project: project})
+    {:reply, public_project(project), state}
+  end
+
+  def handle_call(:project, _from, state), do: {:reply, state.project && public_project(state.project), state}
+
+  def handle_call(:projects, _from, state) do
+    projects =
+      state.project
+      |> List.wrap()
+      |> Enum.reject(&is_nil/1)
+      |> Enum.map(&public_project/1)
+
+    {:reply, projects, state}
+  end
+
+  def handle_call({:project_by_id, id}, _from, state) do
+    project =
+      case state.project do
+        %{id: ^id} = project -> public_project(project)
+        _ -> nil
+      end
+
     {:reply, project, state}
   end
 
-  def handle_call(:project, _from, state), do: {:reply, state.project, state}
+  def handle_call({:upsert_gitlab_identity, attrs}, _from, state) do
+    now = now()
+    identity = normalize_identity(attrs, now)
+    state = state |> put_in([Access.key(:identities), identity_key(identity)], identity) |> persist()
+    {:reply, identity, state}
+  end
+
+  def handle_call({:upsert_oauth_token, identity_id, attrs}, _from, state) do
+    now = now()
+
+    with {:ok, encrypted_access_token} <- SymphonyElixir.Auth.TokenVault.seal(attrs["access_token"] || attrs[:access_token]),
+         {:ok, encrypted_refresh_token} <- SymphonyElixir.Auth.TokenVault.seal(attrs["refresh_token"] || attrs[:refresh_token]) do
+      existing = Map.get(state.oauth_tokens, identity_id, %{})
+
+      token =
+        existing
+        |> Map.merge(%{
+          id: existing[:id] || Ecto.UUID.generate(),
+          identity_id: identity_id,
+          encrypted_access_token: encrypted_access_token,
+          encrypted_refresh_token: encrypted_refresh_token || existing[:encrypted_refresh_token],
+          scopes: oauth_scopes(attrs),
+          token_type: attrs["token_type"] || attrs[:token_type],
+          expires_at: oauth_expires_at(attrs, now),
+          last_refreshed_at: now,
+          inserted_at: existing[:inserted_at] || now,
+          updated_at: now
+        })
+
+      state = state |> put_in([Access.key(:oauth_tokens), identity_id], token) |> persist()
+      {:reply, token, state}
+    else
+      {:error, reason} -> raise "failed to seal OAuth token: #{inspect(reason)}"
+    end
+  end
+
+  def handle_call({:oauth_token, identity_id}, _from, state), do: {:reply, Map.get(state.oauth_tokens, identity_id), state}
+
+  def handle_call({:upsert_project_membership, identity_id, project_setting_id, attrs}, _from, state) do
+    now = now()
+    membership = normalize_project_membership(identity_id, project_setting_id, attrs, now)
+    state = state |> put_in([Access.key(:project_memberships), membership_key(identity_id, project_setting_id)], membership) |> persist()
+    {:reply, membership, state}
+  end
+
+  def handle_call({:put_project_access_token, project_setting_id, token, identity_id}, _from, state) do
+    case state.project do
+      %{id: ^project_setting_id} = project ->
+        case SymphonyElixir.Auth.TokenVault.seal(token) do
+          {:ok, encrypted} ->
+            project =
+              project
+              |> Map.put(:encrypted_project_access_token, encrypted)
+              |> Map.put(:project_access_token_set_by_identity_id, identity_id)
+              |> Map.put(:project_access_token_set_at, now())
+              |> Map.put(:updated_at, now())
+
+            state = persist(%{state | project: project})
+            {:reply, {:ok, public_project(project)}, state}
+
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
+
+      _ ->
+        {:reply, {:error, :project_not_found}, state}
+    end
+  end
+
+  def handle_call({:project_access_token, project_or_id}, _from, state) do
+    project =
+      case project_or_id do
+        id when is_binary(id) ->
+          if state.project && state.project.id == id, do: state.project
+
+        %{encrypted_project_access_token: _} = project ->
+          project
+
+        _ ->
+          nil
+      end
+
+    reply =
+      case project do
+        %{encrypted_project_access_token: encrypted} when is_binary(encrypted) ->
+          SymphonyElixir.Auth.TokenVault.open(encrypted)
+
+        _ ->
+          {:error, :project_access_token_missing}
+      end
+
+    {:reply, reply, state}
+  end
 
   def handle_call({:upsert_issue, attrs}, _from, state) do
     now = now()
     local_id = issue_local_id(attrs)
     existing = Map.get(state.issues, local_id, %{})
-    issue = normalize_issue(attrs, existing, now)
+    project = project_for_issue_attrs(state, attrs)
+    issue = normalize_issue(attrs, existing, now, project)
     workflow_state = Map.get(state.workflow_states, local_id) || default_workflow_state(local_id, now)
 
     state =
@@ -634,6 +778,9 @@ defmodule SymphonyElixir.Store.Json do
 
   defp hydrate_state(map) when is_map(map) do
     map
+    |> update_map_values(:identities, &hydrate_datetime_fields(&1, [:last_login_at, :inserted_at, :updated_at]))
+    |> update_map_values(:oauth_tokens, &hydrate_datetime_fields(&1, [:expires_at, :last_refreshed_at, :inserted_at, :updated_at]))
+    |> update_map_values(:project_memberships, &hydrate_datetime_fields(&1, [:expires_at, :last_checked_at, :inserted_at, :updated_at]))
     |> update_map_values(:issues, &hydrate_issue/1)
     |> update_map_values(:workflow_states, &hydrate_workflow_state/1)
     |> update_map_values(:dependencies, &hydrate_datetime_fields(&1, [:inserted_at, :updated_at]))
@@ -675,24 +822,129 @@ defmodule SymphonyElixir.Store.Json do
     |> Map.put_new(:inserted_at, now)
   end
 
+  defp public_project(project) when is_map(project) do
+    project
+    |> Map.drop([:encrypted_project_access_token, :project_access_token_set_by_identity_id])
+    |> Map.put(:project_access_token_status, token_status(project[:encrypted_project_access_token]))
+  end
+
+  defp token_status(value) when is_binary(value) and value != "", do: "configured"
+  defp token_status(_value), do: "missing"
+
+  defp oauth_scopes(attrs) do
+    scope = attrs["scope"] || attrs[:scope] || attrs["scopes"] || attrs[:scopes] || []
+
+    cond do
+      is_binary(scope) -> String.split(scope, ~r/[\s,]+/, trim: true)
+      is_list(scope) -> Enum.map(scope, &to_string/1)
+      true -> []
+    end
+  end
+
+  defp oauth_expires_at(attrs, now) do
+    expires_in = attrs["expires_in"] || attrs[:expires_in]
+
+    case expires_in do
+      seconds when is_integer(seconds) and seconds > 0 ->
+        DateTime.add(now, seconds, :second)
+
+      seconds when is_binary(seconds) ->
+        case Integer.parse(seconds) do
+          {int, ""} when int > 0 -> DateTime.add(now, int, :second)
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp normalize_identity(attrs, now) do
+    attrs = Map.new(attrs)
+    issuer = attrs[:issuer] || attrs["issuer"]
+    gitlab_user_id = attrs[:gitlab_user_id] || attrs["gitlab_user_id"] || attrs[:sub] || attrs["sub"]
+    sub = attrs[:sub] || attrs["sub"] || gitlab_user_id
+
+    %{
+      id: attrs[:id] || attrs["id"] || Ecto.UUID.generate(),
+      issuer: issuer,
+      gitlab_user_id: to_string(gitlab_user_id),
+      sub: to_string(sub),
+      username: attrs[:username] || attrs["username"],
+      name: attrs[:name] || attrs["name"],
+      email: attrs[:email] || attrs["email"],
+      avatar_url: attrs[:avatar_url] || attrs["avatar_url"],
+      profile_url: attrs[:profile_url] || attrs["profile_url"],
+      raw_claims: attrs[:raw_claims] || attrs["raw_claims"] || %{},
+      last_login_at: now,
+      inserted_at: attrs[:inserted_at] || attrs["inserted_at"] || now,
+      updated_at: now
+    }
+  end
+
+  defp normalize_project_membership(identity_id, project_setting_id, attrs, now) do
+    attrs = Map.new(attrs)
+    access_level = attrs[:access_level] || attrs["access_level"] || 0
+
+    %{
+      id: attrs[:id] || attrs["id"] || Ecto.UUID.generate(),
+      identity_id: identity_id,
+      gitlab_project_setting_id: project_setting_id,
+      gitlab_user_id: to_string(attrs[:gitlab_user_id] || attrs["gitlab_user_id"]),
+      username: attrs[:username] || attrs["username"],
+      name: attrs[:name] || attrs["name"],
+      access_level: access_level,
+      role: attrs[:role] || attrs["role"] || SymphonyElixir.Auth.Config.role_for_access_level(access_level),
+      expires_at: attrs[:expires_at] || attrs["expires_at"],
+      state: attrs[:state] || attrs["state"],
+      last_checked_at: now,
+      raw_gitlab: attrs[:raw_gitlab] || attrs["raw_gitlab"] || %{},
+      inserted_at: attrs[:inserted_at] || attrs["inserted_at"] || now,
+      updated_at: now
+    }
+  end
+
+  defp identity_key(%{issuer: issuer, gitlab_user_id: gitlab_user_id}), do: "#{issuer}:#{gitlab_user_id}"
+  defp membership_key(identity_id, project_setting_id), do: "#{identity_id}:#{project_setting_id}"
+
+  defp project_for_issue_attrs(state, attrs) do
+    attrs = Map.new(attrs)
+    gitlab_project_id = attrs[:gitlab_project_id] || attrs["gitlab_project_id"] || attrs[:project_id] || attrs["project_id"]
+
+    case state.project do
+      %{project_id: ^gitlab_project_id} = project ->
+        project
+
+      %{project_id: project_id} = project ->
+        if to_string(project_id) == to_string(gitlab_project_id), do: project, else: state.project
+
+      project ->
+        project
+    end
+  end
+
   defp issue_local_id(attrs) do
     project_id = attrs[:gitlab_project_id] || attrs["gitlab_project_id"] || attrs[:project_id] || attrs["project_id"]
     iid = attrs[:iid] || attrs["iid"]
     "gitlab-#{project_id}-#{iid}"
   end
 
-  defp normalize_issue(attrs, existing, now) do
+  defp normalize_issue(attrs, existing, now, project) do
     attrs = Map.new(attrs)
     local_id = issue_local_id(attrs)
 
     existing
     |> Map.merge(attrs)
+    |> maybe_put_project_setting_id(project)
     |> Map.put(:id, local_id)
     |> Map.put_new(:inserted_at, now)
     |> Map.put(:updated_at, now)
     |> Map.update(:labels, [], &(&1 || []))
     |> Map.update(:assignees, [], &(&1 || []))
   end
+
+  defp maybe_put_project_setting_id(issue, %{id: id}), do: Map.put(issue, :gitlab_project_setting_id, id)
+  defp maybe_put_project_setting_id(issue, _project), do: issue
 
   defp default_workflow_state(issue_id, now) do
     %{
@@ -1127,7 +1379,7 @@ defmodule SymphonyElixir.Store.Json do
 
   defp to_snapshot(state) do
     %{
-      project: state.project,
+      project: state.project && public_project(state.project),
       issues: Enum.map(state.issue_order, &(state.issues |> Map.get(&1) |> maybe_decorate_issue(state))) |> Enum.reject(&is_nil/1),
       cursors: state.cursors,
       runs: Enum.map(state.run_order, &(state.runs |> Map.get(&1) |> maybe_decorate_run(state))) |> Enum.reject(&is_nil/1),
@@ -1144,6 +1396,7 @@ defmodule SymphonyElixir.Store.Json do
         {:status, "blocked"} -> issue.is_blocked == true
         {:status, status} -> issue.workflow_status == status
         {:gitlab_state, state} -> issue.gitlab_state == state
+        {:project_setting_id, project_setting_id} -> Map.get(issue, :gitlab_project_setting_id) == project_setting_id
         {:search, search} -> issue_matches_search?(issue, search)
         _ -> true
       end)
@@ -1172,6 +1425,7 @@ defmodule SymphonyElixir.Store.Json do
     Enum.filter(runs, fn run ->
       Enum.all?(filters, fn
         {:issue_id, issue_id} -> run.gitlab_issue_id == issue_id
+        {:project_setting_id, project_setting_id} -> get_in(run, [:issue, :gitlab_project_setting_id]) == project_setting_id
         _ -> true
       end)
     end)

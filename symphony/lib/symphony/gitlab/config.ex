@@ -116,6 +116,34 @@ defmodule Symphony.GitLab.Config do
 
   def from_split_config(_base_url, _project_ref), do: invalid_config("GitLab split configuration is invalid")
 
+  @spec from_project_setting(map(), String.t() | nil) :: {:ok, t()} | {:error, Error.t()}
+  def from_project_setting(project, token \\ nil)
+
+  def from_project_setting(%{api_root: api_root, project_ref: project_ref}, token)
+      when is_binary(api_root) and is_binary(project_ref) do
+    base = api_root |> String.replace_suffix("/api/v4", "") |> String.trim_trailing("/")
+
+    {:ok,
+     struct!(__MODULE__, %{
+       gitlab_base_url: base,
+       gitlab_api_root: api_root,
+       gitlab_project_ref: project_ref,
+       gitlab_project_path_param: project_ref_path_param(project_ref),
+       token: token,
+       source: :split_config,
+       bind_host: System.get_env("SYMPHONY_BIND_HOST") || "127.0.0.1",
+       port: int_env("SYMPHONY_PORT", 4000, 0),
+       shared_secret: nil,
+       sync_interval_ms: int_env("SYMPHONY_SYNC_INTERVAL_MS", 60_000, 1),
+       sync_page_size: int_env("SYMPHONY_SYNC_PAGE_SIZE", 100, 1),
+       sync_cursor_overlap_seconds: int_env("SYMPHONY_SYNC_CURSOR_OVERLAP_SECONDS", 120, 0),
+       workspace_root: blank_to_nil(System.get_env("SYMPHONY_WORKSPACE_ROOT")),
+       logs_root: System.get_env("SYMPHONY_LOGS_ROOT") || "./log"
+     })}
+  end
+
+  def from_project_setting(_project, _token), do: invalid_config("Project setting is missing GitLab API root or project ref")
+
   @spec redacted(t() | map()) :: map()
   def redacted(%__MODULE__{} = config) do
     config
@@ -213,10 +241,7 @@ defmodule Symphony.GitLab.Config do
   end
 
   defp token_from_env do
-    case blank_to_nil(System.get_env("GITLAB_TOKEN")) do
-      nil -> invalid_config("Set GITLAB_TOKEN")
-      token -> {:ok, token}
-    end
+    {:ok, blank_to_nil(System.get_env("GITLAB_TOKEN"))}
   end
 
   defp bind_host do

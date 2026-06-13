@@ -82,7 +82,9 @@ defmodule SymphonyElixir.HttpServer do
   defp normalize_host(host) when is_binary(host), do: host
 
   defp secret_key_base do
-    Base.encode64(:crypto.strong_rand_bytes(@secret_key_bytes), padding: false)
+    System.get_env("SYMPHONY_SESSION_SECRET") ||
+      System.get_env("SECRET_KEY_BASE") ||
+      Base.encode64(:crypto.strong_rand_bytes(@secret_key_bytes), padding: false)
   end
 
   defp bind_host do

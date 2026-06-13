@@ -8,6 +8,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   alias Plug.Conn
   alias SymphonyElixir.Monitor.DTO
   alias SymphonyElixir.Sync.Poller
+  alias SymphonyElixirWeb.AuthPlug
 
   @spec state(Conn.t(), map()) :: Conn.t()
   def state(conn, _params) do
@@ -18,10 +19,29 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   def issue(conn, %{"issue_identifier" => issue_identifier}) do
     case DTO.issue_debug(issue_identifier, snapshot_timeout_ms()) do
       {:ok, payload} ->
-        json(conn, payload)
+        if visible_issue?(conn, payload.issue) do
+          json(conn, payload)
+        else
+          error_response(conn, 404, "issue_not_found", "Issue not found")
+        end
 
       {:error, :issue_not_found} ->
         error_response(conn, 404, "issue_not_found", "Issue not found")
+    end
+  end
+
+  defp visible_issue?(conn, issue) do
+    case current_project_setting_id(conn) do
+      nil -> true
+      project_id -> issue[:gitlab_project_setting_id] == project_id
+    end
+  end
+
+  defp current_project_setting_id(conn) do
+    case AuthPlug.current_user(conn) do
+      %{local?: true} -> nil
+      %{project_setting_id: project_setting_id} -> project_setting_id
+      _ -> nil
     end
   end
 
