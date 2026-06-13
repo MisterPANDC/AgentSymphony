@@ -134,6 +134,12 @@ textarea {
   background: #f1f5f9;
 }
 
+.icon-button:disabled,
+.text-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;

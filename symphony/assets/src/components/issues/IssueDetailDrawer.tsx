@@ -5,6 +5,7 @@ import { getIssueNotes } from "../../api/issues";
 import type { IssueDTO } from "../../types/issue";
 import { BlockerEditor } from "./BlockerEditor";
 import { GitLabMeta } from "./GitLabMeta";
+import { IssueNoteComposer } from "./IssueNoteComposer";
 import { StatusSelect } from "./StatusSelect";
 
 export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; onClose: () => void }) {
@@ -40,13 +41,16 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
               <BlockerEditor issue={issue} />
               <section>
                 <h3 className="mb-2 text-xs font-semibold uppercase text-[#6b7280]">Notes</h3>
-                <div className="space-y-2">
-                  {(data?.notes ?? []).map((note) => (
-                    <div key={note.id} className="rounded-md border border-[#e5e7eb] p-2 text-sm">
-                      <div className="mb-1 text-[11px] text-[#6b7280]">{note.author?.name ?? "GitLab"}</div>
-                      <p className="whitespace-pre-wrap">{note.body}</p>
-                    </div>
-                  ))}
+                <div className="space-y-3">
+                  <IssueNoteComposer issueId={issue.id} />
+                  <div className="space-y-2">
+                    {(data?.notes ?? []).map((note) => (
+                      <div key={note.id} className="rounded-md border border-[#e5e7eb] p-2 text-sm">
+                        <div className="mb-1 text-[11px] text-[#6b7280]">{note.author?.name ?? "GitLab"}</div>
+                        <p className="whitespace-pre-wrap">{note.body}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </section>
             </div>
