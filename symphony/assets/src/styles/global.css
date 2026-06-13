@@ -891,6 +891,29 @@ textarea {
   box-shadow: 0 3px 10px rgba(17, 24, 39, 0.04);
 }
 
+.board-column {
+  display: flex;
+  flex-direction: column;
+}
+
+.board-column-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--panel-subtle);
+  padding: 10px;
+}
+
+.board-count {
+  display: inline-block;
+  color: #5c606a;
+  font-size: 11px;
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+}
+
 .empty-state {
   padding: 22px 12px;
   color: var(--muted);
