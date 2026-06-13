@@ -21,7 +21,7 @@ export function AgentControlPanel() {
           <h1 className="flex items-center gap-2 text-sm font-semibold"><Bot size={15} /> Agent Control</h1>
           <button className="text-button" onClick={() => dispatch.mutate()}><Play size={14} /> Dispatch</button>
         </div>
-        <div className="grid grid-cols-4 gap-px bg-[#e5e7eb]">
+        <div className="grid grid-cols-2 gap-px bg-[#e5e7eb] sm:grid-cols-4">
           {[
             ["Max", monitor.data?.agents.maxConcurrent ?? 0],
             ["Queued", monitor.data?.agents.queued ?? 0],

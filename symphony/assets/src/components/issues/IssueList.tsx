@@ -24,15 +24,15 @@ export function IssueList() {
   return (
     <>
       <section className="panel">
-        <div className="panel-header">
+        <div className="panel-header panel-header-stack">
           <div>
             <h1 className="text-sm font-semibold">Issues</h1>
             <p className="text-[12px] text-[#6b7280]">{issues.length} visible</p>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="text-button">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 sm:flex-none sm:flex-nowrap">
+            <div className="text-button flex-1 sm:flex-none">
               <Filter size={14} />
-              <select className="bg-transparent outline-none" value={status} onChange={(event) => setStatus(event.target.value as WorkflowStatus | "all")}>
+              <select className="min-w-0 flex-1 bg-transparent outline-none" value={status} onChange={(event) => setStatus(event.target.value as WorkflowStatus | "all")}>
                 {["all", "triage", "todo", "in_progress", "blocked", "review", "merging", "rework", "done", "canceled"].map((item) => (
                   <option key={item} value={item}>
                     {item.replace("_", " ")}
@@ -41,7 +41,7 @@ export function IssueList() {
               </select>
             </div>
             <input
-              className="h-8 w-64 rounded-md border border-[#d7dce3] bg-[#ffffff] px-2 text-sm outline-none"
+              className="h-8 min-w-0 flex-[1_1_180px] rounded-md border border-[#d7dce3] bg-[#ffffff] px-2 text-sm outline-none sm:w-64 sm:flex-none"
               placeholder="Search title or description"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -59,7 +59,7 @@ export function IssueList() {
           </div>
         </div>
         <div className="overflow-auto">
-          <table className="dense-table">
+          <table className="dense-table issue-table">
             <thead>
               <tr>
                 <th>Issue</th>

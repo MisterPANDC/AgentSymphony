@@ -9,7 +9,7 @@ export function IssueBoard() {
   const { data } = useQuery({ queryKey: ["issues"], queryFn: () => listIssues() });
 
   return (
-    <div className="grid gap-3 lg:grid-cols-4 xl:grid-cols-9">
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
       {columns.map((status) => (
         <IssueColumn key={status} status={status} issues={(data?.issues ?? []).filter((issue) => issue.workflowStatus === status)} />
       ))}

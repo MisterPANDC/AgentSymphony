@@ -52,6 +52,7 @@ textarea {
 
 .topbar {
   height: 52px;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -67,6 +68,7 @@ textarea {
 }
 
 .panel {
+  min-width: 0;
   border: 1px solid #d7dce3;
   border-radius: 6px;
   background: #ffffff;
@@ -77,13 +79,24 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   border-bottom: 1px solid #e5e7eb;
   padding: 8px 12px;
 }
 
+.panel-header-stack {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.panel-header-stack > :last-child {
+  width: 100%;
+}
+
 .dense-table {
   width: 100%;
+  min-width: 680px;
   border-collapse: collapse;
   font-size: 12px;
 }
@@ -100,6 +113,31 @@ textarea {
   color: #64748b;
   font-weight: 500;
   background: #f8fafc;
+}
+
+.issue-table {
+  min-width: 540px;
+  table-layout: fixed;
+}
+
+.issue-table th:nth-child(1),
+.issue-table td:nth-child(1) {
+  width: 54px;
+}
+
+.issue-table th:nth-child(3),
+.issue-table td:nth-child(3) {
+  width: 118px;
+}
+
+.issue-table th:nth-child(4),
+.issue-table td:nth-child(4) {
+  width: 132px;
+}
+
+.issue-table th:nth-child(5),
+.issue-table td:nth-child(5) {
+  width: 42px;
 }
 
 .icon-button {
@@ -187,6 +225,7 @@ textarea {
 @media (max-width: 860px) {
   .app-grid {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .sidebar {
@@ -194,12 +233,50 @@ textarea {
     top: 0;
     z-index: 10;
     display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100vw;
     overflow-x: auto;
     border-right: 0;
     border-bottom: 1px solid #d7dce3;
+    padding: 8px 10px;
+  }
+
+  .sidebar > div {
+    flex: 0 0 auto;
+    min-width: 170px;
+    margin-bottom: 0;
+  }
+
+  .sidebar nav {
+    flex: 0 0 auto;
+    flex-direction: row;
+    min-width: max-content;
+  }
+
+  .sidebar nav a {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .topbar {
+    min-height: 52px;
+    height: auto;
+    padding: 10px 12px;
   }
 
   .content {
     padding: 12px;
+  }
+}
+
+@media (min-width: 640px) {
+  .panel-header-stack {
+    align-items: center;
+    flex-direction: row;
+  }
+
+  .panel-header-stack > :last-child {
+    width: auto;
   }
 }

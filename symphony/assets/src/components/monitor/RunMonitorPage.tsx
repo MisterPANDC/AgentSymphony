@@ -8,21 +8,21 @@ import { RuntimeOverviewCard } from "./RuntimeOverviewCard";
 import { SyncHealthCard } from "./SyncHealthCard";
 import { WorkspaceLogsCard } from "./WorkspaceLogsCard";
 
-export function RunMonitorPage() {
+export function RunMonitorPage({ compact = false }: { compact?: boolean }) {
   const { data } = useQuery({ queryKey: ["monitor-state"], queryFn: getMonitorState });
 
   if (!data) return <div className="panel p-4">Loading Run Monitor</div>;
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 xl:grid-cols-3">
+      <div className={compact ? "grid gap-4" : "grid gap-4 xl:grid-cols-3"}>
         <RuntimeOverviewCard state={data} />
         <AgentCapacityCard state={data} />
         <SyncHealthCard state={data} />
       </div>
       <ActiveRunsTable runs={data.activeRuns} />
       <BlockedQueue blocks={data.blocked} />
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className={compact ? "grid gap-4" : "grid gap-4 xl:grid-cols-2"}>
         <WorkspaceLogsCard state={data} />
         <OperationalApiCard state={data} />
       </div>

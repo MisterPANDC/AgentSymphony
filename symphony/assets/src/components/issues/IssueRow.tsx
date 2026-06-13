@@ -23,7 +23,7 @@ export function IssueRow({ issue, onOpen }: { issue: IssueDTO; onOpen: (issue: I
         </button>
       </td>
       <td>
-        <button className="block max-w-[760px] truncate text-left font-medium" onClick={() => onOpen(issue)}>
+        <button className="block w-full min-w-0 truncate text-left font-medium" onClick={() => onOpen(issue)}>
           {issue.title}
         </button>
         <div className="mt-1 flex flex-wrap gap-1">

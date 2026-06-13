@@ -39,9 +39,11 @@ function DashboardOverview() {
   const monitor = useQuery({ queryKey: ["monitor-state"], queryFn: getMonitorState });
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-      <IssueList />
-      <section className="space-y-4">
+    <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+      <div className="min-w-0">
+        <IssueList />
+      </div>
+      <section className="min-w-0 space-y-4">
         <div className="panel p-3">
           <div className="text-xs uppercase text-[#6b7280]">Runtime</div>
           <div className="mt-2 grid grid-cols-3 gap-2 text-center">
@@ -50,7 +52,7 @@ function DashboardOverview() {
             <Metric label="Queued" value={monitor.data?.agents.queued ?? 0} />
           </div>
         </div>
-        <RunMonitorPage />
+        <RunMonitorPage compact />
       </section>
     </div>
   );
@@ -91,11 +93,11 @@ function GitLabSettingsPage() {
           <button className="text-button" onClick={() => syncMutation.mutate()}><RefreshCcw size={14} /> Sync</button>
         </div>
       </div>
-      <dl className="grid grid-cols-[180px_minmax(0,1fr)] gap-x-4 gap-y-2 p-4 text-sm">
-        <dt className="text-[#6b7280]">API root</dt><dd className="mono truncate">{data?.gitlab.gitlab_api_root ?? "missing"}</dd>
-        <dt className="text-[#6b7280]">Project ref</dt><dd>{data?.gitlab.gitlab_project_ref ?? "missing"}</dd>
-        <dt className="text-[#6b7280]">Project</dt><dd>{data?.project?.name ?? "unvalidated"}</dd>
-        <dt className="text-[#6b7280]">Web URL</dt><dd>{data?.project?.web_url ?? "n/a"}</dd>
+      <dl className="grid grid-cols-1 gap-x-4 gap-y-2 p-4 text-sm sm:grid-cols-[180px_minmax(0,1fr)]">
+        <dt className="text-[#6b7280]">API root</dt><dd className="mono min-w-0 break-words">{data?.gitlab.gitlab_api_root ?? "missing"}</dd>
+        <dt className="text-[#6b7280]">Project ref</dt><dd className="min-w-0 break-words">{data?.gitlab.gitlab_project_ref ?? "missing"}</dd>
+        <dt className="text-[#6b7280]">Project</dt><dd className="min-w-0 break-words">{data?.project?.name ?? "unvalidated"}</dd>
+        <dt className="text-[#6b7280]">Web URL</dt><dd className="min-w-0 break-words">{data?.project?.web_url ?? "n/a"}</dd>
         <dt className="text-[#6b7280]">Token</dt><dd>{data?.gitlab.token_status ?? "missing"}</dd>
       </dl>
       {testMutation.data && <pre className="m-4 rounded-md border border-[#e5e7eb] bg-[#f8fafc] p-3 text-xs">{JSON.stringify(testMutation.data, null, 2)}</pre>}
@@ -110,14 +112,14 @@ function WorkflowSettingsPage() {
   return (
     <section className="panel">
       <div className="panel-header"><h1 className="text-sm font-semibold">Workflow Settings</h1></div>
-      <dl className="grid grid-cols-[220px_minmax(0,1fr)] gap-x-4 gap-y-2 p-4 text-sm">
-        <dt className="text-[#6b7280]">Allowed statuses</dt><dd>{workflow?.statuses.join(", ")}</dd>
-        <dt className="text-[#6b7280]">Dispatch candidates</dt><dd>{workflow?.dispatchCandidateStatuses.join(", ")}</dd>
-        <dt className="text-[#6b7280]">Required labels</dt><dd>{workflow?.requiredGitlabLabels.join(", ") || "none"}</dd>
+      <dl className="grid grid-cols-1 gap-x-4 gap-y-2 p-4 text-sm sm:grid-cols-[220px_minmax(0,1fr)]">
+        <dt className="text-[#6b7280]">Allowed statuses</dt><dd className="min-w-0 break-words">{workflow?.statuses.join(", ")}</dd>
+        <dt className="text-[#6b7280]">Dispatch candidates</dt><dd className="min-w-0 break-words">{workflow?.dispatchCandidateStatuses.join(", ")}</dd>
+        <dt className="text-[#6b7280]">Required labels</dt><dd className="min-w-0 break-words">{workflow?.requiredGitlabLabels.join(", ") || "none"}</dd>
         <dt className="text-[#6b7280]">Max agents</dt><dd>{workflow?.maxConcurrentAgents}</dd>
         <dt className="text-[#6b7280]">Sync interval</dt><dd>{workflow?.syncIntervalMs}ms</dd>
         <dt className="text-[#6b7280]">Cursor overlap</dt><dd>{workflow?.cursorOverlapSeconds}s</dd>
-        <dt className="text-[#6b7280]">Read-only impact</dt><dd>{workflow?.readOnlyImpacts}</dd>
+        <dt className="text-[#6b7280]">Read-only impact</dt><dd className="min-w-0 break-words">{workflow?.readOnlyImpacts}</dd>
       </dl>
     </section>
   );

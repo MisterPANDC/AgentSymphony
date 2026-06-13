@@ -17,7 +17,7 @@ export function AppShell() {
       <section className="main-region">
         <header className="topbar">
           <CommandPalette />
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             <SyncStatusBadge />
             <span className="status-pill" title="Active runs">
               <CircleDot size={12} className="mr-1" />
