@@ -1,13 +1,7 @@
-Application.put_env(
-  :symphony_elixir,
-  :store_path,
-  Path.join(
-    System.tmp_dir!(),
-    "symphony-test-#{System.os_time(:nanosecond)}-#{System.unique_integer([:positive])}.json"
-  )
-)
+postgres_url? = not is_nil(System.get_env("SYMPHONY_DATABASE_URL") || System.get_env("DATABASE_URL"))
+postgres_tests? = System.get_env("SYMPHONY_STORE_BACKEND") == "postgres" and postgres_url?
 
-unless System.get_env("SYMPHONY_STORE_BACKEND") == "postgres" and System.get_env("SYMPHONY_DATABASE_URL") do
+unless postgres_tests? do
   ExUnit.configure(exclude: [postgres: true])
 end
 

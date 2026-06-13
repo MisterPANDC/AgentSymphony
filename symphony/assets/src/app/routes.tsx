@@ -140,21 +140,24 @@ function GitLabSettingsPage() {
           </div>
         </div>
         <div className="settings-form">
-          <label className="settings-field">
-            <span>Token</span>
-            <input
-              className="field-input"
-              type="password"
-              value={projectAccessToken}
-              onChange={(event) => setProjectAccessToken(event.target.value)}
-              placeholder="Paste a GitLab Project Access Token"
-              autoComplete="off"
-            />
-          </label>
-          <button className="text-button" disabled={!projectAccessToken.trim() || tokenMutation.isPending} onClick={() => tokenMutation.mutate(projectAccessToken)}>
-            {tokenMutation.isPending ? <RefreshCcw size={14} /> : <Save size={14} />}
-            Save token
-          </button>
+          <div className="settings-field">
+            <label htmlFor="project-access-token">Token</label>
+            <div className="settings-token-action-row">
+              <input
+                id="project-access-token"
+                className="field-input"
+                type="password"
+                value={projectAccessToken}
+                onChange={(event) => setProjectAccessToken(event.target.value)}
+                placeholder="Paste a GitLab Project Access Token"
+                autoComplete="off"
+              />
+              <button className="text-button settings-token-save-button" type="button" disabled={!projectAccessToken.trim() || tokenMutation.isPending} onClick={() => tokenMutation.mutate(projectAccessToken)}>
+                {tokenMutation.isPending ? <RefreshCcw size={14} /> : <Save size={14} />}
+                Save token
+              </button>
+            </div>
+          </div>
           <p className="settings-hint"><KeyRound size={13} /> The saved token is encrypted and cannot be viewed again from Symphony.</p>
           {tokenMutation.isError && <div className="repo-error">{tokenMutation.error.message}</div>}
         </div>

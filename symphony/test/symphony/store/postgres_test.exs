@@ -5,6 +5,9 @@ defmodule SymphonyElixir.Store.PostgresTest do
 
   alias SymphonyElixir.Persistence.AgentRun
   alias SymphonyElixir.Persistence.AgentRunEvent
+  alias SymphonyElixir.Persistence.GitLabIdentity
+  alias SymphonyElixir.Persistence.GitLabOAuthToken
+  alias SymphonyElixir.Persistence.GitLabProjectMembership
   alias SymphonyElixir.Persistence.Issue
   alias SymphonyElixir.Persistence.IssueDependency
   alias SymphonyElixir.Persistence.IssueEvent
@@ -75,6 +78,41 @@ defmodule SymphonyElixir.Store.PostgresTest do
     assert Repo.aggregate(IssueEvent, :count) >= 4
   end
 
+  test "stores project membership access level when GitLab omits role" do
+    identity =
+      Store.upsert_gitlab_identity(%{
+        issuer: "https://gitlab.example.com",
+        gitlab_user_id: "8",
+        sub: "8",
+        username: "yifei",
+        name: "Yifei",
+        raw_claims: %{}
+      })
+
+    project =
+      Store.upsert_project(%{
+        api_root: "https://gitlab.example.com/api/v4",
+        project_ref: "group/project",
+        project_id: 42,
+        path_with_namespace: "group/project",
+        name: "Project",
+        web_url: "https://gitlab.example.com/group/project",
+        visibility: "private"
+      })
+
+    membership =
+      Store.upsert_project_membership(identity.id, project.id, %{
+        gitlab_user_id: "8",
+        username: "yifei",
+        name: "Yifei",
+        access_level: 50,
+        state: "active",
+        raw_gitlab: %{"access_level" => 50}
+      })
+
+    assert membership.access_level == 50
+  end
+
   defp clean_database do
     Repo.delete_all(RuntimeBlock)
     Repo.delete_all(AgentRunEvent)
@@ -87,5 +125,8 @@ defmodule SymphonyElixir.Store.PostgresTest do
     Repo.delete_all(Issue)
     Repo.delete_all(SyncCursor)
     Repo.delete_all(ProjectSetting)
+    Repo.delete_all(GitLabOAuthToken)
+    Repo.delete_all(GitLabProjectMembership)
+    Repo.delete_all(GitLabIdentity)
   end
 end

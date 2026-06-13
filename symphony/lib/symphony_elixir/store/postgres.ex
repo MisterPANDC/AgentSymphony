@@ -7,7 +7,6 @@ defmodule SymphonyElixir.Store.Postgres do
 
   import Ecto.Query
 
-  alias SymphonyElixir.Auth.Config, as: AuthConfig
   alias SymphonyElixir.Auth.TokenVault
   alias SymphonyElixir.Persistence.AgentRun
   alias SymphonyElixir.Persistence.AgentRunEvent
@@ -142,19 +141,17 @@ defmodule SymphonyElixir.Store.Postgres do
   @spec upsert_project_membership(String.t(), String.t(), map()) :: map()
   def upsert_project_membership(identity_id, project_setting_id, attrs) do
     raw_access_level = attrs[:access_level] || attrs["access_level"]
+    access_level = normalize_access_level(raw_access_level)
 
     attrs =
       attrs
       |> atomize_keys()
       |> Map.update(:gitlab_user_id, nil, &to_string/1)
+      |> Map.put(:access_level, access_level || raw_access_level)
       |> Map.put(:identity_id, identity_id)
       |> Map.put(:gitlab_project_setting_id, project_setting_id)
       |> Map.put(:last_checked_at, now())
       |> Map.put_new(:raw_gitlab, %{})
-      |> Map.update(:role, nil, fn
-        nil -> AuthConfig.role_for_access_level(raw_access_level)
-        role -> role
-      end)
 
     membership =
       Repo.one(
@@ -169,6 +166,17 @@ defmodule SymphonyElixir.Store.Postgres do
     |> Repo.insert_or_update!()
     |> plain()
   end
+
+  defp normalize_access_level(level) when is_integer(level), do: level
+
+  defp normalize_access_level(level) when is_binary(level) do
+    case Integer.parse(level) do
+      {parsed, ""} -> parsed
+      _ -> nil
+    end
+  end
+
+  defp normalize_access_level(_level), do: nil
 
   @spec put_project_access_token(String.t(), String.t(), String.t() | nil) :: {:ok, map()} | {:error, term()}
   def put_project_access_token(project_setting_id, token, identity_id \\ nil) do

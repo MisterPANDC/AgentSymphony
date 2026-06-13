@@ -135,21 +135,9 @@ load_local_env() {
   fi
 }
 
-database_configured() {
-  [[ -n "${SYMPHONY_DATABASE_URL:-}" ]] ||
-    [[ -n "${DATABASE_URL:-}" ]] ||
-    [[ "${SYMPHONY_STORE_BACKEND:-}" == "postgres" ]]
-}
-
 setup_database() {
   if [[ "$SKIP_DB" -eq 1 ]]; then
     step "跳过数据库初始化"
-    return
-  fi
-
-  if ! database_configured; then
-    step "跳过数据库初始化"
-    echo "未配置 SYMPHONY_DATABASE_URL / DATABASE_URL，运行时将使用 JSON fallback。"
     return
   fi
 

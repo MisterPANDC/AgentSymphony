@@ -108,7 +108,6 @@ defmodule SymphonyElixirWeb.AuthPlug do
         user
         |> Map.merge(%{
           access_level: membership.access_level,
-          role: Config.role_for_access_level(membership.access_level),
           membership_checked_at: System.system_time(:second)
         })
 

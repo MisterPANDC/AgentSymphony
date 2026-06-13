@@ -29,15 +29,22 @@ defmodule SymphonyElixir.Sync.Poller do
     GenServer.call(__MODULE__, :refresh, 60_000)
   end
 
-  @spec reset_issue_cursor() :: :ok
-  def reset_issue_cursor do
-    Store.put_cursor("gitlab", @issue_cursor, %{
-      cursor_value: nil,
-      last_success_at: nil,
-      last_attempt_at: nil,
-      last_error: nil,
-      last_error_at: nil
-    })
+  @spec reset_issue_cursor(String.t() | nil) :: :ok
+  def reset_issue_cursor(project_setting_id \\ nil)
+
+  def reset_issue_cursor(project_setting_id) when is_binary(project_setting_id) do
+    reset_cursor(issue_cursor_name(project_setting_id))
+    :ok
+  end
+
+  def reset_issue_cursor(_project_setting_id) do
+    reset_cursor(@issue_cursor)
+
+    Store.projects()
+    |> Enum.each(fn
+      %{id: project_setting_id} when is_binary(project_setting_id) -> reset_cursor(issue_cursor_name(project_setting_id))
+      _project -> :ok
+    end)
 
     :ok
   end
@@ -131,6 +138,8 @@ defmodule SymphonyElixir.Sync.Poller do
   end
 
   defp sync_project(project) do
+    cursor_name = issue_cursor_name(project.id)
+
     with {:ok, token} <- Store.project_access_token(project.id),
          {:ok, config} <- Config.from_project_setting(project, token),
          :ok <- Client.validate_api_root(config),
@@ -138,7 +147,7 @@ defmodule SymphonyElixir.Sync.Poller do
          project_setting <- upsert_project(config, raw_project),
          backfilled_issue_count = Store.backfill_issue_project_setting(project_setting),
          {:ok, issues} <- sync_issues(config, project_setting),
-         :ok <- put_success_cursor(@issue_cursor, DateTime.utc_now()) do
+         :ok <- put_success_cursor(cursor_name, DateTime.utc_now()) do
       Store.record_event("sync_project_validated", "gitlab_sync", %{project_id: raw_project["id"]})
 
       {:ok,
@@ -147,6 +156,10 @@ defmodule SymphonyElixir.Sync.Poller do
          issue_count: length(issues),
          backfilled_issue_count: backfilled_issue_count
        }}
+    else
+      {:error, reason} ->
+        put_error_cursor(cursor_name, reason)
+        {:error, reason}
     end
   end
 
@@ -173,7 +186,7 @@ defmodule SymphonyElixir.Sync.Poller do
         sort: "asc",
         per_page: config.sync_page_size
       }
-      |> maybe_put_updated_after(config)
+      |> maybe_put_updated_after(config, project_setting)
 
     with {:ok, raw_issues} <- Client.list_project_issues(config, params) do
       issues =
@@ -188,8 +201,8 @@ defmodule SymphonyElixir.Sync.Poller do
     end
   end
 
-  defp maybe_put_updated_after(params, config) do
-    case issue_last_success_at() do
+  defp maybe_put_updated_after(params, config, project_setting) do
+    case issue_last_success_at(project_setting) do
       %DateTime{} = last_success ->
         updated_after =
           last_success
@@ -233,13 +246,23 @@ defmodule SymphonyElixir.Sync.Poller do
     end
   end
 
-  defp issue_last_success_at do
+  defp issue_last_success_at(project_setting) do
     Store.cursors()
-    |> Map.get(cursor_key(@issue_cursor))
+    |> Map.get(cursor_key(issue_cursor_name(project_setting.id)))
     |> case do
       %{last_success_at: %DateTime{} = datetime} -> datetime
       _ -> nil
     end
+  end
+
+  defp reset_cursor(cursor_name) do
+    Store.put_cursor("gitlab", cursor_name, %{
+      cursor_value: nil,
+      last_success_at: nil,
+      last_attempt_at: nil,
+      last_error: nil,
+      last_error_at: nil
+    })
   end
 
   defp put_success_cursor(cursor_name, datetime) do
@@ -263,6 +286,8 @@ defmodule SymphonyElixir.Sync.Poller do
       last_error_at: now
     })
   end
+
+  defp issue_cursor_name(project_setting_id) when is_binary(project_setting_id), do: "#{@issue_cursor}:#{project_setting_id}"
 
   defp cursor_key(cursor_name), do: "gitlab:#{cursor_name}"
 

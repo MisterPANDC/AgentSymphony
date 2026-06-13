@@ -133,7 +133,6 @@ defmodule SymphonyElixirWeb.AuthController do
       avatar_url: identity.avatar_url,
       profile_url: identity.profile_url,
       access_level: 0,
-      role: "No access",
       membership_checked_at: System.system_time(:second)
     }
   end
@@ -149,7 +148,7 @@ defmodule SymphonyElixirWeb.AuthController do
       avatar_url: user[:avatar_url],
       profile_url: user[:profile_url],
       access_level: user[:access_level],
-      role: user[:role],
+      role: Config.role_for_access_level(user[:access_level]),
       project_setting_id: user[:project_setting_id]
     }
   end

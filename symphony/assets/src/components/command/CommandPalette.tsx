@@ -46,10 +46,14 @@ export function CommandPalette() {
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Trigger asChild>
-        <button className="command-trigger text-button min-w-0 justify-start text-[#686b73]" title="Command palette">
-          <Search size={15} />
-          <span className="command-trigger-label truncate">Search issues, runs, settings</span>
-          <span className="command-trigger-shortcut ml-auto mono text-[11px] text-[#8a8d96]">⌘K</span>
+        <button
+          className={`sidebar-link command-trigger${open ? " is-active" : ""}`}
+          type="button"
+          title="Search issues, runs, settings (⌘K)"
+          aria-label="Search issues, runs, settings"
+        >
+          <span className="sidebar-link-icon"><Search size={17} /></span>
+          <span>Search</span>
         </button>
       </Dialog.Trigger>
       <Dialog.Portal>

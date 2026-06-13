@@ -156,6 +156,29 @@ defmodule SymphonyElixir.Store.WorkflowTest do
     assert unblocked_issue.open_runtime_block_count == 0
   end
 
+  test "project access token status stays attached to the matching project" do
+    previous_secret = System.get_env("SYMPHONY_TOKEN_ENCRYPTION_SECRET")
+    System.put_env("SYMPHONY_TOKEN_ENCRYPTION_SECRET", "json-store-project-token-test")
+
+    try do
+      first = Store.upsert_project(project_attrs(42, "group/project-one", "Project One"))
+      assert {:ok, first_with_token} = Store.put_project_access_token(first.id, "token-one")
+      assert first_with_token.project_access_token_status == "configured"
+
+      second = Store.upsert_project(project_attrs(43, "group/project-two", "Project Two"))
+      assert second.project_access_token_status == "missing"
+
+      statuses =
+        Store.projects()
+        |> Map.new(&{&1.project_id, &1.project_access_token_status})
+
+      assert statuses[42] == "configured"
+      assert statuses[43] == "missing"
+    after
+      restore_env("SYMPHONY_TOKEN_ENCRYPTION_SECRET", previous_secret)
+    end
+  end
+
   defp seed_issue(iid) do
     Store.upsert_issue(%{
       gitlab_issue_id: 90_000 + iid,
@@ -178,14 +201,21 @@ defmodule SymphonyElixir.Store.WorkflowTest do
   end
 
   defp project_attrs do
+    project_attrs(42, "group/project", "Project")
+  end
+
+  defp project_attrs(project_id, path, name) do
     %{
       api_root: "https://gitlab.example.com/api/v4",
-      project_ref: "group/project",
-      project_id: 42,
-      path_with_namespace: "group/project",
-      name: "Project",
-      web_url: "https://gitlab.example.com/group/project",
+      project_ref: path,
+      project_id: project_id,
+      path_with_namespace: path,
+      name: name,
+      web_url: "https://gitlab.example.com/#{path}",
       visibility: "private"
     }
   end
+
+  defp restore_env(key, nil), do: System.delete_env(key)
+  defp restore_env(key, value), do: System.put_env(key, value)
 end

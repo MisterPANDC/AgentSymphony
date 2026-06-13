@@ -29,6 +29,7 @@ defmodule SymphonyElixir.Application do
         {Phoenix.PubSub, name: SymphonyElixir.PubSub},
         {Task.Supervisor, name: SymphonyElixir.TaskSupervisor},
         SymphonyElixir.WorkflowStore,
+        SymphonyElixir.Auth.ProjectCache,
         repo_child(),
         SymphonyElixir.Store,
         SymphonyElixir.Sync.Poller,

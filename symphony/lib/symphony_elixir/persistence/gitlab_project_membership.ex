@@ -13,7 +13,6 @@ defmodule SymphonyElixir.Persistence.GitLabProjectMembership do
     field(:username, :string)
     field(:name, :string)
     field(:access_level, :integer)
-    field(:role, :string)
     field(:expires_at, :date)
     field(:state, :string)
     field(:last_checked_at, :utc_datetime_usec)
@@ -25,8 +24,8 @@ defmodule SymphonyElixir.Persistence.GitLabProjectMembership do
     timestamps(type: :utc_datetime_usec)
   end
 
-  @fields ~w(identity_id gitlab_project_setting_id gitlab_user_id username name access_level role expires_at state last_checked_at raw_gitlab)a
-  @required ~w(identity_id gitlab_project_setting_id gitlab_user_id username access_level role last_checked_at)a
+  @fields ~w(identity_id gitlab_project_setting_id gitlab_user_id username name access_level expires_at state last_checked_at raw_gitlab)a
+  @required ~w(identity_id gitlab_project_setting_id gitlab_user_id username access_level last_checked_at)a
 
   @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
   def changeset(membership, attrs) do

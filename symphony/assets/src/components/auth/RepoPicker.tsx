@@ -6,7 +6,13 @@ import { activateGitLabProject, listGitLabProjects } from "../../api/auth";
 export function RepoPicker() {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
-  const projects = useQuery({ queryKey: ["gitlab-projects"], queryFn: listGitLabProjects });
+  const projects = useQuery({ queryKey: ["gitlab-projects"], queryFn: () => listGitLabProjects(), staleTime: 60_000 });
+  const refreshProjects = useMutation({
+    mutationFn: () => listGitLabProjects(true),
+    onSuccess: (payload) => {
+      queryClient.setQueryData(["gitlab-projects"], payload);
+    }
+  });
   const activate = useMutation({
     mutationFn: activateGitLabProject,
     onSuccess: () => {
@@ -35,7 +41,12 @@ export function RepoPicker() {
             <div className="auth-kicker">Symphony</div>
             <h1>Choose a GitLab repository</h1>
           </div>
-          <button className="icon-button" onClick={() => projects.refetch()} title="Refresh repositories">
+          <button
+            className="icon-button"
+            onClick={() => refreshProjects.mutate()}
+            disabled={projects.isFetching || refreshProjects.isPending}
+            title="Refresh repositories"
+          >
             <RefreshCcw size={15} />
           </button>
         </div>

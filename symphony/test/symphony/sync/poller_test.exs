@@ -38,6 +38,40 @@ defmodule SymphonyElixir.Sync.PollerTest do
     assert cursor.last_error_at == nil
   end
 
+  test "reset_issue_cursor clears only the selected project marker" do
+    timestamp = ~U[2026-06-13 16:50:02.647149Z]
+    project = Store.upsert_project(project_attrs(30_101))
+    other_project = Store.upsert_project(project_attrs(30_102))
+
+    Store.put_cursor("gitlab", "gitlab_issues_updated_after:#{project.id}", %{
+      cursor_value: DateTime.to_iso8601(timestamp),
+      last_success_at: timestamp,
+      last_attempt_at: timestamp,
+      last_error: "old error",
+      last_error_at: timestamp
+    })
+
+    Store.put_cursor("gitlab", "gitlab_issues_updated_after:#{other_project.id}", %{
+      cursor_value: DateTime.to_iso8601(timestamp),
+      last_success_at: timestamp,
+      last_attempt_at: timestamp
+    })
+
+    assert :ok = Poller.reset_issue_cursor(project.id)
+
+    cursors = Store.cursors()
+    cursor = cursors["gitlab:gitlab_issues_updated_after:#{project.id}"]
+    other_cursor = cursors["gitlab:gitlab_issues_updated_after:#{other_project.id}"]
+
+    assert cursor.cursor_value == nil
+    assert cursor.last_success_at == nil
+    assert cursor.last_attempt_at == nil
+    assert cursor.last_error == nil
+    assert cursor.last_error_at == nil
+    assert other_cursor.cursor_value == DateTime.to_iso8601(timestamp)
+    assert other_cursor.last_success_at == timestamp
+  end
+
   test "full sync writes issues with the current project setting id" do
     Application.put_env(:symphony_elixir, :gitlab_req_options, plug: sync_plug())
 
@@ -63,6 +97,7 @@ defmodule SymphonyElixir.Sync.PollerTest do
 
     assert issue.gitlab_project_setting_id == project.id
     assert Enum.any?(Store.list_issues(project_setting_id: project.id), &(&1.id == issue.id))
+    assert Store.cursors()["gitlab:gitlab_issues_updated_after:#{project.id}"].last_success_at
   end
 
   test "explicit backfill attaches orphaned local issues to their project setting" do

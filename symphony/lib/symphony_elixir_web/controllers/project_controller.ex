@@ -6,16 +6,16 @@ defmodule SymphonyElixirWeb.ProjectController do
   alias Plug.Conn
   alias Symphony.GitLab.{Client, Error}
   alias Symphony.GitLab.Config, as: GitLabConfig
-  alias SymphonyElixir.Auth.{GitLabAccess, TokenManager}
+  alias SymphonyElixir.Auth.{GitLabAccess, ProjectCache, TokenManager}
   alias SymphonyElixir.Auth.Config, as: AuthConfig
   alias SymphonyElixir.Store
   alias SymphonyElixir.Sync.Poller
   alias SymphonyElixirWeb.AuthPlug
 
   @spec index(Conn.t(), map()) :: Conn.t()
-  def index(conn, _params) do
+  def index(conn, params) do
     with %{} = user <- AuthPlug.current_user(conn),
-         {:ok, projects} <- user_projects(conn, user) do
+         {:ok, projects} <- user_projects(conn, user, force_refresh?: force_refresh?(params)) do
       json(conn, %{projects: projects})
     else
       nil -> unauthorized(conn)
@@ -30,12 +30,12 @@ defmodule SymphonyElixirWeb.ProjectController do
     with %{} = user <- AuthPlug.current_user(conn),
          {:ok, access_token} <- user_access_token(user),
          {:ok, gitlab} <- gitlab_config(conn),
-         {:ok, raw_project} <- Client.get_project_by_id(gitlab, project_id, auth: {:bearer, access_token}),
+         {:ok, raw_project} <- project_from_cache_or_gitlab(user, gitlab, project_id, access_token),
          project <- upsert_project(gitlab, raw_project),
          {:ok, project_config} <- GitLabConfig.from_project_setting(project),
          {:ok, membership} <- GitLabAccess.project_membership(project_config, auth_config, user.gitlab_user_id, access_token),
          true <- membership.access_level >= auth_config.min_access_level || {:error, :insufficient_gitlab_access} do
-      :ok = Poller.reset_issue_cursor()
+      :ok = Poller.reset_issue_cursor(project.id)
       membership = Store.upsert_project_membership(user.identity_id, project.id, membership)
       updated_user = session_user(user, membership, project)
 
@@ -55,10 +55,10 @@ defmodule SymphonyElixirWeb.ProjectController do
 
   def activate(conn, _params), do: error(conn, 400, "missing_project", "Project id is required.")
 
-  defp user_projects(conn, user) do
+  defp user_projects(conn, user, opts) do
     with {:ok, access_token} <- user_access_token(user),
          {:ok, gitlab} <- gitlab_config(conn),
-         {:ok, raw_projects} <- Client.list_user_projects(gitlab, %{}, auth: {:bearer, access_token}) do
+         {:ok, raw_projects} <- cached_user_projects(user, gitlab, access_token, Keyword.get(opts, :force_refresh?, false)) do
       selected_project_id = selected_project_id(conn)
       stored_by_gitlab_id = Store.projects() |> Map.new(&{to_string(&1.project_id), &1})
 
@@ -72,6 +72,33 @@ defmodule SymphonyElixirWeb.ProjectController do
       {:ok, projects}
     end
   end
+
+  defp cached_user_projects(user, gitlab, access_token, true), do: fetch_user_projects(user, gitlab, access_token)
+
+  defp cached_user_projects(user, gitlab, access_token, _force_refresh?) do
+    key = project_cache_key(user, gitlab)
+
+    case ProjectCache.get(key) do
+      {:ok, raw_projects} -> {:ok, raw_projects}
+      :miss -> fetch_user_projects(user, gitlab, access_token)
+    end
+  end
+
+  defp fetch_user_projects(user, gitlab, access_token) do
+    with {:ok, raw_projects} <- Client.list_user_projects(gitlab, %{}, auth: {:bearer, access_token}) do
+      ProjectCache.put(project_cache_key(user, gitlab), raw_projects)
+      {:ok, raw_projects}
+    end
+  end
+
+  defp project_from_cache_or_gitlab(user, gitlab, project_id, access_token) do
+    case ProjectCache.find_project(project_cache_key(user, gitlab), project_id) do
+      {:ok, raw_project} -> {:ok, raw_project}
+      :miss -> Client.get_project_by_id(gitlab, project_id, auth: {:bearer, access_token})
+    end
+  end
+
+  defp project_cache_key(%{identity_id: identity_id}, %GitLabConfig{gitlab_api_root: api_root}), do: {identity_id, api_root}
 
   defp user_access_token(%{identity_id: identity_id}) when is_binary(identity_id), do: TokenManager.access_token(identity_id)
   defp user_access_token(_user), do: {:error, :missing_identity_id}
@@ -153,13 +180,15 @@ defmodule SymphonyElixirWeb.ProjectController do
     end
   end
 
+  defp force_refresh?(%{"refresh" => value}) when value in ["1", "true"], do: true
+  defp force_refresh?(_params), do: false
+
   defp session_user(user, membership, project) do
     user
     |> Map.merge(%{
       project_membership_id: membership.id,
       project_setting_id: project.id,
       access_level: membership.access_level,
-      role: membership.role || AuthConfig.role_for_access_level(membership.access_level),
       membership_checked_at: System.system_time(:second)
     })
   end
@@ -175,7 +204,7 @@ defmodule SymphonyElixirWeb.ProjectController do
       avatar_url: user[:avatar_url],
       profile_url: user[:profile_url],
       access_level: user[:access_level],
-      role: user[:role],
+      role: AuthConfig.role_for_access_level(user[:access_level]),
       project_setting_id: user[:project_setting_id]
     }
   end

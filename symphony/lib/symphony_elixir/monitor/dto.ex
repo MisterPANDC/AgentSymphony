@@ -16,7 +16,7 @@ defmodule SymphonyElixir.Monitor.DTO do
     %{
       runtime: runtime_dto(workflow, gitlab_config),
       gitlab: gitlab_dto(gitlab_config, store.project),
-      sync: sync_dto(sync_status),
+      sync: sync_dto(sync_status, store.project),
       agents: agents_dto(store, orchestrator),
       activeRuns: active_runs_dto(store, orchestrator),
       blocked: blocked_dto(store, orchestrator),
@@ -112,20 +112,26 @@ defmodule SymphonyElixir.Monitor.DTO do
     }
   end
 
-  defp sync_dto(status) do
+  defp sync_dto(status, project) do
     cursors = status.cursors || %{}
-    issue_cursor = Map.get(cursors, "gitlab:gitlab_issues_updated_after", %{})
+    issue_cursor = issue_cursor(cursors, project)
     notes_cursor = Map.get(cursors, "gitlab:gitlab_notes_last_full_sync_at", %{})
 
     %{
       issueLastSuccessAt: iso(issue_cursor[:last_success_at]),
       issueLastAttemptAt: iso(issue_cursor[:last_attempt_at]),
-      issueLastError: issue_cursor[:last_error] || status.last_error,
+      issueLastError: issue_cursor[:last_error],
       notesLastSuccessAt: iso(notes_cursor[:last_success_at]),
       pending: status.pending == true,
       nextRunAt: iso(status.next_run_at)
     }
   end
+
+  defp issue_cursor(cursors, %{id: project_setting_id}) when is_binary(project_setting_id) do
+    Map.get(cursors, "gitlab:gitlab_issues_updated_after:#{project_setting_id}", %{})
+  end
+
+  defp issue_cursor(cursors, _project), do: Map.get(cursors, "gitlab:gitlab_issues_updated_after", %{})
 
   defp agents_dto(store, orchestrator) do
     runs = store.runs || []

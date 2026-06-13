@@ -28,7 +28,10 @@ config :symphony_elixir, SymphonyElixirWeb.Endpoint,
   server: false
 
 if config_env() == :test do
+  # Tests pin JSON explicitly before the OTP application starts. Runtime defaults
+  # remain PostgreSQL because SYMPHONY_STORE_BACKEND takes precedence.
   config :symphony_elixir,
+    store_backend: :json,
     store_path:
       Path.join(
         System.tmp_dir!(),

@@ -2,9 +2,9 @@ defmodule SymphonyElixir.Store do
   @moduledoc """
   Persistence facade for GitLab-backed Symphony state.
 
-  The GitLab migration uses PostgreSQL through `SymphonyElixir.Store.Postgres`
-  when a database URL or explicit backend setting is present. A JSON fallback is
-  kept for local development on machines without PostgreSQL.
+  The GitLab-backed runtime uses PostgreSQL through
+  `SymphonyElixir.Store.Postgres` by default. The JSON implementation remains
+  available only when explicitly selected by tests or one-off local tooling.
   """
 
   @type backend :: SymphonyElixir.Store.Postgres | SymphonyElixir.Store.Json
@@ -44,19 +44,10 @@ defmodule SymphonyElixir.Store do
       configured in ["json", :json] ->
         :json
 
-      database_url?() ->
-        :postgres
-
       true ->
-        :json
+        :postgres
     end
   end
-
-  defp database_url? do
-    present?(System.get_env("SYMPHONY_DATABASE_URL")) or present?(System.get_env("DATABASE_URL"))
-  end
-
-  defp present?(value), do: is_binary(value) and String.trim(value) != ""
 
   @spec upsert_project(map()) :: map()
   def upsert_project(attrs), do: backend().upsert_project(attrs)

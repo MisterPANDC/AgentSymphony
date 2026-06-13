@@ -8,7 +8,6 @@ GitLab-native 的 Symphony 运行时，用 Elixir/Phoenix 提供本地调度服�
 - **内部工作流**：`triage`、`todo`、`in_progress`、`review`、`merging`、`rework`、`done`、`canceled` 等阶段存储在 Symphony 数据库中；依赖阻塞和人工介入作为 issue/run 的阻塞状态单独记录，不依赖 GitLab 付费工作流能力。
 - **持久化运行态**：agent runs、run events、runtime blocks、operator-input、sync cursors 均可落库，重启后可恢复观察。
 - **Linear 风格控制台**：高密度 issue dashboard、issue drawer、blocker editor、agent controls、run history、settings 和 Run Monitor。
-- **可降级开发体验**：未配置 PostgreSQL 时使用本地 JSON store，便于本机快速试用。
 
 ## 快速开始
 
@@ -30,6 +29,12 @@ cp .env.example .env.local
 npm --prefix assets run build
 mix escript.build
 ./bin/symphony ./WORKFLOW.md --port 4000
+```
+
+数据库相关的更改后需要创建数据库及更新表结构
+```bash
+mix ecto.create
+mix ecto.migrate
 ```
 
 ## 环境要求
@@ -64,12 +69,6 @@ SYMPHONY_AUTH_MODE=gitlab_oidc
 GITLAB_BASE_URL=https://gitlab.example.com
 GITLAB_OIDC_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 GITLAB_OIDC_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
-
-启用 PostgreSQL：
-
-```env
-SYMPHONY_STORE_BACKEND=postgres
 SYMPHONY_DATABASE_URL=postgres://postgres:postgres@localhost:5432/symphony_dev
 ```
 
@@ -100,7 +99,7 @@ https://symphony.example.com/auth/gitlab/callback
 
 1. 检查 `mix`、`node`、`npm`。
 2. 安装 Hex/Rebar、Mix 依赖和 npm 依赖。
-3. 如果配置了 PostgreSQL，执行 `mix ecto.create` 和 `mix ecto.migrate`。
+3. 执行 PostgreSQL `mix ecto.create` 和 `mix ecto.migrate`。
 4. 构建前端资源到 `priv/static`。
 5. 构建 `bin/symphony`。
 
@@ -120,14 +119,14 @@ https://symphony.example.com/auth/gitlab/callback
 
 迁移文件位于 `priv/repo/migrations`，覆盖项目、issue、note、workflow、dependency、run、block 和 sync cursor 等表。
 
+PostgreSQL 是默认持久化后端；应用不再因为缺少 `SYMPHONY_DATABASE_URL` / `DATABASE_URL` 自动切到 JSON store。未提供连接串时，Ecto 会按 `SYMPHONY_DATABASE_*` 拆分配置或默认本机 `symphony_dev` 连接 PostgreSQL。
+
 手动初始化：
 
 ```bash
 mix ecto.create
 mix ecto.migrate
 ```
-
-未配置 `SYMPHONY_DATABASE_URL` / `DATABASE_URL` 时，应用使用 JSON fallback。JSON fallback 只适合本地试用；云端多用户、多 repo、OIDC token 和 Project Access Token 场景建议显式配置 PostgreSQL。
 
 ## 开发命令
 

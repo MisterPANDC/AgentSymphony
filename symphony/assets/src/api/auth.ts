@@ -5,8 +5,8 @@ export function getAuthSession(): Promise<AuthSession> {
   return api<AuthSession>("/api/auth/session");
 }
 
-export function listGitLabProjects(): Promise<{ projects: GitLabProject[] }> {
-  return api<{ projects: GitLabProject[] }>("/api/projects");
+export function listGitLabProjects(refresh = false): Promise<{ projects: GitLabProject[] }> {
+  return api<{ projects: GitLabProject[] }>(refresh ? "/api/projects?refresh=1" : "/api/projects");
 }
 
 export function activateGitLabProject(projectId: number | string): Promise<Pick<AuthSession, "project" | "user" | "permissions">> {

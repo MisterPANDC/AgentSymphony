@@ -1,10 +1,9 @@
 defmodule SymphonyElixir.Store.Json do
   @moduledoc """
-  Local JSON fallback state for GitLab-backed Symphony.
+  Explicit local JSON state for GitLab-backed Symphony.
 
-  PostgreSQL is the conforming persistence backend. This module is retained as
-  a local fallback for development environments that have not configured a
-  database yet.
+  PostgreSQL is the default and conforming persistence backend. This module is
+  retained only for tests and one-off local tooling that explicitly opt in.
   """
 
   use GenServer
@@ -22,6 +21,7 @@ defmodule SymphonyElixir.Store.Json do
     :path,
     :started_at,
     :project,
+    projects: %{},
     identities: %{},
     oauth_tokens: %{},
     project_memberships: %{},
@@ -50,17 +50,21 @@ defmodule SymphonyElixir.Store.Json do
 
   @impl true
   def init(opts) do
-    path = Keyword.get(opts, :path) || Application.get_env(:symphony_elixir, :store_path) || default_path()
-    File.mkdir_p!(Path.dirname(path))
+    with path when is_binary(path) <- Keyword.get(opts, :path) || Application.get_env(:symphony_elixir, :store_path) do
+      path = Path.expand(path)
+      File.mkdir_p!(Path.dirname(path))
 
-    state =
-      path
-      |> load_state()
-      |> Map.put(:path, path)
-      |> Map.put_new(:started_at, DateTime.utc_now())
-      |> struct_state()
+      state =
+        path
+        |> load_state()
+        |> Map.put(:path, path)
+        |> Map.put_new(:started_at, DateTime.utc_now())
+        |> struct_state()
 
-    {:ok, state}
+      {:ok, state}
+    else
+      _ -> {:stop, :json_store_path_required}
+    end
   end
 
   @spec upsert_project(map()) :: map()
@@ -204,8 +208,10 @@ defmodule SymphonyElixir.Store.Json do
   @impl true
   def handle_call({:upsert_project, attrs}, _from, state) do
     now = now()
-    project = normalize_project(attrs, state.project, now)
-    state = persist(%{state | project: project})
+    existing = find_project(state.projects, attrs)
+    project = normalize_project(attrs, existing, now)
+    projects = Map.put(state.projects, project.id, project)
+    state = persist(%{state | project: project, projects: projects})
     {:reply, public_project(project), state}
   end
 
@@ -213,9 +219,8 @@ defmodule SymphonyElixir.Store.Json do
 
   def handle_call(:projects, _from, state) do
     projects =
-      state.project
-      |> List.wrap()
-      |> Enum.reject(&is_nil/1)
+      state.projects
+      |> Map.values()
       |> Enum.map(&public_project/1)
 
     {:reply, projects, state}
@@ -223,12 +228,14 @@ defmodule SymphonyElixir.Store.Json do
 
   def handle_call({:project_by_id, id}, _from, state) do
     project =
-      case state.project do
-        %{id: ^id} = project -> public_project(project)
-        _ -> nil
+      state.projects
+      |> Map.get(id)
+      |> case do
+        nil -> if state.project && state.project.id == id, do: state.project
+        project -> project
       end
 
-    {:reply, project, state}
+    {:reply, project && public_project(project), state}
   end
 
   def handle_call({:upsert_gitlab_identity, attrs}, _from, state) do
@@ -277,7 +284,7 @@ defmodule SymphonyElixir.Store.Json do
   end
 
   def handle_call({:put_project_access_token, project_setting_id, token, identity_id}, _from, state) do
-    case state.project do
+    case Map.get(state.projects, project_setting_id) || (state.project && state.project.id == project_setting_id && state.project) do
       %{id: ^project_setting_id} = project ->
         case SymphonyElixir.Auth.TokenVault.seal(token) do
           {:ok, encrypted} ->
@@ -288,7 +295,9 @@ defmodule SymphonyElixir.Store.Json do
               |> Map.put(:project_access_token_set_at, now())
               |> Map.put(:updated_at, now())
 
-            state = persist(%{state | project: project})
+            projects = Map.put(state.projects, project.id, project)
+            current_project = if state.project && state.project.id == project.id, do: project, else: state.project
+            state = persist(%{state | project: current_project, projects: projects})
             {:reply, {:ok, public_project(project)}, state}
 
           {:error, reason} ->
@@ -304,7 +313,7 @@ defmodule SymphonyElixir.Store.Json do
     project =
       case project_or_id do
         id when is_binary(id) ->
-          if state.project && state.project.id == id, do: state.project
+          Map.get(state.projects, id) || if state.project && state.project.id == id, do: state.project
 
         %{encrypted_project_access_token: _} = project ->
           project
@@ -769,8 +778,6 @@ defmodule SymphonyElixir.Store.Json do
 
   defp call(message), do: GenServer.call(__MODULE__, message, 15_000)
 
-  defp default_path, do: Path.expand(".symphony/state.json")
-
   defp load_state(path) do
     case File.read(path) do
       {:ok, body} ->
@@ -789,6 +796,7 @@ defmodule SymphonyElixir.Store.Json do
     map
     |> update_map_values(:identities, &hydrate_datetime_fields(&1, [:last_login_at, :inserted_at, :updated_at]))
     |> update_map_values(:oauth_tokens, &hydrate_datetime_fields(&1, [:expires_at, :last_refreshed_at, :inserted_at, :updated_at]))
+    |> update_map_values(:projects, &hydrate_project/1)
     |> update_map_values(:project_memberships, &hydrate_datetime_fields(&1, [:expires_at, :last_checked_at, :inserted_at, :updated_at]))
     |> update_map_values(:issues, &hydrate_issue/1)
     |> update_map_values(:workflow_states, &hydrate_workflow_state/1)
@@ -803,7 +811,10 @@ defmodule SymphonyElixir.Store.Json do
   end
 
   defp struct_state(map) do
-    struct(__MODULE__, Map.merge(%__MODULE__{} |> Map.from_struct(), map))
+    state = struct(__MODULE__, Map.merge(%__MODULE__{} |> Map.from_struct(), map))
+    projects = migrate_projects(state.project, state.projects)
+    project = current_project(state.project, projects)
+    %{state | project: project, projects: projects}
   end
 
   defp persist(%__MODULE__{} = state) do
@@ -829,6 +840,45 @@ defmodule SymphonyElixir.Store.Json do
     |> Map.put_new(:id, Ecto.UUID.generate())
     |> Map.put(:updated_at, now)
     |> Map.put_new(:inserted_at, now)
+  end
+
+  defp find_project(projects, attrs) do
+    attrs = Map.new(attrs)
+    api_root = attrs[:api_root] || attrs["api_root"]
+    project_id = attrs[:project_id] || attrs["project_id"]
+    project_ref = attrs[:project_ref] || attrs["project_ref"]
+
+    Enum.find(Map.values(projects), fn project ->
+      same_api_root? = is_nil(api_root) or (is_binary(api_root) and project[:api_root] == api_root)
+
+      cond do
+        same_api_root? and not is_nil(project_id) ->
+          to_string(project[:project_id]) == to_string(project_id)
+
+        same_api_root? and is_binary(project_ref) ->
+          project[:project_ref] == project_ref
+
+        true ->
+          false
+      end
+    end)
+  end
+
+  defp migrate_projects(_project, projects) when is_map(projects) and map_size(projects) > 0 do
+    Map.new(projects, fn {id, value} ->
+      project = Map.put_new(value, :id, to_string(id))
+      {project.id, project}
+    end)
+  end
+
+  defp migrate_projects(%{id: id} = project, _projects) when is_binary(id), do: %{id => project}
+  defp migrate_projects(_project, _projects), do: %{}
+
+  defp current_project(%{id: id}, projects) when is_binary(id), do: Map.get(projects, id)
+  defp current_project(_project, projects), do: projects |> Map.values() |> List.first()
+
+  defp hydrate_project(project) do
+    hydrate_datetime_fields(project, [:last_validated_at, :project_access_token_set_at, :inserted_at, :updated_at])
   end
 
   defp public_project(project) when is_map(project) do
@@ -903,7 +953,6 @@ defmodule SymphonyElixir.Store.Json do
       username: attrs[:username] || attrs["username"],
       name: attrs[:name] || attrs["name"],
       access_level: access_level,
-      role: attrs[:role] || attrs["role"] || SymphonyElixir.Auth.Config.role_for_access_level(access_level),
       expires_at: attrs[:expires_at] || attrs["expires_at"],
       state: attrs[:state] || attrs["state"],
       last_checked_at: now,
@@ -961,17 +1010,16 @@ defmodule SymphonyElixir.Store.Json do
     attrs = Map.new(attrs)
     gitlab_project_id = attrs[:gitlab_project_id] || attrs["gitlab_project_id"] || attrs[:project_id] || attrs["project_id"]
 
-    case state.project do
-      %{project_id: ^gitlab_project_id} = project ->
+    case find_project(state.projects, %{project_id: gitlab_project_id, api_root: state.project && state.project[:api_root]}) do
+      %{project_id: _} = project ->
         project
 
-      %{project_id: project_id} = project ->
-        if to_string(project_id) == to_string(gitlab_project_id), do: project, else: state.project
-
-      project ->
-        project
+      _ ->
+        fallback_project_for_issue_attrs(state.project, gitlab_project_id)
     end
   end
+
+  defp fallback_project_for_issue_attrs(project, _gitlab_project_id), do: project
 
   defp issue_local_id(attrs) do
     project_id = attrs[:gitlab_project_id] || attrs["gitlab_project_id"] || attrs[:project_id] || attrs["project_id"]
