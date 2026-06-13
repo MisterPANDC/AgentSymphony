@@ -47,6 +47,22 @@ defmodule SymphonyElixir.Tracker.Memory do
     :ok
   end
 
+  @spec create_followup_issue(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def create_followup_issue(current_issue_id, attrs) do
+    followup = %{
+      id: "memory-followup-#{System.unique_integer([:positive])}",
+      iid: System.unique_integer([:positive]),
+      identifier: "MEM-FOLLOWUP",
+      web_url: "memory://followup",
+      workflow_status: "triage",
+      related_to_current_issue: Map.get(attrs, :related_to_current_issue, true),
+      blocked_by_current_issue: Map.get(attrs, :blocked_by_current_issue, false)
+    }
+
+    send_event({:memory_tracker_followup_issue, current_issue_id, attrs, followup})
+    {:ok, %{issue: followup, relations: %{}, note_created: false}}
+  end
+
   @spec close_issue(String.t()) :: :ok | {:error, term()}
   def close_issue(issue_id) do
     send_event({:memory_tracker_issue_closed, issue_id})

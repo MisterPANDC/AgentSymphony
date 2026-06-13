@@ -11,11 +11,12 @@ defmodule SymphonyElixir.Store.Json do
 
   alias SymphonyElixir.Tracker.Issue
 
-  @workflow_statuses ~w(triage todo in_progress blocked review merging rework done canceled)
+  @workflow_statuses ~w(triage todo in_progress review merging rework done canceled)
   @priorities ~w(none low medium high urgent)
   @run_statuses ~w(queued starting running blocked succeeded failed canceled stale)
   @block_types ~w(operator_input approval_required mcp_elicitation sandbox_rejection external_failure blocked_by_dependency)
   @event_sources ~w(gitlab_sync local_ui agent system)
+  @relation_types ~w(relates_to)
 
   defstruct [
     :path,
@@ -27,6 +28,7 @@ defmodule SymphonyElixir.Store.Json do
     issue_by_gitlab_id: %{},
     workflow_states: %{},
     dependencies: %{},
+    relations: %{},
     notes: %{},
     events: [],
     cursors: %{},
@@ -107,6 +109,13 @@ defmodule SymphonyElixir.Store.Json do
 
   @spec remove_blocker(String.t(), String.t()) :: :ok | {:error, term()}
   def remove_blocker(blocked_issue_id, blocking_issue_id), do: call({:remove_blocker, blocked_issue_id, blocking_issue_id})
+
+  @spec list_issue_relations(String.t()) :: map()
+  def list_issue_relations(issue_id), do: call({:list_issue_relations, issue_id})
+
+  @spec add_issue_relation(String.t(), String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def add_issue_relation(source_issue_id, target_issue_id, relation_type, opts \\ []),
+    do: call({:add_issue_relation, source_issue_id, target_issue_id, relation_type, opts})
 
   @spec upsert_note(String.t(), map()) :: map()
   def upsert_note(issue_id, attrs), do: call({:upsert_note, issue_id, attrs})
@@ -234,7 +243,8 @@ defmodule SymphonyElixir.Store.Json do
         workflow = Map.get(state.workflow_states, issue.id, %{})
 
         issue.gitlab_state == "opened" and MapSet.member?(active_statuses, workflow.status) and
-          not unresolved_dependency?(state, issue.id) and labels_satisfy?(issue.labels, required_labels) and
+          not unresolved_dependency?(state, issue.id) and open_runtime_block_count(state, issue.id) == 0 and
+          labels_satisfy?(issue.labels, required_labels) and
           no_active_run?(state, issue.id)
       end)
       |> Enum.map(&tracker_issue(state, &1))
@@ -334,7 +344,13 @@ defmodule SymphonyElixir.Store.Json do
           state =
             state
             |> put_in([Access.key(:dependencies), dependency_key(blocked_issue_id, blocking_issue_id)], edge)
-            |> append_event("dependency_added", "local_ui", Map.take(edge, [:blocking_issue_id, :reason]), issue_id: blocked_issue_id)
+            |> append_event(
+              "dependency_added",
+              Keyword.get(opts, :source, "local_ui"),
+              Map.take(edge, [:blocking_issue_id, :reason]),
+              issue_id: blocked_issue_id,
+              actor: Keyword.get(opts, :actor, "local_operator")
+            )
             |> persist()
 
           {:ok, edge, state}
@@ -359,6 +375,62 @@ defmodule SymphonyElixir.Store.Json do
       {:reply, :ok, state}
     else
       {:reply, {:error, :dependency_not_found}, state}
+    end
+  end
+
+  def handle_call({:list_issue_relations, issue_id}, _from, state) do
+    {:reply, relation_dtos(state, issue_id), state}
+  end
+
+  def handle_call({:add_issue_relation, source_issue_id, target_issue_id, relation_type, opts}, _from, state) do
+    relation_type = normalize_relation_type(relation_type)
+
+    result =
+      cond do
+        relation_type not in @relation_types ->
+          {:error, :invalid_relation_type}
+
+        source_issue_id == target_issue_id ->
+          {:error, :self_relation}
+
+        not Map.has_key?(state.issues, source_issue_id) or not Map.has_key?(state.issues, target_issue_id) ->
+          {:error, :issue_not_found}
+
+        true ->
+          now = now()
+
+          relation = %{
+            id: Ecto.UUID.generate(),
+            source_issue_id: source_issue_id,
+            target_issue_id: target_issue_id,
+            relation_type: relation_type,
+            created_by: Keyword.get(opts, :actor, "local_operator"),
+            reason: Keyword.get(opts, :reason),
+            metadata: Keyword.get(opts, :metadata, %{}) || %{},
+            inserted_at: now,
+            updated_at: now
+          }
+
+          key = relation_key(source_issue_id, target_issue_id, relation_type)
+
+          state =
+            state
+            |> put_in([Access.key(:relations), key], relation)
+            |> append_event(
+              "issue_relation_added",
+              Keyword.get(opts, :source, "local_ui"),
+              Map.take(relation, [:target_issue_id, :relation_type, :reason, :metadata]),
+              issue_id: source_issue_id,
+              actor: Keyword.get(opts, :actor, "local_operator")
+            )
+            |> persist()
+
+          {:ok, relation, state}
+      end
+
+    case result do
+      {:ok, relation, state} -> {:reply, {:ok, relation}, state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
@@ -563,8 +635,9 @@ defmodule SymphonyElixir.Store.Json do
   defp hydrate_state(map) when is_map(map) do
     map
     |> update_map_values(:issues, &hydrate_issue/1)
-    |> update_map_values(:workflow_states, &hydrate_datetime_fields(&1, [:claimed_at, :last_transition_at, :inserted_at, :updated_at]))
+    |> update_map_values(:workflow_states, &hydrate_workflow_state/1)
     |> update_map_values(:dependencies, &hydrate_datetime_fields(&1, [:inserted_at, :updated_at]))
+    |> update_map_values(:relations, &hydrate_datetime_fields(&1, [:inserted_at, :updated_at]))
     |> update_map_values(:runs, &hydrate_datetime_fields(&1, [:started_at, :finished_at, :last_heartbeat_at, :inserted_at, :updated_at]))
     |> update_map_values(:runtime_blocks, &hydrate_datetime_fields(&1, [:resolved_at, :inserted_at, :updated_at]))
     |> update_map_values(:cursors, &hydrate_datetime_fields(&1, [:last_success_at, :last_attempt_at, :last_error_at, :inserted_at, :updated_at]))
@@ -637,6 +710,22 @@ defmodule SymphonyElixir.Store.Json do
     }
   end
 
+  defp hydrate_workflow_state(workflow) do
+    workflow
+    |> hydrate_datetime_fields([:claimed_at, :last_transition_at, :inserted_at, :updated_at])
+    |> Map.update(:status, "triage", &normalize_persisted_workflow_status/1)
+  end
+
+  defp normalize_persisted_workflow_status(status) do
+    status = normalize_status(status)
+
+    cond do
+      status == "blocked" -> "todo"
+      status in @workflow_statuses -> status
+      true -> "triage"
+    end
+  end
+
   defp normalize_note(issue_id, attrs, now) do
     attrs = Map.new(attrs)
 
@@ -688,6 +777,8 @@ defmodule SymphonyElixir.Store.Json do
 
   defp decorate_issue(state, issue) do
     workflow = Map.get(state.workflow_states, issue.id) || default_workflow_state(issue.id, now())
+    unresolved_blocker_count = unresolved_blocker_count(state, issue.id)
+    open_runtime_block_count = open_runtime_block_count(state, issue.id)
 
     issue
     |> Map.put(:identifier, issue_identifier(state, issue))
@@ -695,12 +786,30 @@ defmodule SymphonyElixir.Store.Json do
     |> Map.put(:workflow_status, workflow.status)
     |> Map.put(:priority, workflow.priority)
     |> Map.put(:blockers, blocker_dtos(state, issue.id))
+    |> Map.put(:relations, relation_dtos(state, issue.id))
+    |> Map.put(:is_blocked, unresolved_blocker_count > 0 or open_runtime_block_count > 0 or blocked_run?(state, issue.id))
+    |> Map.put(:unresolved_blocker_count, unresolved_blocker_count)
+    |> Map.put(:open_runtime_block_count, open_runtime_block_count)
     |> Map.put(:blocked_by_count, blocked_by_count(state, issue.id))
     |> Map.put(:active_run_id, active_run_id(state, issue.id))
     |> Map.put(:last_run_status, last_run_status(state, issue.id))
   end
 
-  defp undecorate(issue), do: Map.drop(issue, [:workflow_state, :workflow_status, :priority, :blockers, :blocked_by_count, :active_run_id, :last_run_status])
+  defp undecorate(issue),
+    do:
+      Map.drop(issue, [
+        :workflow_state,
+        :workflow_status,
+        :priority,
+        :blockers,
+        :relations,
+        :is_blocked,
+        :unresolved_blocker_count,
+        :open_runtime_block_count,
+        :blocked_by_count,
+        :active_run_id,
+        :last_run_status
+      ])
 
   defp maybe_decorate_issue(nil, _state), do: nil
   defp maybe_decorate_issue(issue, state), do: decorate_issue(state, issue)
@@ -722,11 +831,14 @@ defmodule SymphonyElixir.Store.Json do
       web_url: decorated.web_url,
       labels: decorated.labels || [],
       assignees: decorated.assignees || [],
+      is_blocked: decorated.is_blocked || false,
+      unresolved_blocker_count: decorated.unresolved_blocker_count || 0,
+      open_runtime_block_count: decorated.open_runtime_block_count || 0,
       blockers: decorated.blockers || [],
       blocked_by: blocker_refs(state, issue.id),
       notes_summary: notes_summary(state, issue.id),
-      created_at: decorated.gitlab_created_at,
-      updated_at: decorated.gitlab_updated_at
+      created_at: Map.get(decorated, :gitlab_created_at),
+      updated_at: Map.get(decorated, :gitlab_updated_at)
     }
   end
 
@@ -781,12 +893,11 @@ defmodule SymphonyElixir.Store.Json do
   defp allowed_transition?(from, _to) when from in ["done", "canceled"], do: false
   defp allowed_transition?(_from, "canceled"), do: true
   defp allowed_transition?("triage", "todo"), do: true
-  defp allowed_transition?("todo", status), do: status in ["in_progress", "blocked"]
-  defp allowed_transition?("in_progress", status), do: status in ["blocked", "review", "todo"]
-  defp allowed_transition?("blocked", status), do: status in ["todo", "canceled"]
+  defp allowed_transition?("todo", status), do: status in ["in_progress"]
+  defp allowed_transition?("in_progress", status), do: status in ["review", "todo"]
   defp allowed_transition?("review", status), do: status in ["todo", "merging", "rework"]
-  defp allowed_transition?("merging", status), do: status in ["done", "blocked", "review"]
-  defp allowed_transition?("rework", status), do: status in ["in_progress", "blocked", "review"]
+  defp allowed_transition?("merging", status), do: status in ["done", "review"]
+  defp allowed_transition?("rework", status), do: status in ["in_progress", "review"]
   defp allowed_transition?(_from, _to), do: false
 
   defp blocker_dtos(state, issue_id) do
@@ -794,17 +905,65 @@ defmodule SymphonyElixir.Store.Json do
     |> Map.values()
     |> Enum.filter(&(&1.blocked_issue_id == issue_id))
     |> Enum.map(fn edge ->
-      blocking_issue = decorate_issue(state, Map.fetch!(state.issues, edge.blocking_issue_id))
-
-      %{
-        issue_id: blocking_issue.id,
-        iid: blocking_issue.iid,
-        identifier: blocking_issue.identifier,
-        title: blocking_issue.title,
-        status: blocking_issue.workflow_status,
-        reason: edge.reason
-      }
+      issue_ref(state, edge.blocking_issue_id, reason: edge.reason)
     end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp relation_dtos(state, issue_id) do
+    %{
+      related: related_issue_dtos(state, issue_id),
+      blocks: blocked_issue_dtos(state, issue_id),
+      blocked_by: blocker_dtos(state, issue_id)
+    }
+  end
+
+  defp related_issue_dtos(state, issue_id) do
+    state.relations
+    |> Map.values()
+    |> Enum.filter(&(&1.relation_type == "relates_to" and (&1.source_issue_id == issue_id or &1.target_issue_id == issue_id)))
+    |> Enum.sort_by(& &1.inserted_at, DateTime)
+    |> Enum.map(fn relation ->
+      related_issue_id =
+        if relation.source_issue_id == issue_id do
+          relation.target_issue_id
+        else
+          relation.source_issue_id
+        end
+
+      issue_ref(state, related_issue_id,
+        reason: relation.reason,
+        relation_type: relation.relation_type,
+        direction: if(relation.source_issue_id == issue_id, do: "outgoing", else: "incoming")
+      )
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp blocked_issue_dtos(state, issue_id) do
+    state.dependencies
+    |> Map.values()
+    |> Enum.filter(&(&1.blocking_issue_id == issue_id))
+    |> Enum.map(fn edge ->
+      issue_ref(state, edge.blocked_issue_id, reason: edge.reason)
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp issue_ref(state, issue_id, extra) do
+    with %{} = issue <- Map.get(state.issues, issue_id),
+         %{} = workflow <- Map.get(state.workflow_states, issue_id) do
+      %{
+        issue_id: issue.id,
+        iid: issue.iid,
+        identifier: issue_identifier(state, issue),
+        title: issue.title,
+        status: workflow.status
+      }
+      |> Map.merge(Map.new(extra))
+    else
+      _ -> nil
+    end
   end
 
   defp blocker_refs(state, issue_id) do
@@ -823,6 +982,23 @@ defmodule SymphonyElixir.Store.Json do
     |> Enum.count(&(&1.blocking_issue_id == issue_id))
   end
 
+  defp unresolved_blocker_count(state, issue_id) do
+    blocker_dtos(state, issue_id)
+    |> Enum.count(&(&1.status != "done"))
+  end
+
+  defp open_runtime_block_count(state, issue_id) do
+    state.runtime_blocks
+    |> Map.values()
+    |> Enum.count(&(&1.gitlab_issue_id == issue_id and is_nil(&1.resolved_at)))
+  end
+
+  defp blocked_run?(state, issue_id) do
+    state.runs
+    |> Map.values()
+    |> Enum.any?(&(&1.gitlab_issue_id == issue_id and &1.status == "blocked"))
+  end
+
   defp issue_identifier(state, issue) do
     case Map.get(issue, :identifier) do
       identifier when is_binary(identifier) and identifier != "" ->
@@ -837,13 +1013,7 @@ defmodule SymphonyElixir.Store.Json do
   end
 
   defp unresolved_dependency?(state, issue_id) do
-    state.dependencies
-    |> Map.values()
-    |> Enum.filter(&(&1.blocked_issue_id == issue_id))
-    |> Enum.any?(fn edge ->
-      workflow = Map.get(state.workflow_states, edge.blocking_issue_id, %{})
-      workflow.status != "done"
-    end)
+    unresolved_blocker_count(state, issue_id) > 0
   end
 
   defp dependency_path?(state, from_issue_id, target_issue_id) do
@@ -868,6 +1038,7 @@ defmodule SymphonyElixir.Store.Json do
   end
 
   defp dependency_key(blocked_issue_id, blocking_issue_id), do: "#{blocked_issue_id}:#{blocking_issue_id}"
+  defp relation_key(source_issue_id, target_issue_id, relation_type), do: "#{source_issue_id}:#{target_issue_id}:#{relation_type}"
 
   defp labels_satisfy?(issue_labels, required_labels) do
     normalized = MapSet.new(issue_labels || [], &normalize_label/1)
@@ -970,6 +1141,7 @@ defmodule SymphonyElixir.Store.Json do
   defp apply_issue_filters(issues, filters) do
     Enum.filter(issues, fn issue ->
       Enum.all?(filters, fn
+        {:status, "blocked"} -> issue.is_blocked == true
         {:status, status} -> issue.workflow_status == status
         {:gitlab_state, state} -> issue.gitlab_state == state
         {:search, search} -> issue_matches_search?(issue, search)
@@ -1019,6 +1191,9 @@ defmodule SymphonyElixir.Store.Json do
 
   defp normalize_status(status) when is_binary(status), do: status |> String.trim() |> String.downcase()
   defp normalize_status(status), do: to_string(status)
+
+  defp normalize_relation_type(type) when is_binary(type), do: type |> String.trim() |> String.downcase()
+  defp normalize_relation_type(type), do: to_string(type) |> normalize_relation_type()
 
   defp normalize_priority(priority) when is_binary(priority), do: priority |> String.trim() |> String.downcase()
   defp normalize_priority(priority), do: to_string(priority)

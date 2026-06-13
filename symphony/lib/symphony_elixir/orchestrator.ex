@@ -1088,14 +1088,6 @@ defmodule SymphonyElixir.Orchestrator do
       run_id
     )
 
-    Store.transition_workflow(
-      issue_id,
-      "blocked",
-      source: "system",
-      actor: "orchestrator",
-      reason: error
-    )
-
     if is_binary(run_id), do: Store.add_run_event(run_id, "blocked", error, %{})
   rescue
     _ -> :ok
@@ -1169,10 +1161,6 @@ defmodule SymphonyElixir.Orchestrator do
       "review" ->
         persist_run_finished(running_entry, "succeeded")
         release_completed_issue(state, issue_id)
-
-      "blocked" ->
-        persist_run_finished(running_entry, "blocked", blocked_reason: "agent completed with blocked workflow status")
-        release_issue_claim(state, issue_id)
 
       active_status when active_status in ["todo", "in_progress", "merging", "rework"] ->
         persist_run_finished(running_entry, "succeeded")

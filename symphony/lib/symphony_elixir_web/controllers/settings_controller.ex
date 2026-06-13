@@ -3,6 +3,7 @@ defmodule SymphonyElixirWeb.SettingsController do
 
   alias Plug.Conn
   alias Symphony.GitLab.{Client, Config}
+  alias SymphonyElixir.Persistence.WorkflowState
   alias SymphonyElixir.Store
 
   @spec gitlab(Conn.t(), map()) :: Conn.t()
@@ -48,7 +49,7 @@ defmodule SymphonyElixirWeb.SettingsController do
 
     json(conn, %{
       workflow: %{
-        statuses: ~w(triage todo in_progress blocked review merging rework done canceled),
+        statuses: WorkflowState.statuses(),
         dispatchCandidateStatuses: ~w(todo in_progress merging rework),
         requiredGitlabLabels: settings.tracker.required_labels,
         maxConcurrentAgents: settings.agent.max_concurrent_agents,

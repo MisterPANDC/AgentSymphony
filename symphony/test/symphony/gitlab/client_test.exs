@@ -29,6 +29,20 @@ defmodule Symphony.GitLab.ClientTest do
     assert error.message == "bad token"
   end
 
+  test "creates a project issue with scoped attributes" do
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: create_issue_plug())
+
+    assert {:ok, issue} =
+             Client.create_project_issue(config(), %{
+               "title" => "Follow-up",
+               "description" => "Body",
+               "labels" => "follow-up,backend"
+             })
+
+    assert issue["iid"] == 3
+    assert issue["title"] == "Follow-up"
+  end
+
   defp config do
     %Config{
       gitlab_base_url: "https://gitlab.example.com",
@@ -63,6 +77,32 @@ defmodule Symphony.GitLab.ClientTest do
       conn
       |> Plug.Conn.put_status(401)
       |> Req.Test.json(%{message: "bad token"})
+    end
+  end
+
+  defp create_issue_plug do
+    fn conn ->
+      assert conn.method == "POST"
+      assert conn.request_path == "/api/v4/projects/123/issues"
+      assert Plug.Conn.get_req_header(conn, "private-token") == ["test-token"]
+
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      payload = Jason.decode!(body)
+      assert payload["title"] == "Follow-up"
+      assert payload["description"] == "Body"
+      assert payload["labels"] == "follow-up,backend"
+
+      Req.Test.json(conn, %{
+        "id" => 300,
+        "project_id" => 123,
+        "iid" => 3,
+        "web_url" => "https://gitlab.example.com/group/project/-/issues/3",
+        "title" => payload["title"],
+        "description" => payload["description"],
+        "state" => "opened",
+        "labels" => ["follow-up", "backend"],
+        "assignees" => []
+      })
     end
   end
 end

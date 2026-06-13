@@ -9,6 +9,7 @@ defmodule SymphonyElixir.Store.PostgresTest do
   alias SymphonyElixir.Persistence.IssueDependency
   alias SymphonyElixir.Persistence.IssueEvent
   alias SymphonyElixir.Persistence.IssueNote
+  alias SymphonyElixir.Persistence.IssueRelation
   alias SymphonyElixir.Persistence.ProjectSetting
   alias SymphonyElixir.Persistence.RuntimeBlock
   alias SymphonyElixir.Persistence.SyncCursor
@@ -80,6 +81,7 @@ defmodule SymphonyElixir.Store.PostgresTest do
     Repo.delete_all(AgentRun)
     Repo.delete_all(IssueEvent)
     Repo.delete_all(IssueDependency)
+    Repo.delete_all(IssueRelation)
     Repo.delete_all(IssueNote)
     Repo.delete_all(WorkflowState)
     Repo.delete_all(Issue)

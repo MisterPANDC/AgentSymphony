@@ -85,7 +85,7 @@ defmodule SymphonyElixir.Repo.Migrations.CreateGitlabStore do
     create index(:issue_workflow_states, [:status])
 
     create constraint(:issue_workflow_states, :issue_workflow_states_status_check,
-             check: "status in ('triage', 'todo', 'in_progress', 'blocked', 'review', 'done', 'canceled')"
+             check: "status in ('triage', 'todo', 'in_progress', 'review', 'merging', 'rework', 'done', 'canceled')"
            )
 
     create constraint(:issue_workflow_states, :issue_workflow_states_priority_check,

@@ -5,7 +5,7 @@ GitLab-native 的 Symphony 运行时，用 Elixir/Phoenix 提供本地调度服�
 ## 亮点
 
 - **GitLab 原生集成**：支持 GitLab project API URL、project path / numeric id、issue 同步、note 同步和必要的 GitLab 写入。
-- **内部工作流**：`triage`、`todo`、`in_progress`、`blocked`、`review`、`done`、`canceled` 等状态存储在 Symphony 数据库中，不依赖 GitLab 付费工作流能力。
+- **内部工作流**：`triage`、`todo`、`in_progress`、`review`、`merging`、`rework`、`done`、`canceled` 等阶段存储在 Symphony 数据库中；依赖阻塞和人工介入作为 issue/run 的阻塞状态单独记录，不依赖 GitLab 付费工作流能力。
 - **持久化运行态**：agent runs、run events、runtime blocks、operator-input、sync cursors 均可落库，重启后可恢复观察。
 - **Linear 风格控制台**：高密度 issue dashboard、issue drawer、blocker editor、agent controls、run history、settings 和 Run Monitor。
 - **可降级开发体验**：未配置 PostgreSQL 时使用本地 JSON store，便于本机快速试用。

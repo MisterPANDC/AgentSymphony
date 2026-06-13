@@ -107,6 +107,18 @@ defmodule SymphonyElixir.Store do
   @spec remove_blocker(String.t(), String.t()) :: :ok | {:error, term()}
   def remove_blocker(blocked_issue_id, blocking_issue_id), do: backend().remove_blocker(blocked_issue_id, blocking_issue_id)
 
+  @spec list_issue_relations(String.t()) :: map()
+  def list_issue_relations(issue_id), do: backend().list_issue_relations(issue_id)
+
+  @spec add_issue_relation(String.t(), String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def add_issue_relation(source_issue_id, target_issue_id, relation_type, opts \\ [])
+
+  def add_issue_relation(source_issue_id, target_issue_id, "blocks", opts),
+    do: add_blocker(target_issue_id, source_issue_id, opts)
+
+  def add_issue_relation(source_issue_id, target_issue_id, relation_type, opts),
+    do: backend().add_issue_relation(source_issue_id, target_issue_id, relation_type, opts)
+
   @spec upsert_note(String.t(), map()) :: map()
   def upsert_note(issue_id, attrs), do: backend().upsert_note(issue_id, attrs)
 

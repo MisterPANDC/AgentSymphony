@@ -46,8 +46,8 @@ A conforming implementation MUST satisfy all of the following goals:
    - Symphony MUST authenticate to GitLab from the server side only.
 
 5. **Maintain Symphony workflow state internally**
-   - Symphony workflow statuses such as `triage`, `todo`, `in_progress`, `blocked`, `review`, `merging`, `rework`, `done`, and `canceled` MUST be stored in the Symphony database.
-   - Blocker/dependency relationships MUST be stored in the Symphony database.
+   - Symphony workflow statuses such as `triage`, `todo`, `in_progress`, `review`, `merging`, `rework`, `done`, and `canceled` MUST be stored in the Symphony database.
+   - Blocker/dependency relationships and issue-level blocked state MUST be stored or derived in the Symphony database separately from workflow status.
    - Dashboard ordering, run state, dispatch state, blocked/operator-input state, and sync cursors MUST be stored in the Symphony database.
    - GitLab paid workflow/blocker/status features MUST NOT be required for the core workflow.
 
@@ -383,6 +383,7 @@ The client MUST expose typed Elixir functions for required operations:
 get_project(config)
 list_project_issues(config, params)
 get_project_issue(config, issue_iid)
+create_project_issue(config, attrs)
 update_project_issue(config, issue_iid, attrs)
 list_issue_notes(config, issue_iid, params)
 create_issue_note(config, issue_iid, body)
@@ -589,7 +590,6 @@ Allowed `status` values:
 triage
 todo
 in_progress
-blocked
 review
 merging
 rework
@@ -847,7 +847,63 @@ POST /projects/:id/issues/:issue_iid/notes
 
 Agent-created comments MUST be posted through `create_issue_note/3` and then inserted into local `gitlab_issue_notes` after GitLab returns the created note.
 
-### 8.4 Manual refresh
+### 8.4 Agent-created follow-up issues
+
+The GitLab migration MUST preserve the upstream workflow behavior where an
+Agent can capture out-of-scope follow-up work without expanding the current
+issue scope.
+
+Agent-created follow-up issues MUST be created through
+`create_project_issue/2`, not through arbitrary GitLab REST calls. The
+operation MUST be scoped to the current configured GitLab project.
+
+The implementation MUST use:
+
+```text
+POST /projects/:id/issues
+```
+
+The follow-up creation request MUST require:
+
+```text
+title
+description
+acceptance_criteria
+```
+
+The request MAY include:
+
+```text
+labels
+assignee_ids
+milestone_id
+due_date
+confidential
+related_to_current_issue
+blocked_by_current_issue
+```
+
+`blocked_by_current_issue` implies `related_to_current_issue`.
+
+After GitLab returns the created issue, Symphony MUST:
+
+1. Upsert the returned issue into `gitlab_issues`.
+2. Create its `issue_workflow_states` row with default status `triage`.
+3. Record an `issue_events` row with source `agent`, actor `agent`, and a
+   payload containing the current issue id, created issue iid, and relationship
+   flags.
+4. Ensure the created issue description contains a link back to the current
+   GitLab issue when `related_to_current_issue` is true.
+5. Post a note on the current issue linking to the follow-up issue when
+   `related_to_current_issue` is true.
+6. Create local `issue_dependencies` when `blocked_by_current_issue` is true.
+7. Return the created issue DTO to the Agent tool caller.
+
+If GitLab issue creation succeeds but local persistence fails, the
+implementation MUST record the persistence error in Run Monitor and retry local
+upsert on the next sync. It MUST NOT silently drop the created issue.
+
+### 8.5 Manual refresh
 
 The backend MUST expose a manual refresh endpoint used by Run Monitor and Settings:
 
@@ -857,7 +913,7 @@ POST /api/sync/refresh
 
 Manual refresh MUST enqueue or execute a sync job. It MUST NOT require or simulate external GitLab events.
 
-### 8.5 Conflict behavior
+### 8.6 Conflict behavior
 
 When GitLab fields change externally:
 
@@ -877,7 +933,6 @@ When GitLab fields change externally:
 | `triage` | Synced from GitLab and not yet accepted into work queue. | No |
 | `todo` | Ready for Agent work. | Yes |
 | `in_progress` | Implementation actively underway. | Yes |
-| `blocked` | Cannot proceed because dependency or operator input is required. | No |
 | `review` | Implementation is validated and waiting for human review or merge approval. | No |
 | `merging` | Human approved the change; Agent should run the merge/land flow. | Yes |
 | `rework` | Reviewer requested changes; Agent should restart the implementation/review loop. | Yes |
@@ -893,20 +948,14 @@ Required transitions:
 ```text
 triage -> todo
 todo -> in_progress
-todo -> blocked
-in_progress -> blocked
 in_progress -> review
 in_progress -> todo
-blocked -> todo
-blocked -> canceled
 review -> todo
 review -> merging
 review -> rework
 merging -> done
-merging -> blocked
 merging -> review
 rework -> in_progress
-rework -> blocked
 rework -> review
 any non-terminal -> canceled
 ```
@@ -924,8 +973,14 @@ The implementation MUST record each transition in `issue_events`.
 
 An issue is blocked when either condition is true:
 
-1. Its workflow status is `blocked`.
-2. It has unresolved dependencies where at least one blocking issue is not in `done`.
+1. It has unresolved dependencies where at least one blocking issue is not in `done`.
+2. It has an unresolved `runtime_blocks` row, or its active `agent_runs.status` is `blocked`.
+
+Blocked is issue/run state, not a workflow stage. A blocked issue MUST keep its
+current `issue_workflow_states.status` such as `todo`, `in_progress`,
+`merging`, or `rework`, and the dashboard MUST render the block as a
+badge/filter or Run Monitor row rather than moving the issue into a separate
+workflow column.
 
 Blocked issues MUST NOT be dispatched.
 
@@ -958,6 +1013,7 @@ A dispatch candidate MUST satisfy:
 gitlab_issues.gitlab_state = "opened"
 issue_workflow_states.status in ["todo", "in_progress", "merging", "rework"]
 no unresolved dependency blocker
+no unresolved runtime block for the same issue
 no active agent run for the same issue
 required labels satisfied when configured
 max_concurrent_agents not exceeded
@@ -991,6 +1047,7 @@ issue.gitlab_state
 issue.labels
 issue.assignees
 issue.workflow_status
+issue.is_blocked
 issue.blockers
 issue.notes_summary
 workspace.path
@@ -1009,9 +1066,20 @@ gitlab_current_issue
 get_current_issue_notes
 create_current_issue_note
 update_current_issue_state
+create_followup_issue
 ```
 
-The tool MUST be scoped to the current configured project and current issue. It MUST NOT expose arbitrary GitLab REST calls to the agent by default.
+The tools MUST be scoped to the current configured project and current issue.
+`create_followup_issue` MAY create a new issue in the current configured
+project, but it MUST require explicit title, description, and acceptance
+criteria, and it MUST initialize the new issue as internal status `triage`.
+The tool surface MUST NOT expose arbitrary GitLab REST calls to the agent by
+default.
+
+`create_followup_issue` MUST be used when repo workflow instructions require an
+Agent to capture out-of-scope improvements as a separate future task. It MUST
+return the created GitLab issue identity, web URL, internal workflow status, and
+relationship flags or dependency records created by Symphony.
 
 ### 10.5 Blocked and operator-input handling
 
@@ -1019,9 +1087,10 @@ When Codex reports that operator input, approval, MCP elicitation, or sandbox re
 
 1. The active `agent_runs.status` MUST become `blocked`.
 2. A `runtime_blocks` row MUST be created.
-3. `issue_workflow_states.status` MUST transition to `blocked` unless the issue is already terminal.
-4. Run Monitor MUST show the block.
-5. The issue MUST remain claimed until the operator resolves the block, cancels the run, or resets the issue to `todo`.
+3. `issue_workflow_states.status` MUST remain unchanged; `blocked` MUST NOT be written as an issue workflow status.
+4. The issue DTO MUST expose derived blocked state so the issue can show a blocked badge/filter while staying in its current workflow stage.
+5. Run Monitor MUST show the block.
+6. The issue MUST remain claimed until the operator resolves the block, cancels the run, or explicitly resets the issue/run to a dispatchable state.
 
 Unlike the original prototype, blocked state MUST survive orchestrator restart.
 
@@ -1038,7 +1107,7 @@ For GitLab-backed internal workflow state, this completion rule is the GitLab
 mapping of upstream Symphony's tracker-state handoff semantics:
 
 - Agent tools are the preferred way to move an issue between `in_progress`,
-  `review`, `merging`, `rework`, `done`, and `blocked`.
+  `review`, `merging`, `rework`, and `done`.
 - If the Agent exits normally and the current internal workflow status is still
   an active status (`todo`, `in_progress`, `merging`, or `rework`), the
   orchestrator MUST keep the upstream continuation behavior and schedule a
@@ -1048,10 +1117,6 @@ mapping of upstream Symphony's tracker-state handoff semantics:
   or approval.
 - If the Agent exits normally and the current internal workflow status is
   `done`, the orchestrator MUST preserve `done`.
-- If the Agent exits normally and the current internal workflow status is
-  `blocked`, the orchestrator MUST preserve `blocked` and surface the block in
-  Run Monitor.
-
 Internal `review` MUST NOT automatically close the GitLab issue. Internal
 `done` means the merge/land flow has completed; when an issue enters `done`,
 Symphony SHOULD close the GitLab issue through the server-side GitLab client.
@@ -1062,7 +1127,7 @@ When the Agent fails:
 
 - `agent_runs.status` MUST become `failed`.
 - The issue workflow status SHOULD remain unchanged for retryable active-state failures.
-- The issue workflow status SHOULD transition to `blocked` when the failure is caused by missing permissions, secrets, required tools, approval, or operator input.
+- When the failure is caused by missing permissions, secrets, required tools, approval, or operator input, the run SHOULD become `blocked`, a `runtime_blocks` row SHOULD be created, and the issue workflow status SHOULD remain unchanged.
 - Failure details MUST be visible in Run Monitor.
 
 ---
@@ -1548,7 +1613,6 @@ export type WorkflowStatus =
   | "triage"
   | "todo"
   | "in_progress"
-  | "blocked"
   | "review"
   | "merging"
   | "rework"
@@ -1581,6 +1645,9 @@ export interface IssueDTO {
     title: string;
     status: WorkflowStatus;
   }>;
+  isBlocked: boolean;
+  unresolvedBlockerCount: number;
+  openRuntimeBlockCount: number;
   blockedByCount: number;
   activeRunId: string | null;
   lastRunStatus: string | null;
@@ -1676,7 +1743,7 @@ Linear team/project/workflow status assumptions
 | Linear issue | GitLab project issue read model |
 | Linear project slug | Configured GitLab project ref/API URL |
 | Linear workflow state | `issue_workflow_states.status` |
-| Linear blocked state | `runtime_blocks` + `issue_dependencies` |
+| Linear blocked state | derived issue blocked state from `runtime_blocks`, `agent_runs.status`, and `issue_dependencies` |
 | Linear comments | GitLab issue notes |
 | Linear GraphQL tool | Narrow GitLab current-issue tool |
 | LiveView observability dashboard | React Run Monitor + `/api/v1/*` JSON |
@@ -1803,7 +1870,7 @@ Required work:
 
 1. Implement GitLab REST client.
 2. Implement project validation.
-3. Implement issue list/get/update.
+3. Implement issue list/get/create/update.
 4. Implement issue notes list/create.
 5. Add Ecto schemas and migrations.
 6. Add mappers and fixtures.
@@ -1811,6 +1878,7 @@ Required work:
 Acceptance:
 
 - Project issue sync works against a fake GitLab server.
+- Project issue creation works against a fake GitLab server.
 - Notes sync works against a fake GitLab server.
 - Pagination is tested.
 - `id` vs `iid` behavior is tested.
@@ -1856,13 +1924,16 @@ Required work:
 3. Persist agent runs and run events.
 4. Persist runtime blocked/operator-input state.
 5. Post GitLab notes for run summaries when write permission exists.
-6. Remove Linear tool assumptions from repo skills.
+6. Provide a narrow `create_followup_issue` tool for Agent-created follow-up work.
+7. Remove Linear tool assumptions from repo skills.
 
 Acceptance:
 
 - A `todo` GitLab issue can be claimed and run.
 - Agent run history persists.
 - Operator-input blocked state appears after restart.
+- Agent-created follow-up issues are created in the configured GitLab project
+  and enter internal `triage`.
 - No Linear prompt fields remain.
 
 ### Phase 7 — React control frontend
@@ -1984,11 +2055,13 @@ The test MUST prove:
 3. The issue appears in dashboard.
 4. Internal status changes to `todo`.
 5. Agent run starts.
-6. Run appears in Run Monitor.
-7. Stub runner blocks for operator input.
-8. Block appears in Run Monitor and `/api/v1/state`.
-9. Restart preserves block.
-10. Operator cancels or resolves block.
+6. Stub runner creates a follow-up issue.
+7. The follow-up issue appears in the dashboard with internal status `triage`.
+8. Run appears in Run Monitor.
+9. Stub runner blocks for operator input.
+10. Block appears in Run Monitor and `/api/v1/state`.
+11. Restart preserves block.
+12. Operator cancels or resolves block.
 
 ---
 
@@ -2034,23 +2107,24 @@ A migration is conforming only when every item below is true:
 6. GitLab REST API is called only from Elixir backend modules.
 7. Browser frontend never receives the GitLab token.
 8. GitLab issues sync through polling.
-9. GitLab notes sync and note creation work through the backend.
-10. No GitLab event receiver or project hook is required.
-11. Internal workflow states are stored in Symphony DB.
-12. Blocker/dependency relationships are stored in Symphony DB.
-13. Closed GitLab issues are not dispatch candidates.
-14. Agent dispatch uses GitLab issue read model plus internal workflow state.
-15. Agent runs are persisted.
-16. Runtime blocked/operator-input state is persisted.
-17. TypeScript + React dashboard exists.
-18. Issue list, board, detail drawer, Agent panel, run history, and settings exist.
-19. Run Monitor exists as a top-level frontend area.
-20. Run Monitor includes runtime overview, sync health, active runs, blocked queue, workspace/log info, manual refresh, and operational JSON debug info.
-21. `/api/v1/state`, `/api/v1/:issue_identifier`, and `/api/v1/refresh` exist for local operational debugging.
-22. Run Monitor issue identifiers link to GitLab `web_url` when the URL is `http` or `https`.
-23. Token redaction tests pass.
-24. Fake GitLab integration tests pass.
-25. No runtime Linear dependency remains.
+9. GitLab issue creation works through the backend for constrained follow-up issues.
+10. GitLab notes sync and note creation work through the backend.
+11. No GitLab event receiver or project hook is required.
+12. Internal workflow states are stored in Symphony DB.
+13. Blocker/dependency relationships are stored in Symphony DB.
+14. Closed GitLab issues are not dispatch candidates.
+15. Agent dispatch uses GitLab issue read model plus internal workflow state.
+16. Agent runs are persisted.
+17. Runtime blocked/operator-input state is persisted.
+18. TypeScript + React dashboard exists.
+19. Issue list, board, detail drawer, Agent panel, run history, and settings exist.
+20. Run Monitor exists as a top-level frontend area.
+21. Run Monitor includes runtime overview, sync health, active runs, blocked queue, workspace/log info, manual refresh, and operational JSON debug info.
+22. `/api/v1/state`, `/api/v1/:issue_identifier`, and `/api/v1/refresh` exist for local operational debugging.
+23. Run Monitor issue identifiers link to GitLab `web_url` when the URL is `http` or `https`.
+24. Token redaction tests pass.
+25. Fake GitLab integration tests pass.
+26. No runtime Linear dependency remains.
 
 ---
 

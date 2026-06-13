@@ -18,6 +18,7 @@ defmodule SymphonyElixir.Store.WorkflowTest do
     assert {:ok, in_progress} = Store.transition_workflow(issue.id, "in_progress", claimed_by: "agent-1")
     assert in_progress.status == "in_progress"
     assert in_progress.claimed_by == "agent-1"
+    assert {:error, :invalid_status} = Store.transition_workflow(issue.id, "blocked")
 
     assert {:ok, review} = Store.transition_workflow(issue.id, "review", reason: "ready for review")
     assert review.status == "review"
@@ -56,6 +57,105 @@ defmodule SymphonyElixir.Store.WorkflowTest do
     assert {:error, :dependency_cycle} = Store.add_blocker(blocking.id, blocked.id)
   end
 
+  test "dependency blockers derive issue blocked state without changing workflow status" do
+    blocked = seed_issue(30)
+    blocking = seed_issue(31)
+
+    {:ok, _todo} = Store.transition_workflow(blocked.id, "todo", reason: "accepted")
+    {:ok, _blocking_todo} = Store.transition_workflow(blocking.id, "todo", reason: "accepted")
+
+    assert blocked.id in candidate_ids()
+    assert {:ok, _edge} = Store.add_blocker(blocked.id, blocking.id, reason: "waiting on API")
+
+    blocked_issue = Store.get_issue(blocked.id)
+    assert blocked_issue.workflow_status == "todo"
+    assert blocked_issue.is_blocked == true
+    assert blocked_issue.unresolved_blocker_count == 1
+    refute blocked.id in candidate_ids()
+
+    {:ok, _blocking_in_progress} = Store.transition_workflow(blocking.id, "in_progress", reason: "started")
+    {:ok, _blocking_review} = Store.transition_workflow(blocking.id, "review", reason: "ready")
+    {:ok, _blocking_merging} = Store.transition_workflow(blocking.id, "merging", reason: "approved")
+    {:ok, _blocking_done} = Store.transition_workflow(blocking.id, "done", reason: "merged")
+
+    unblocked_issue = Store.get_issue(blocked.id)
+    assert unblocked_issue.workflow_status == "todo"
+    assert unblocked_issue.is_blocked == false
+    assert unblocked_issue.unresolved_blocker_count == 0
+    assert blocked.id in candidate_ids()
+  end
+
+  test "issue relations expose related issues and blocks as separate concepts" do
+    current = seed_issue(35)
+    followup = seed_issue(36)
+
+    {:ok, _current_todo} = Store.transition_workflow(current.id, "todo", reason: "accepted")
+    {:ok, _followup_todo} = Store.transition_workflow(followup.id, "todo", reason: "accepted")
+
+    assert {:ok, relation} =
+             Store.add_issue_relation(current.id, followup.id, "relates_to",
+               source: "agent",
+               actor: "agent",
+               reason: "agent-created follow-up"
+             )
+
+    assert relation.source_issue_id == current.id
+    assert relation.target_issue_id == followup.id
+    assert relation.relation_type == "relates_to"
+
+    current_issue = Store.get_issue(current.id)
+    followup_issue = Store.get_issue(followup.id)
+
+    assert [%{issue_id: related_id}] = current_issue.relations.related
+    assert related_id == followup.id
+    assert [%{issue_id: reverse_related_id}] = followup_issue.relations.related
+    assert reverse_related_id == current.id
+    refute followup_issue.is_blocked
+    assert followup.id in candidate_ids()
+
+    assert {:ok, dependency} =
+             Store.add_issue_relation(current.id, followup.id, "blocks",
+               source: "agent",
+               actor: "agent",
+               reason: "follow-up depends on current issue"
+             )
+
+    assert dependency.blocking_issue_id == current.id
+    assert dependency.blocked_issue_id == followup.id
+
+    current_issue = Store.get_issue(current.id)
+    followup_issue = Store.get_issue(followup.id)
+
+    assert [%{issue_id: blocked_id}] = current_issue.relations.blocks
+    assert blocked_id == followup.id
+    assert [%{issue_id: blocker_id}] = followup_issue.relations.blocked_by
+    assert blocker_id == current.id
+    assert followup_issue.is_blocked
+    refute followup.id in candidate_ids()
+  end
+
+  test "runtime blocks derive issue blocked state without changing workflow status" do
+    issue = seed_issue(40)
+
+    {:ok, _todo} = Store.transition_workflow(issue.id, "todo", reason: "accepted")
+    {:ok, _in_progress} = Store.transition_workflow(issue.id, "in_progress", reason: "started")
+    {:ok, run} = Store.create_run(issue.id, %{status: "running", mode: "workflow"})
+
+    assert {:ok, block} = Store.create_runtime_block(issue.id, "operator_input", "Need approval", %{}, run.id)
+
+    blocked_issue = Store.get_issue(issue.id)
+    assert blocked_issue.workflow_status == "in_progress"
+    assert blocked_issue.is_blocked == true
+    assert blocked_issue.open_runtime_block_count == 1
+
+    assert {:ok, _resolved} = Store.resolve_runtime_block(block.id)
+
+    unblocked_issue = Store.get_issue(issue.id)
+    assert unblocked_issue.workflow_status == "in_progress"
+    assert unblocked_issue.is_blocked == false
+    assert unblocked_issue.open_runtime_block_count == 0
+  end
+
   defp seed_issue(iid) do
     Store.upsert_issue(%{
       gitlab_issue_id: 90_000 + iid,
@@ -70,6 +170,11 @@ defmodule SymphonyElixir.Store.WorkflowTest do
       assignees: [],
       raw_gitlab: %{}
     })
+  end
+
+  defp candidate_ids do
+    Store.list_candidate_tracker_issues([], ["todo"])
+    |> Enum.map(& &1.id)
   end
 
   defp project_attrs do

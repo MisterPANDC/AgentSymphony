@@ -28,6 +28,7 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
                   <div className="mt-2 flex items-center gap-2">
                     <GitLabMeta issue={issue} />
                     <StatusSelect issueId={issue.id} value={issue.workflowStatus} />
+                    {issue.isBlocked && <span className="status-pill blocked">blocked</span>}
                   </div>
                 </div>
                 <Dialog.Close className="icon-button" title="Close">

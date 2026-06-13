@@ -10,7 +10,6 @@ const commands = [
   { label: "Agents", description: "Agent capacity and run history", to: "/agents" },
   { label: "Runs", description: "Run history", to: "/runs" },
   { label: "Run Monitor", description: "Runtime health and active work", to: "/monitor" },
-  { label: "Blocks", description: "Operator input queue", to: "/monitor/blocks" },
   { label: "GitLab Settings", description: "GitLab connection settings", to: "/settings/gitlab" },
   { label: "Workflow Settings", description: "Workflow rules and limits", to: "/settings/workflow" }
 ];

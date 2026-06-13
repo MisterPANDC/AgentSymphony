@@ -25,7 +25,7 @@ export function AppRoutes() {
         <Route path="monitor" element={<RunMonitorPage />} />
         <Route path="monitor/runs" element={<RunsPage />} />
         <Route path="monitor/runs/:runId" element={<RunsPage />} />
-        <Route path="monitor/blocks" element={<RunMonitorPage />} />
+        <Route path="monitor/blocks" element={<Navigate to="/monitor" replace />} />
         <Route path="monitor/sync" element={<RunMonitorPage />} />
         <Route path="settings/gitlab" element={<GitLabSettingsPage />} />
         <Route path="settings/workflow" element={<WorkflowSettingsPage />} />

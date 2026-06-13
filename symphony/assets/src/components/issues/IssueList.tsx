@@ -3,19 +3,19 @@ import { useQuery } from "@tanstack/react-query";
 import { Filter, RefreshCcw } from "lucide-react";
 import { listIssues } from "../../api/issues";
 import { refreshSync } from "../../api/sync";
-import type { IssueDTO, WorkflowStatus } from "../../types/issue";
+import { issueStatusFilters, type IssueDTO, type IssueStatusFilter } from "../../types/issue";
 import { IssueDetailDrawer } from "./IssueDetailDrawer";
 import { IssueRow } from "./IssueRow";
 
 export function IssueList() {
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<WorkflowStatus | "all">("all");
+  const [status, setStatus] = useState<IssueStatusFilter>("all");
   const [selected, setSelected] = useState<IssueDTO | null>(null);
   const { data, isLoading, refetch } = useQuery({ queryKey: ["issues"], queryFn: () => listIssues() });
 
   const issues = useMemo(() => {
     return (data?.issues ?? []).filter((issue) => {
-      const matchesStatus = status === "all" || issue.workflowStatus === status;
+      const matchesStatus = status === "all" || (status === "blocked" ? issue.isBlocked : issue.workflowStatus === status);
       const haystack = `${issue.identifier} ${issue.title} ${issue.descriptionPreview ?? ""}`.toLowerCase();
       return matchesStatus && haystack.includes(search.toLowerCase());
     });
@@ -32,8 +32,8 @@ export function IssueList() {
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 sm:flex-none sm:flex-nowrap">
             <div className="text-button flex-1 sm:flex-none">
               <Filter size={14} />
-              <select className="min-w-0 flex-1 bg-transparent outline-none" value={status} onChange={(event) => setStatus(event.target.value as WorkflowStatus | "all")}>
-                {["all", "triage", "todo", "in_progress", "blocked", "review", "merging", "rework", "done", "canceled"].map((item) => (
+              <select className="min-w-0 flex-1 bg-transparent outline-none" value={status} onChange={(event) => setStatus(event.target.value as IssueStatusFilter)}>
+                {issueStatusFilters.map((item) => (
                   <option key={item} value={item}>
                     {item.replace("_", " ")}
                   </option>

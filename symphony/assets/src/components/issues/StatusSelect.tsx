@@ -1,8 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { updateIssueWorkflow } from "../../api/issues";
-import type { WorkflowStatus } from "../../types/issue";
-
-const statuses: WorkflowStatus[] = ["triage", "todo", "in_progress", "blocked", "review", "merging", "rework", "done", "canceled"];
+import { workflowStatuses, type WorkflowStatus } from "../../types/issue";
 
 export function StatusSelect({ issueId, value }: { issueId: string; value: WorkflowStatus }) {
   const queryClient = useQueryClient();
@@ -20,7 +18,7 @@ export function StatusSelect({ issueId, value }: { issueId: string; value: Workf
       value={value}
       onChange={(event) => mutation.mutate(event.target.value as WorkflowStatus)}
     >
-      {statuses.map((status) => (
+      {workflowStatuses.map((status) => (
         <option key={status} value={status}>
           {status.replace("_", " ")}
         </option>

@@ -4,11 +4,13 @@ defmodule SymphonyElixir.Codex.DynamicTool do
   """
 
   alias SymphonyElixir.{Store, Sync.Poller, Tracker}
+  alias SymphonyElixir.Persistence.WorkflowState
 
   @current_issue_tool "gitlab_current_issue"
   @get_notes_tool "get_current_issue_notes"
   @create_note_tool "create_current_issue_note"
   @update_state_tool "update_current_issue_state"
+  @create_followup_tool "create_followup_issue"
 
   @spec execute(String.t() | nil, term(), keyword()) :: map()
   def execute(tool, arguments, opts \\ []) do
@@ -17,6 +19,7 @@ defmodule SymphonyElixir.Codex.DynamicTool do
       @get_notes_tool -> current_issue_notes_response(opts)
       @create_note_tool -> create_current_issue_note(arguments, opts)
       @update_state_tool -> update_current_issue_state(arguments, opts)
+      @create_followup_tool -> create_followup_issue(arguments, opts)
       other -> unsupported_tool_response(other)
     end
   end
@@ -56,9 +59,40 @@ defmodule SymphonyElixir.Codex.DynamicTool do
           "properties" => %{
             "status" => %{
               "type" => "string",
-              "enum" => ["triage", "todo", "in_progress", "blocked", "review", "merging", "rework", "done", "canceled"]
+              "enum" => WorkflowState.statuses()
             },
             "reason" => %{"type" => ["string", "null"]}
+          }
+        }
+      },
+      %{
+        "name" => @create_followup_tool,
+        "description" => "Create a scoped GitLab follow-up issue for out-of-scope work discovered while handling the current issue. The new issue is initialized in Symphony as triage.",
+        "inputSchema" => %{
+          "type" => "object",
+          "additionalProperties" => false,
+          "required" => ["title", "description", "acceptance_criteria"],
+          "properties" => %{
+            "title" => %{"type" => "string", "description" => "Clear title for the follow-up issue."},
+            "description" => %{"type" => "string", "description" => "Follow-up issue body without expanding current issue scope."},
+            "acceptance_criteria" => %{
+              "type" => ["string", "array"],
+              "description" => "Concrete completion criteria for the follow-up issue.",
+              "items" => %{"type" => "string"}
+            },
+            "labels" => %{"type" => "array", "items" => %{"type" => "string"}},
+            "assignee_ids" => %{"type" => "array", "items" => %{"type" => "integer"}},
+            "milestone_id" => %{"type" => ["integer", "null"]},
+            "due_date" => %{"type" => ["string", "null"], "description" => "ISO-8601 date, YYYY-MM-DD."},
+            "confidential" => %{"type" => ["boolean", "null"]},
+            "related_to_current_issue" => %{
+              "type" => ["boolean", "null"],
+              "description" => "Defaults to true. Creates a local related relation and links back to the current issue."
+            },
+            "blocked_by_current_issue" => %{
+              "type" => ["boolean", "null"],
+              "description" => "When true, the current issue blocks the new follow-up issue."
+            }
           }
         }
       }
@@ -110,6 +144,16 @@ defmodule SymphonyElixir.Codex.DynamicTool do
     end
   end
 
+  defp create_followup_issue(arguments, opts) do
+    with {:ok, issue_id} <- current_issue_id(opts),
+         {:ok, attrs} <- followup_attrs(arguments),
+         {:ok, result} <- Tracker.create_followup_issue(issue_id, attrs) do
+      success_response(result)
+    else
+      {:error, reason} -> failure_response(%{error: %{message: inspect(reason)}})
+    end
+  end
+
   defp current_issue_id(opts) do
     case Keyword.get(opts, :current_issue) do
       %{id: issue_id} when is_binary(issue_id) -> {:ok, issue_id}
@@ -131,6 +175,51 @@ defmodule SymphonyElixir.Codex.DynamicTool do
   end
 
   defp workflow_status(_arguments), do: {:error, :missing_workflow_status}
+
+  defp followup_attrs(arguments) when is_map(arguments) do
+    attrs = %{
+      title: argument_value(arguments, "title"),
+      description: argument_value(arguments, "description"),
+      acceptance_criteria: argument_value(arguments, "acceptance_criteria"),
+      labels: argument_value(arguments, "labels"),
+      assignee_ids: argument_value(arguments, "assignee_ids"),
+      milestone_id: argument_value(arguments, "milestone_id"),
+      due_date: argument_value(arguments, "due_date"),
+      confidential: argument_value(arguments, "confidential"),
+      related_to_current_issue: argument_value(arguments, "related_to_current_issue"),
+      blocked_by_current_issue: argument_value(arguments, "blocked_by_current_issue")
+    }
+
+    with :ok <- require_nonempty(attrs.title, :title),
+         :ok <- require_nonempty(attrs.description, :description),
+         :ok <- require_acceptance_criteria(attrs.acceptance_criteria) do
+      {:ok, attrs}
+    end
+  end
+
+  defp followup_attrs(_arguments), do: {:error, :invalid_followup_arguments}
+
+  defp argument_value(arguments, key) do
+    Map.get(arguments, key, Map.get(arguments, String.to_atom(key)))
+  end
+
+  defp require_nonempty(value, field) when is_binary(value) do
+    if String.trim(value) == "", do: {:error, {:missing_required_followup_field, field}}, else: :ok
+  end
+
+  defp require_nonempty(_value, field), do: {:error, {:missing_required_followup_field, field}}
+
+  defp require_acceptance_criteria(value) when is_binary(value), do: require_nonempty(value, :acceptance_criteria)
+
+  defp require_acceptance_criteria(value) when is_list(value) do
+    if Enum.any?(value, &(is_binary(&1) and String.trim(&1) != "")) do
+      :ok
+    else
+      {:error, {:missing_required_followup_field, :acceptance_criteria}}
+    end
+  end
+
+  defp require_acceptance_criteria(_value), do: {:error, {:missing_required_followup_field, :acceptance_criteria}}
 
   defp maybe_close_done_issue(issue_id, status) do
     if normalize_workflow_status(status) == "done", do: Tracker.close_issue(issue_id), else: :ok

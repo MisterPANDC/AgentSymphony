@@ -18,7 +18,11 @@ defmodule SymphonyElixirWeb.DTO do
       priority: issue.priority,
       labels: issue.labels || [],
       assignees: issue.assignees || [],
-      blockers: issue.blockers || [],
+      blockers: (issue.blockers || []) |> Enum.map(&issue_ref/1),
+      relations: relations(issue.relations || %{}),
+      isBlocked: issue.is_blocked || false,
+      unresolvedBlockerCount: issue.unresolved_blocker_count || 0,
+      openRuntimeBlockCount: issue.open_runtime_block_count || 0,
       blockedByCount: issue.blocked_by_count || 0,
       activeRunId: issue.active_run_id,
       lastRunStatus: issue.last_run_status,
@@ -88,8 +92,34 @@ defmodule SymphonyElixirWeb.DTO do
     }
   end
 
+  @spec issue_ref(map()) :: map()
+  def issue_ref(ref) when is_map(ref) do
+    %{
+      issueId: ref[:issue_id] || ref["issue_id"] || ref[:id] || ref["id"],
+      iid: ref[:iid] || ref["iid"],
+      identifier: ref[:identifier] || ref["identifier"],
+      title: ref[:title] || ref["title"],
+      status: ref[:status] || ref["status"],
+      reason: ref[:reason] || ref["reason"],
+      relationType: ref[:relation_type] || ref["relation_type"],
+      direction: ref[:direction] || ref["direction"]
+    }
+  end
+
   defp iso(%DateTime{} = datetime), do: datetime |> DateTime.truncate(:second) |> DateTime.to_iso8601()
   defp iso(%Date{} = date), do: Date.to_iso8601(date)
   defp iso(value) when is_binary(value), do: value
   defp iso(_value), do: nil
+
+  defp relations(relations) do
+    %{
+      related: relations |> relation_items(:related) |> Enum.map(&issue_ref/1),
+      blocks: relations |> relation_items(:blocks) |> Enum.map(&issue_ref/1),
+      blockedBy: relations |> relation_items(:blocked_by) |> Enum.map(&issue_ref/1)
+    }
+  end
+
+  defp relation_items(relations, key) when is_map(relations) do
+    Map.get(relations, key) || Map.get(relations, to_string(key)) || []
+  end
 end

@@ -13,6 +13,7 @@ defmodule SymphonyElixir.Store.Postgres do
   alias SymphonyElixir.Persistence.IssueDependency
   alias SymphonyElixir.Persistence.IssueEvent
   alias SymphonyElixir.Persistence.IssueNote
+  alias SymphonyElixir.Persistence.IssueRelation
   alias SymphonyElixir.Persistence.ProjectSetting
   alias SymphonyElixir.Persistence.RuntimeBlock
   alias SymphonyElixir.Persistence.SyncCursor
@@ -23,6 +24,7 @@ defmodule SymphonyElixir.Store.Postgres do
   @workflow_statuses WorkflowState.statuses()
   @priorities WorkflowState.priorities()
   @block_types RuntimeBlock.block_types()
+  @relation_types IssueRelation.relation_types()
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(_opts \\ []) do
@@ -147,6 +149,7 @@ defmodule SymphonyElixir.Store.Postgres do
     list_issues(gitlab_state: "opened")
     |> Enum.filter(&MapSet.member?(active_statuses, &1.workflow_status))
     |> Enum.reject(&unresolved_dependency?(&1.id))
+    |> Enum.reject(&(open_runtime_block_count(&1.id) > 0))
     |> Enum.filter(&labels_satisfy?(&1.labels, required_labels))
     |> Enum.reject(&active_run_id(&1.id))
     |> Enum.map(&tracker_issue/1)
@@ -285,7 +288,11 @@ defmodule SymphonyElixir.Store.Postgres do
           )
           |> plain()
 
-        append_event("dependency_added", "local_ui", Map.take(edge, [:blocking_issue_id, :reason]), issue_id: blocked_issue_id)
+        append_event("dependency_added", Keyword.get(opts, :source, "local_ui"), Map.take(edge, [:blocking_issue_id, :reason]),
+          issue_id: blocked_issue_id,
+          actor: Keyword.get(opts, :actor, "local_operator")
+        )
+
         {:ok, edge}
     end
   end
@@ -305,6 +312,60 @@ defmodule SymphonyElixir.Store.Postgres do
         Repo.delete!(edge)
         append_event("dependency_removed", "local_ui", %{blocking_issue_id: blocking_issue_id}, issue_id: blocked_issue_id)
         :ok
+    end
+  end
+
+  @spec list_issue_relations(String.t()) :: map()
+  def list_issue_relations(issue_id) do
+    %{
+      related: related_issue_dtos(issue_id),
+      blocks: blocked_issue_dtos(issue_id),
+      blocked_by: blocker_dtos(issue_id)
+    }
+  end
+
+  @spec add_issue_relation(String.t(), String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def add_issue_relation(source_issue_id, target_issue_id, relation_type, opts \\ []) do
+    relation_type = normalize_relation_type(relation_type)
+
+    cond do
+      relation_type not in @relation_types ->
+        {:error, :invalid_relation_type}
+
+      source_issue_id == target_issue_id ->
+        {:error, :self_relation}
+
+      is_nil(Repo.get(Issue, source_issue_id)) or is_nil(Repo.get(Issue, target_issue_id)) ->
+        {:error, :issue_not_found}
+
+      true ->
+        attrs = %{
+          source_issue_id: source_issue_id,
+          target_issue_id: target_issue_id,
+          relation_type: relation_type,
+          created_by: Keyword.get(opts, :actor, "local_operator"),
+          reason: Keyword.get(opts, :reason),
+          metadata: Keyword.get(opts, :metadata, %{}) || %{}
+        }
+
+        relation =
+          %IssueRelation{}
+          |> IssueRelation.changeset(attrs)
+          |> Repo.insert!(
+            on_conflict: {:replace, [:reason, :created_by, :metadata, :updated_at]},
+            conflict_target: [:source_issue_id, :target_issue_id, :relation_type]
+          )
+          |> plain()
+
+        append_event(
+          "issue_relation_added",
+          Keyword.get(opts, :source, "local_ui"),
+          Map.take(relation, [:target_issue_id, :relation_type, :reason, :metadata]),
+          issue_id: source_issue_id,
+          actor: Keyword.get(opts, :actor, "local_operator")
+        )
+
+        {:ok, relation}
     end
   end
 
@@ -574,6 +635,8 @@ defmodule SymphonyElixir.Store.Postgres do
   defp decorate_issue(%Issue{} = issue) do
     workflow = ensure_workflow_state(issue.id)
     plain_issue = plain(issue)
+    unresolved_blocker_count = unresolved_blocker_count(issue.id)
+    open_runtime_block_count = open_runtime_block_count(issue.id)
 
     plain_issue
     |> Map.put(:identifier, issue_identifier(issue))
@@ -581,6 +644,10 @@ defmodule SymphonyElixir.Store.Postgres do
     |> Map.put(:workflow_status, workflow.status)
     |> Map.put(:priority, workflow.priority)
     |> Map.put(:blockers, blocker_dtos(issue.id))
+    |> Map.put(:relations, list_issue_relations(issue.id))
+    |> Map.put(:is_blocked, unresolved_blocker_count > 0 or open_runtime_block_count > 0 or blocked_run?(issue.id))
+    |> Map.put(:unresolved_blocker_count, unresolved_blocker_count)
+    |> Map.put(:open_runtime_block_count, open_runtime_block_count)
     |> Map.put(:blocked_by_count, blocked_by_count(issue.id))
     |> Map.put(:active_run_id, active_run_id(issue.id))
     |> Map.put(:last_run_status, last_run_status(issue.id))
@@ -590,7 +657,20 @@ defmodule SymphonyElixir.Store.Postgres do
   defp maybe_decorate_issue(issue), do: decorate_issue(issue)
 
   defp undecorate(issue) when is_map(issue) do
-    Map.drop(issue, [:identifier, :workflow_state, :workflow_status, :priority, :blockers, :blocked_by_count, :active_run_id, :last_run_status])
+    Map.drop(issue, [
+      :identifier,
+      :workflow_state,
+      :workflow_status,
+      :priority,
+      :blockers,
+      :relations,
+      :is_blocked,
+      :unresolved_blocker_count,
+      :open_runtime_block_count,
+      :blocked_by_count,
+      :active_run_id,
+      :last_run_status
+    ])
   end
 
   defp tracker_issue(issue) when is_map(issue) do
@@ -615,6 +695,9 @@ defmodule SymphonyElixir.Store.Postgres do
       web_url: issue.web_url,
       labels: issue.labels || [],
       assignees: issue.assignees || [],
+      is_blocked: issue.is_blocked || false,
+      unresolved_blocker_count: issue.unresolved_blocker_count || 0,
+      open_runtime_block_count: issue.open_runtime_block_count || 0,
       blockers: issue.blockers || [],
       blocked_by: blocker_refs(issue.id),
       notes_summary: notes_summary(issue.id),
@@ -659,6 +742,63 @@ defmodule SymphonyElixir.Store.Postgres do
     end)
   end
 
+  defp blocked_issue_dtos(issue_id) do
+    from(e in IssueDependency,
+      join: i in Issue,
+      on: i.id == e.blocked_issue_id,
+      join: w in WorkflowState,
+      on: w.gitlab_issue_id == i.id,
+      where: e.blocking_issue_id == ^issue_id,
+      select: {e, i, w}
+    )
+    |> Repo.all()
+    |> Enum.map(fn {edge, issue, workflow} ->
+      %{
+        issue_id: issue.id,
+        iid: issue.iid,
+        identifier: issue_identifier(issue),
+        title: issue.title,
+        status: workflow.status,
+        reason: edge.reason
+      }
+    end)
+  end
+
+  defp related_issue_dtos(issue_id) do
+    IssueRelation
+    |> where([r], r.relation_type == "relates_to" and (r.source_issue_id == ^issue_id or r.target_issue_id == ^issue_id))
+    |> order_by([r], asc: r.inserted_at)
+    |> Repo.all()
+    |> Enum.map(fn relation ->
+      related_issue_id =
+        if relation.source_issue_id == issue_id do
+          relation.target_issue_id
+        else
+          relation.source_issue_id
+        end
+
+      case Repo.get(Issue, related_issue_id) do
+        nil ->
+          nil
+
+        issue ->
+          workflow = ensure_workflow_state(issue.id)
+
+          %{
+            issue_id: issue.id,
+            iid: issue.iid,
+            identifier: issue_identifier(issue),
+            title: issue.title,
+            status: workflow.status,
+            reason: relation.reason,
+            relation_type: relation.relation_type,
+            direction: if(relation.source_issue_id == issue_id, do: "outgoing", else: "incoming")
+          }
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
   defp blocker_refs(issue_id) do
     blocker_dtos(issue_id)
     |> Enum.map(&%{id: &1.issue_id, identifier: &1.identifier, state: &1.status})
@@ -668,9 +808,30 @@ defmodule SymphonyElixir.Store.Postgres do
     Repo.one(from(e in IssueDependency, where: e.blocking_issue_id == ^issue_id, select: count(e.id)))
   end
 
-  defp unresolved_dependency?(issue_id) do
+  defp unresolved_blocker_count(issue_id) do
     blocker_dtos(issue_id)
-    |> Enum.any?(&(&1.status != "done"))
+    |> Enum.count(&(&1.status != "done"))
+  end
+
+  defp open_runtime_block_count(issue_id) do
+    Repo.one(
+      from(b in RuntimeBlock,
+        where: b.gitlab_issue_id == ^issue_id and is_nil(b.resolved_at),
+        select: count(b.id)
+      )
+    )
+  end
+
+  defp blocked_run?(issue_id) do
+    Repo.exists?(
+      from(r in AgentRun,
+        where: r.gitlab_issue_id == ^issue_id and r.status == "blocked"
+      )
+    )
+  end
+
+  defp unresolved_dependency?(issue_id) do
+    unresolved_blocker_count(issue_id) > 0
   end
 
   defp dependency_path?(from_issue_id, target_issue_id) do
@@ -681,6 +842,9 @@ defmodule SymphonyElixir.Store.Postgres do
 
     do_dependency_path?(graph, from_issue_id, target_issue_id, MapSet.new())
   end
+
+  defp normalize_relation_type(type) when is_binary(type), do: type |> String.trim() |> String.downcase()
+  defp normalize_relation_type(type), do: to_string(type) |> normalize_relation_type()
 
   defp do_dependency_path?(_graph, issue_id, issue_id, _seen), do: true
 
@@ -773,6 +937,7 @@ defmodule SymphonyElixir.Store.Postgres do
   defp apply_issue_filters(issues, filters) do
     Enum.filter(issues, fn issue ->
       Enum.all?(filters, fn
+        {:status, "blocked"} -> issue.is_blocked == true
         {:status, status} -> issue.workflow_status == status
         {:gitlab_state, state} -> issue.gitlab_state == state
         {:search, search} -> issue_matches_search?(issue, search)
@@ -823,12 +988,11 @@ defmodule SymphonyElixir.Store.Postgres do
   defp allowed_transition?(from, _to) when from in ["done", "canceled"], do: false
   defp allowed_transition?(_from, "canceled"), do: true
   defp allowed_transition?("triage", "todo"), do: true
-  defp allowed_transition?("todo", status), do: status in ["in_progress", "blocked"]
-  defp allowed_transition?("in_progress", status), do: status in ["blocked", "review", "todo"]
-  defp allowed_transition?("blocked", status), do: status in ["todo", "canceled"]
+  defp allowed_transition?("todo", status), do: status in ["in_progress"]
+  defp allowed_transition?("in_progress", status), do: status in ["review", "todo"]
   defp allowed_transition?("review", status), do: status in ["todo", "merging", "rework"]
-  defp allowed_transition?("merging", status), do: status in ["done", "blocked", "review"]
-  defp allowed_transition?("rework", status), do: status in ["in_progress", "blocked", "review"]
+  defp allowed_transition?("merging", status), do: status in ["done", "review"]
+  defp allowed_transition?("rework", status), do: status in ["in_progress", "review"]
   defp allowed_transition?(_from, _to), do: false
 
   defp priority_rank("urgent"), do: 1

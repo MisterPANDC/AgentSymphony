@@ -14,6 +14,7 @@ export function IssueRow({ issue, onOpen }: { issue: IssueDTO; onOpen: (issue: I
       queryClient.invalidateQueries({ queryKey: ["runs"] });
     }
   });
+  const runDisabled = issue.isBlocked || runMutation.isPending;
 
   return (
     <tr className="hover:bg-[#f8fafc]">
@@ -27,6 +28,7 @@ export function IssueRow({ issue, onOpen }: { issue: IssueDTO; onOpen: (issue: I
           {issue.title}
         </button>
         <div className="mt-1 flex flex-wrap gap-1">
+          {issue.isBlocked && <span className="status-pill blocked">blocked</span>}
           {issue.labels.slice(0, 5).map((label) => (
             <span key={label} className="status-pill">
               {label}
@@ -41,7 +43,7 @@ export function IssueRow({ issue, onOpen }: { issue: IssueDTO; onOpen: (issue: I
         <GitLabMeta issue={issue} />
       </td>
       <td className="w-[48px] text-right">
-        <button className="icon-button" title="Start agent" onClick={() => runMutation.mutate()}>
+        <button className="icon-button" title={issue.isBlocked ? "Issue is blocked" : "Start agent"} disabled={runDisabled} onClick={() => runMutation.mutate()}>
           <Play size={14} />
         </button>
       </td>

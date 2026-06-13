@@ -22,6 +22,11 @@ defmodule Symphony.GitLab.Client do
     request(config, :get, project_path(config) <> "/issues/#{issue_iid}", [])
   end
 
+  @spec create_project_issue(Config.t(), map()) :: {:ok, map()} | {:error, Error.t()}
+  def create_project_issue(%Config{} = config, attrs) when is_map(attrs) do
+    request(config, :post, project_path(config) <> "/issues", json: attrs)
+  end
+
   @spec update_project_issue(Config.t(), integer() | String.t(), map()) ::
           {:ok, map()} | {:error, Error.t()}
   def update_project_issue(%Config{} = config, issue_iid, attrs) when is_map(attrs) do

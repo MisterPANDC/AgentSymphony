@@ -2,10 +2,11 @@ defmodule SymphonyElixirWeb.WorkflowController do
   use Phoenix.Controller, formats: [:json]
 
   alias Plug.Conn
+  alias SymphonyElixir.Persistence.WorkflowState
   alias SymphonyElixir.{Store, Tracker}
   alias SymphonyElixirWeb.DTO
 
-  @statuses ~w(triage todo in_progress blocked review merging rework done canceled)
+  @statuses WorkflowState.statuses()
   @priorities ~w(none low medium high urgent)
   @dispatch_candidate_statuses ~w(todo in_progress merging rework)
 
@@ -38,7 +39,7 @@ defmodule SymphonyElixirWeb.WorkflowController do
   def blockers(conn, %{"id" => id}) do
     case find_issue(id) do
       nil -> error(conn, 404, "issue_not_found", "Issue not found")
-      issue -> json(conn, %{blockers: Store.list_blockers(issue.id)})
+      issue -> json(conn, %{blockers: Store.list_blockers(issue.id) |> Enum.map(&DTO.issue_ref/1)})
     end
   end
 
@@ -47,7 +48,7 @@ defmodule SymphonyElixirWeb.WorkflowController do
     with %{} = issue <- find_issue(id),
          %{} = blocking_issue <- find_issue(blocking_id),
          {:ok, _edge} <- Store.add_blocker(issue.id, blocking_issue.id, reason: params["reason"]) do
-      json(conn, %{blockers: Store.list_blockers(issue.id)})
+      json(conn, %{blockers: Store.list_blockers(issue.id) |> Enum.map(&DTO.issue_ref/1)})
     else
       nil -> error(conn, 404, "issue_not_found", "Issue not found")
       {:error, reason} -> error(conn, 422, "blocker_add_failed", inspect(reason))
@@ -61,7 +62,7 @@ defmodule SymphonyElixirWeb.WorkflowController do
     with %{} = issue <- find_issue(id),
          %{} = blocking_issue <- find_issue(blocking_id),
          :ok <- Store.remove_blocker(issue.id, blocking_issue.id) do
-      json(conn, %{blockers: Store.list_blockers(issue.id)})
+      json(conn, %{blockers: Store.list_blockers(issue.id) |> Enum.map(&DTO.issue_ref/1)})
     else
       nil -> error(conn, 404, "issue_not_found", "Issue not found")
       {:error, reason} -> error(conn, 422, "blocker_remove_failed", inspect(reason))

@@ -45,6 +45,7 @@ Issue context:
 - Title: {{ issue.title }}
 - GitLab state: {{ issue.gitlab_state }}
 - Internal workflow status: {{ issue.workflow_status }}
+- Blocked: {{ issue.is_blocked }}
 - Labels: {{ issue.labels }}
 - Assignees: {{ issue.assignees }}
 - URL: {{ issue.web_url }}
@@ -74,12 +75,14 @@ Instructions:
    - `get_current_issue_notes`
    - `create_current_issue_note`
    - `update_current_issue_state`
+   - `create_followup_issue`
 3. Do not read or ask for GitLab tokens. Symphony owns GitLab API access on the server side.
-4. If blocked by missing permissions, secrets, approval, or external service failure, stop with a concise blocker summary so Symphony can surface it in Run Monitor.
-5. Follow the internal workflow status:
+4. If meaningful out-of-scope follow-up work is discovered, use `create_followup_issue` instead of expanding the current issue scope. Set `blocked_by_current_issue` only when the follow-up depends on this issue being completed first.
+5. If blocked by missing permissions, secrets, approval, or external service failure, stop with a concise blocker summary so Symphony can surface it in Run Monitor.
+6. Follow the internal workflow status:
    - `todo`: move to `in_progress` before active work.
    - `in_progress`: implement, validate, publish/attach merge request evidence, then set status to `review`.
    - `review`: wait for human review or approval; do not continue implementation unless feedback requires it.
    - `merging`: perform the merge/land flow until the merge request is merged, then set status to `done`.
    - `rework`: address reviewer feedback, revalidate, and return to `review`.
-6. Set `done` only after the merge/land flow is complete.
+7. Set `done` only after the merge/land flow is complete.

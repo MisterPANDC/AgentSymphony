@@ -74,6 +74,33 @@ defmodule SymphonyElixir.OrchestratorCompletionTest do
     assert MapSet.member?(state.claimed, issue.id)
   end
 
+  test "operator input blocks run without changing issue workflow status" do
+    issue = seed_issue(304)
+    {:ok, _todo} = Store.transition_workflow(issue.id, "todo", reason: "accepted")
+    {:ok, _in_progress} = Store.transition_workflow(issue.id, "in_progress", reason: "agent dispatch")
+    {:ok, run} = Store.create_run(issue.id, %{status: "running", mode: "workflow", started_at: DateTime.utc_now()})
+
+    running_entry =
+      issue
+      |> running_entry(run)
+      |> Map.merge(%{last_codex_event: :turn_input_required})
+
+    state = Orchestrator.handle_agent_down_for_test(:normal, claimed_state(issue.id), issue.id, running_entry, "session-5")
+
+    updated_issue = Store.get_issue(issue.id)
+    assert updated_issue.workflow_status == "in_progress"
+    assert updated_issue.is_blocked == true
+    assert Store.get_run(run.id).status == "blocked"
+
+    assert Enum.any?(
+             Store.list_open_runtime_blocks(),
+             &(&1.gitlab_issue_id == issue.id and &1.block_type == "operator_input")
+           )
+
+    assert Map.has_key?(state.blocked, issue.id)
+    assert MapSet.member?(state.claimed, issue.id)
+  end
+
   defp claimed_state(issue_id) do
     %State{
       claimed: MapSet.new([issue_id]),

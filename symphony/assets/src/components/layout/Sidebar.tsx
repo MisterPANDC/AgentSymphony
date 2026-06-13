@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { Activity, Bot, Columns3, GitBranch, History, LayoutDashboard, MonitorDot, Settings } from "lucide-react";
+import { Bot, Columns3, GitBranch, History, LayoutDashboard, MonitorDot, Settings } from "lucide-react";
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -8,7 +8,6 @@ const links = [
   { to: "/agents", label: "Agents", icon: Bot },
   { to: "/runs", label: "Runs", icon: History },
   { to: "/monitor", label: "Run Monitor", icon: MonitorDot },
-  { to: "/monitor/blocks", label: "Blocks", icon: Activity },
   { to: "/settings/gitlab", label: "Settings", icon: Settings }
 ];
 

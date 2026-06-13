@@ -10,6 +10,7 @@ defmodule SymphonyElixir.Tracker do
   @callback fetch_issue_states_by_ids([String.t()]) :: {:ok, [term()]} | {:error, term()}
   @callback create_comment(String.t(), String.t()) :: :ok | {:error, term()}
   @callback update_issue_state(String.t(), String.t()) :: :ok | {:error, term()}
+  @callback create_followup_issue(String.t(), map()) :: {:ok, map()} | {:error, term()}
   @callback close_issue(String.t()) :: :ok | {:error, term()}
 
   @spec fetch_candidate_issues() :: {:ok, [term()]} | {:error, term()}
@@ -35,6 +36,11 @@ defmodule SymphonyElixir.Tracker do
   @spec update_issue_state(String.t(), String.t()) :: :ok | {:error, term()}
   def update_issue_state(issue_id, state_name) do
     adapter().update_issue_state(issue_id, state_name)
+  end
+
+  @spec create_followup_issue(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def create_followup_issue(current_issue_id, attrs) do
+    adapter().create_followup_issue(current_issue_id, attrs)
   end
 
   @spec close_issue(String.t()) :: :ok | {:error, term()}

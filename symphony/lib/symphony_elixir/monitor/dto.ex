@@ -171,29 +171,7 @@ defmodule SymphonyElixir.Monitor.DTO do
   end
 
   defp issue_dto(issue) do
-    %{
-      id: issue.id,
-      iid: issue.iid,
-      identifier: issue.identifier,
-      gitlabIssueId: issue.gitlab_issue_id,
-      gitlabProjectId: issue.gitlab_project_id,
-      webUrl: issue.web_url,
-      title: issue.title,
-      description: issue.description,
-      descriptionPreview: issue.description_preview,
-      gitlabState: issue.gitlab_state,
-      workflowStatus: issue.workflow_status,
-      priority: issue.priority,
-      labels: issue.labels || [],
-      assignees: issue.assignees || [],
-      blockers: issue.blockers || [],
-      blockedByCount: issue.blocked_by_count || 0,
-      activeRunId: issue.active_run_id,
-      lastRunStatus: issue.last_run_status,
-      updatedAt: iso(issue.updated_at),
-      gitlabUpdatedAt: iso(issue.gitlab_updated_at),
-      lastSyncAt: iso(issue.last_synced_at)
-    }
+    SymphonyElixirWeb.DTO.issue(issue)
   end
 
   defp run_dto(run) do
