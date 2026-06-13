@@ -9,6 +9,7 @@ defmodule SymphonyElixirWeb.ProjectController do
   alias SymphonyElixir.Auth.{GitLabAccess, TokenManager}
   alias SymphonyElixir.Auth.Config, as: AuthConfig
   alias SymphonyElixir.Store
+  alias SymphonyElixir.Sync.Poller
   alias SymphonyElixirWeb.AuthPlug
 
   @spec index(Conn.t(), map()) :: Conn.t()
@@ -34,6 +35,7 @@ defmodule SymphonyElixirWeb.ProjectController do
          {:ok, project_config} <- GitLabConfig.from_project_setting(project),
          {:ok, membership} <- GitLabAccess.project_membership(project_config, auth_config, user.gitlab_user_id, access_token),
          true <- membership.access_level >= auth_config.min_access_level || {:error, :insufficient_gitlab_access} do
+      :ok = Poller.reset_issue_cursor()
       membership = Store.upsert_project_membership(user.identity_id, project.id, membership)
       updated_user = session_user(user, membership, project)
 

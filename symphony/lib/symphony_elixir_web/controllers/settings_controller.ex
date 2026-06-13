@@ -6,6 +6,7 @@ defmodule SymphonyElixirWeb.SettingsController do
   alias Symphony.GitLab.Config, as: GitLabConfig
   alias SymphonyElixir.Persistence.WorkflowState
   alias SymphonyElixir.Store
+  alias SymphonyElixir.Sync.Poller
   alias SymphonyElixirWeb.AuthPlug
 
   @spec gitlab(Conn.t(), map()) :: Conn.t()
@@ -67,7 +68,8 @@ defmodule SymphonyElixirWeb.SettingsController do
          %{} = project <- AuthPlug.current_project(conn),
          {:ok, config} <- GitLabConfig.from_project_setting(project, token),
          {:ok, _result} <- Client.validate(config, auth: {:private_token, token}),
-         {:ok, project} <- Store.put_project_access_token(project.id, token, current_identity_id(conn)) do
+         {:ok, project} <- Store.put_project_access_token(project.id, token, current_identity_id(conn)),
+         :ok <- Poller.reset_issue_cursor() do
       json(conn, %{ok: true, project: project})
     else
       nil ->

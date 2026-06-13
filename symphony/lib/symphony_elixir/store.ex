@@ -93,6 +93,9 @@ defmodule SymphonyElixir.Store do
   @spec upsert_issue(map()) :: map()
   def upsert_issue(attrs), do: backend().upsert_issue(attrs)
 
+  @spec backfill_issue_project_setting(map()) :: non_neg_integer()
+  def backfill_issue_project_setting(project), do: backend().backfill_issue_project_setting(project)
+
   @spec list_issues(keyword()) :: [map()]
   def list_issues(filters \\ []), do: backend().list_issues(filters)
 

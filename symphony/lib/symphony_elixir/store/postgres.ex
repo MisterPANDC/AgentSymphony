@@ -233,6 +233,27 @@ defmodule SymphonyElixir.Store.Postgres do
     decorate_issue(issue)
   end
 
+  @spec backfill_issue_project_setting(map()) :: non_neg_integer()
+  def backfill_issue_project_setting(project) when is_map(project) do
+    project = atomize_keys(project)
+    project_setting_id = project[:id]
+    gitlab_project_id = parse_int(project[:project_id])
+
+    if is_binary(project_setting_id) and is_integer(gitlab_project_id) do
+      {count, _result} =
+        Issue
+        |> where([i], is_nil(i.gitlab_project_setting_id))
+        |> where([i], i.gitlab_project_id == ^gitlab_project_id)
+        |> Repo.update_all(set: [gitlab_project_setting_id: project_setting_id, updated_at: now()])
+
+      count
+    else
+      0
+    end
+  end
+
+  def backfill_issue_project_setting(_project), do: 0
+
   @spec list_issues(keyword()) :: [map()]
   def list_issues(filters \\ []) do
     Issue

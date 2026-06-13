@@ -29,6 +29,19 @@ defmodule SymphonyElixir.Sync.Poller do
     GenServer.call(__MODULE__, :refresh, 60_000)
   end
 
+  @spec reset_issue_cursor() :: :ok
+  def reset_issue_cursor do
+    Store.put_cursor("gitlab", @issue_cursor, %{
+      cursor_value: nil,
+      last_success_at: nil,
+      last_attempt_at: nil,
+      last_error: nil,
+      last_error_at: nil
+    })
+
+    :ok
+  end
+
   @spec status() :: map()
   def status do
     GenServer.call(__MODULE__, :status)
@@ -103,7 +116,13 @@ defmodule SymphonyElixir.Sync.Poller do
 
       if errors == [] do
         summaries = Enum.map(results, fn {:ok, summary} -> summary end)
-        {:ok, %{projects: summaries, issue_count: Enum.sum(Enum.map(summaries, & &1.issue_count))}}
+
+        {:ok,
+         %{
+           projects: summaries,
+           issue_count: Enum.sum(Enum.map(summaries, & &1.issue_count)),
+           backfilled_issue_count: Enum.sum(Enum.map(summaries, &Map.get(&1, :backfilled_issue_count, 0)))
+         }}
       else
         put_error_cursor(@issue_cursor, hd(errors))
         {:error, {:project_sync_failed, errors}}
@@ -117,10 +136,17 @@ defmodule SymphonyElixir.Sync.Poller do
          :ok <- Client.validate_api_root(config),
          {:ok, raw_project} <- Client.get_project(config, auth: {:private_token, token}),
          project_setting <- upsert_project(config, raw_project),
-         {:ok, issues} <- sync_issues(config),
+         backfilled_issue_count = Store.backfill_issue_project_setting(project_setting),
+         {:ok, issues} <- sync_issues(config, project_setting),
          :ok <- put_success_cursor(@issue_cursor, DateTime.utc_now()) do
       Store.record_event("sync_project_validated", "gitlab_sync", %{project_id: raw_project["id"]})
-      {:ok, %{project_id: project_setting.project_id, issue_count: length(issues)}}
+
+      {:ok,
+       %{
+         project_id: project_setting.project_id,
+         issue_count: length(issues),
+         backfilled_issue_count: backfilled_issue_count
+       }}
     end
   end
 
@@ -139,7 +165,7 @@ defmodule SymphonyElixir.Sync.Poller do
     })
   end
 
-  defp sync_issues(config) do
+  defp sync_issues(config, project_setting) do
     params =
       %{
         state: "all",
@@ -154,6 +180,7 @@ defmodule SymphonyElixir.Sync.Poller do
         Enum.map(raw_issues, fn raw ->
           raw
           |> IssueMapper.from_gitlab()
+          |> Map.put(:gitlab_project_setting_id, project_setting.id)
           |> Store.upsert_issue()
         end)
 

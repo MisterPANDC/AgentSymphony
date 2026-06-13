@@ -98,6 +98,9 @@ defmodule SymphonyElixir.Store.Json do
   @spec upsert_issue(map()) :: map()
   def upsert_issue(attrs), do: call({:upsert_issue, attrs})
 
+  @spec backfill_issue_project_setting(map()) :: non_neg_integer()
+  def backfill_issue_project_setting(project), do: call({:backfill_issue_project_setting, project})
+
   @spec list_issues(keyword()) :: [map()]
   def list_issues(filters \\ []), do: call({:list_issues, filters})
 
@@ -340,6 +343,12 @@ defmodule SymphonyElixir.Store.Json do
       |> persist()
 
     {:reply, decorate_issue(state, issue), state}
+  end
+
+  def handle_call({:backfill_issue_project_setting, project}, _from, state) do
+    {state, count} = backfill_issue_project_setting(state, project)
+    state = if count > 0, do: persist(state), else: state
+    {:reply, count, state}
   end
 
   def handle_call({:list_issues, filters}, _from, state) do
@@ -906,6 +915,47 @@ defmodule SymphonyElixir.Store.Json do
 
   defp identity_key(%{issuer: issuer, gitlab_user_id: gitlab_user_id}), do: "#{issuer}:#{gitlab_user_id}"
   defp membership_key(identity_id, project_setting_id), do: "#{identity_id}:#{project_setting_id}"
+
+  defp backfill_issue_project_setting(state, project) when is_map(project) do
+    project = Map.new(project)
+    project_setting_id = project[:id] || project["id"]
+    gitlab_project_id = project[:project_id] || project["project_id"]
+
+    cond do
+      is_nil(project_setting_id) or is_nil(gitlab_project_id) ->
+        {state, 0}
+
+      true ->
+        now = now()
+
+        {issues, count} =
+          Enum.reduce(state.issues, {%{}, 0}, fn {issue_id, issue}, {issues, count} ->
+            if missing_project_setting_id?(issue) and same_gitlab_project?(issue, gitlab_project_id) do
+              issue =
+                issue
+                |> Map.put(:gitlab_project_setting_id, project_setting_id)
+                |> Map.put(:updated_at, now)
+
+              {Map.put(issues, issue_id, issue), count + 1}
+            else
+              {Map.put(issues, issue_id, issue), count}
+            end
+          end)
+
+        {%{state | issues: issues}, count}
+    end
+  end
+
+  defp backfill_issue_project_setting(state, _project), do: {state, 0}
+
+  defp missing_project_setting_id?(issue) do
+    is_nil(issue[:gitlab_project_setting_id] || issue["gitlab_project_setting_id"])
+  end
+
+  defp same_gitlab_project?(issue, project_id) do
+    issue_project_id = issue[:gitlab_project_id] || issue["gitlab_project_id"] || issue[:project_id] || issue["project_id"]
+    not is_nil(issue_project_id) and to_string(issue_project_id) == to_string(project_id)
+  end
 
   defp project_for_issue_attrs(state, attrs) do
     attrs = Map.new(attrs)
