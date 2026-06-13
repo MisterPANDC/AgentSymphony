@@ -54,6 +54,53 @@ SYMPHONY_BIND_HOST=127.0.0.1
 SYMPHONY_PORT=4000
 ```
 
+`GITLAB_PROJECT_API_URL` 填的是 GitLab REST API endpoint，不是浏览器里的项目页面 URL。它不会直接出现在 GitLab 网页界面中，需要根据项目页面 URL 构造：
+
+```text
+项目页面 URL: https://gitlab.example.com/group/project
+API URL:     https://gitlab.example.com/api/v4/projects/group%2Fproject
+```
+
+规则：
+
+1. 取 GitLab 实例根地址，例如 `https://gitlab.example.com`。
+2. 追加固定路径 `/api/v4/projects/`。
+3. 再追加项目标识。可以使用 numeric project id，也可以使用 namespace path。
+4. 如果使用 namespace path，需要把路径里的 `/` 编码成 `%2F`。例如 `group/project` 写成 `group%2Fproject`，`team/subgroup/app` 写成 `team%2Fsubgroup%2Fapp`。
+
+例如项目页面是：
+
+```text
+https://gitlab.example.com/team/subgroup/app
+```
+
+则推荐配置为：
+
+```env
+GITLAB_PROJECT_API_URL=https://gitlab.example.com/api/v4/projects/team%2Fsubgroup%2Fapp
+```
+
+如果已知 GitLab numeric project id，也可以直接使用 id，避免手工编码路径：
+
+```env
+GITLAB_PROJECT_API_URL=https://gitlab.example.com/api/v4/projects/123
+```
+
+不要把 `/api/v4/projects/...` 拼到项目页面 URL 后面。下面这种写法是错误的，因为 `team/subgroup/app` 是项目网页路径，不是 GitLab 实例根地址，`group%2Fproject` 也只是占位示例：
+
+```env
+GITLAB_PROJECT_API_URL=https://gitlab.example.com/team/subgroup/app/api/v4/projects/group%2Fproject
+```
+
+也可以使用拆分配置，让 Symphony 自动处理 project path 编码：
+
+```env
+GITLAB_BASE_URL=https://gitlab.example.com
+GITLAB_PROJECT_PATH=team/subgroup/app
+# 或使用 numeric id:
+# GITLAB_PROJECT_ID=123
+```
+
 启用 PostgreSQL：
 
 ```env
