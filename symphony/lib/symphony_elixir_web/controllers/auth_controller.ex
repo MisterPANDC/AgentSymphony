@@ -16,7 +16,6 @@ defmodule SymphonyElixirWeb.AuthController do
     json(conn, %{
       auth: %{
         mode: config && config.mode,
-        enabled: config && Config.oidc_enabled?(config),
         loginUrl: "/auth/gitlab",
         logoutUrl: "/auth/logout"
       },
@@ -29,7 +28,6 @@ defmodule SymphonyElixirWeb.AuthController do
   @spec login(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def login(conn, params) do
     with {:ok, config} <- Config.load(),
-         true <- Config.oidc_enabled?(config) || :auth_disabled,
          {:ok, discovery} <- OIDC.discovery(config) do
       state = OIDC.random_url_token()
       nonce = OIDC.random_url_token()
@@ -43,9 +41,6 @@ defmodule SymphonyElixirWeb.AuthController do
       |> put_session(:oidc_return_to, normalize_return_to(params["return_to"]))
       |> redirect(external: OIDC.authorize_url(config, discovery, state, nonce, challenge))
     else
-      :auth_disabled ->
-        redirect(conn, to: "/")
-
       {:error, reason} ->
         auth_failure(conn, 500, "GitLab sign-in is not configured", inspect(reason))
     end
@@ -139,8 +134,7 @@ defmodule SymphonyElixirWeb.AuthController do
       profile_url: identity.profile_url,
       access_level: 0,
       role: "No access",
-      membership_checked_at: System.system_time(:second),
-      local?: false
+      membership_checked_at: System.system_time(:second)
     }
   end
 
@@ -156,8 +150,7 @@ defmodule SymphonyElixirWeb.AuthController do
       profile_url: user[:profile_url],
       access_level: user[:access_level],
       role: user[:role],
-      project_setting_id: user[:project_setting_id],
-      local: user[:local?] == true
+      project_setting_id: user[:project_setting_id]
     }
   end
 
@@ -183,7 +176,6 @@ defmodule SymphonyElixirWeb.AuthController do
   defp session_project(%{project_setting_id: project_setting_id}) when is_binary(project_setting_id),
     do: Store.project_by_id(project_setting_id)
 
-  defp session_project(%{local?: true}), do: Store.project()
   defp session_project(_user), do: nil
 
   defp delete_oidc_session(conn) do

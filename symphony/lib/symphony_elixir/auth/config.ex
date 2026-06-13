@@ -2,11 +2,10 @@ defmodule SymphonyElixir.Auth.Config do
   @moduledoc """
   Runtime authentication configuration.
 
-  Local development keeps the current single-user behaviour. Cloud deployments
-  opt in to GitLab OIDC with `SYMPHONY_AUTH_MODE=gitlab_oidc`.
+  Symphony authenticates users through GitLab OIDC. The mode value is kept in
+  configuration only to make unsupported auth modes fail explicitly.
   """
 
-  alias Symphony.GitLab
   alias SymphonyElixir.Dotenv
 
   defstruct [
@@ -39,7 +38,7 @@ defmodule SymphonyElixir.Auth.Config do
   def load(opts \\ []) do
     if Keyword.get(opts, :load_env_file, true), do: Dotenv.load()
 
-    mode = System.get_env("SYMPHONY_AUTH_MODE") || "local_single_user"
+    mode = System.get_env("SYMPHONY_AUTH_MODE") || "gitlab_oidc"
 
     config = %__MODULE__{
       mode: mode,
@@ -55,28 +54,14 @@ defmodule SymphonyElixir.Auth.Config do
 
     config = %{config | redirect_uri: redirect_uri(config)}
 
-    if oidc_enabled?(config), do: validate_oidc(config), else: {:ok, config}
+    with :ok <- validate_mode(config) do
+      validate_oidc(config)
+    end
   end
 
   @spec oidc_enabled?(t()) :: boolean()
   def oidc_enabled?(%__MODULE__{mode: "gitlab_oidc"}), do: true
   def oidc_enabled?(_config), do: false
-
-  @spec local_user() :: map()
-  def local_user do
-    %{
-      id: "local",
-      provider: "local",
-      username: "local_operator",
-      name: "Local Operator",
-      email: nil,
-      avatar_url: nil,
-      profile_url: nil,
-      access_level: 50,
-      role: "Owner",
-      local?: true
-    }
-  end
 
   @spec role_for_access_level(integer() | nil) :: String.t()
   def role_for_access_level(level) when is_integer(level) do
@@ -93,16 +78,19 @@ defmodule SymphonyElixir.Auth.Config do
 
   def role_for_access_level(_level), do: "No access"
 
+  defp validate_mode(%__MODULE__{mode: "gitlab_oidc"}), do: :ok
+  defp validate_mode(%__MODULE__{mode: mode}), do: {:error, {:unsupported_auth_mode, mode}}
+
   defp validate_oidc(%__MODULE__{} = config) do
     missing =
       [
-        {:GITLAB_OIDC_ISSUER, config.issuer},
-        {:GITLAB_OIDC_CLIENT_ID, config.client_id},
-        {:GITLAB_OIDC_CLIENT_SECRET, config.client_secret},
-        {:SYMPHONY_PUBLIC_URL, config.public_url}
+        {"GITLAB_OIDC_ISSUER or GITLAB_BASE_URL", config.issuer},
+        {"GITLAB_OIDC_CLIENT_ID", config.client_id},
+        {"GITLAB_OIDC_CLIENT_SECRET", config.client_secret},
+        {"SYMPHONY_PUBLIC_URL", config.public_url}
       ]
       |> Enum.filter(fn {_name, value} -> is_nil(value) end)
-      |> Enum.map_join(", ", fn {name, _value} -> Atom.to_string(name) end)
+      |> Enum.map_join(", ", fn {name, _value} -> name end)
 
     if missing == "" do
       {:ok, config}
@@ -113,17 +101,7 @@ defmodule SymphonyElixir.Auth.Config do
 
   defp oidc_issuer do
     blank_to_nil(System.get_env("GITLAB_OIDC_ISSUER")) ||
-      blank_to_nil(System.get_env("GITLAB_BASE_URL")) ||
-      gitlab_base_url_from_project_api_url()
-  end
-
-  defp gitlab_base_url_from_project_api_url do
-    with url when is_binary(url) <- blank_to_nil(System.get_env("GITLAB_PROJECT_API_URL")),
-         {:ok, config} <- GitLab.Config.parse_project_api_url(url) do
-      config.gitlab_base_url
-    else
-      _ -> nil
-    end
+      blank_to_nil(System.get_env("GITLAB_BASE_URL"))
   end
 
   defp public_url do

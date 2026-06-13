@@ -27,11 +27,9 @@ export function UserMenu() {
         <ShieldCheck size={12} />
         {user.role}
       </span>
-      {data.auth.enabled && (
-        <a className="user-chip-logout" href={data.auth.logoutUrl} title="Sign out">
-          <LogOut size={13} />
-        </a>
-      )}
+      <a className="user-chip-logout" href={data.auth.logoutUrl} title="Sign out">
+        <LogOut size={13} />
+      </a>
     </div>
   );
 }

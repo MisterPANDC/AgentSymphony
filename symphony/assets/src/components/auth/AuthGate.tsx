@@ -22,11 +22,15 @@ export function AuthGate({ children }: AuthGateProps) {
 
   const data = session.data;
 
-  if (data?.auth.enabled && !data.user) {
+  if (!data) {
+    return <LoginPage loginUrl="/auth/gitlab" />;
+  }
+
+  if (!data?.user) {
     return <LoginPage loginUrl={data.auth.loginUrl} project={data.project?.path_with_namespace ?? data.project?.name} />;
   }
 
-  if (data?.auth.enabled && data.user && !data.project) {
+  if (!data.project) {
     return <RepoPicker />;
   }
 

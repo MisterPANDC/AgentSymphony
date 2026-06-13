@@ -28,7 +28,7 @@ defmodule SymphonyElixirWeb.AgentController do
   defp find_issue(conn, id) do
     case current_project_setting_id(conn) do
       nil ->
-        Store.get_issue(id) || Store.get_issue_by_iid(id) || Store.get_issue_by_identifier(id)
+        nil
 
       project_id ->
         Store.list_issues(project_setting_id: project_id)
@@ -42,7 +42,6 @@ defmodule SymphonyElixirWeb.AgentController do
 
   defp current_project_setting_id(conn) do
     case AuthPlug.current_user(conn) do
-      %{local?: true} -> nil
       %{project_setting_id: project_setting_id} -> project_setting_id
       _ -> nil
     end

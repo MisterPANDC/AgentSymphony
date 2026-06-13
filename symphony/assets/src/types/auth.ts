@@ -1,5 +1,5 @@
 export interface AuthUser {
-  provider: "gitlab" | "local";
+  provider: "gitlab";
   issuer?: string;
   gitlab_user_id?: string;
   username: string;
@@ -9,13 +9,11 @@ export interface AuthUser {
   profile_url?: string | null;
   access_level: number;
   role: string;
-  local?: boolean;
 }
 
 export interface AuthSession {
   auth: {
     mode: string;
-    enabled: boolean;
     loginUrl: string;
     logoutUrl: string;
   };
@@ -46,6 +44,6 @@ export interface GitLabProject {
   visibility?: string | null;
   last_activity_at?: string | null;
   selected: boolean;
-  local_project_setting_id?: string | null;
+  project_setting_id?: string | null;
   project_access_token_status: "configured" | "missing";
 }

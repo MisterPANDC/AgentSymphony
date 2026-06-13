@@ -81,29 +81,9 @@ defmodule SymphonyElixir.Sync.Poller do
   end
 
   defp run_sync do
-    if System.get_env("SYMPHONY_AUTH_MODE") == "gitlab_oidc" do
-      case Store.projects() do
-        [] -> {:error, :project_not_selected}
-        projects -> sync_projects(projects)
-      end
-    else
-      run_legacy_sync()
-    end
-  end
-
-  defp run_legacy_sync do
-    with {:ok, config} <- Config.load(),
-         :ok <- Client.validate_api_root(config),
-         {:ok, project} <- Client.get_project(config),
-         project_setting <- upsert_project(config, project),
-         {:ok, issues} <- sync_issues(config),
-         :ok <- put_success_cursor(@issue_cursor, DateTime.utc_now()) do
-      Store.record_event("sync_project_validated", "gitlab_sync", %{project_id: project["id"]})
-      {:ok, %{project_id: project_setting.project_id, issue_count: length(issues)}}
-    else
-      {:error, reason} ->
-        put_error_cursor(@issue_cursor, reason)
-        {:error, reason}
+    case Store.projects() do
+      [] -> {:error, :project_not_selected}
+      projects -> sync_projects(projects)
     end
   end
 
@@ -215,18 +195,14 @@ defmodule SymphonyElixir.Sync.Poller do
   end
 
   defp config_for_issue(issue) do
-    cond do
-      is_binary(issue[:gitlab_project_setting_id]) ->
-        with %{} = project <- Store.project_by_id(issue.gitlab_project_setting_id),
-             {:ok, token} <- Store.project_access_token(project.id) do
-          Config.from_project_setting(project, token)
-        else
-          nil -> {:error, :project_not_found}
-          {:error, reason} -> {:error, reason}
-        end
-
-      true ->
-        Config.load()
+    with project_id when is_binary(project_id) <- Map.get(issue, :gitlab_project_setting_id),
+         %{} = project <- Store.project_by_id(project_id),
+         {:ok, token} <- Store.project_access_token(project.id) do
+      Config.from_project_setting(project, token)
+    else
+      nil -> {:error, :project_not_found}
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, :project_access_token_missing}
     end
   end
 
@@ -270,9 +246,15 @@ defmodule SymphonyElixir.Sync.Poller do
   end
 
   defp interval_ms do
-    case Config.load() do
-      {:ok, config} -> config.sync_interval_ms
-      _ -> 60_000
+    case System.get_env("SYMPHONY_SYNC_INTERVAL_MS") do
+      value when is_binary(value) ->
+        case Integer.parse(value) do
+          {int, ""} when int > 0 -> int
+          _ -> 60_000
+        end
+
+      _ ->
+        60_000
     end
   end
 end

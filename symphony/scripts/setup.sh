@@ -7,7 +7,6 @@ cd "$ROOT_DIR"
 INSTALL_SYSTEM_DEPS=0
 SKIP_DB=0
 SKIP_FRONTEND=0
-SKIP_GITLAB_TEST=0
 SKIP_BUILD=0
 RUN_TESTS=0
 
@@ -19,7 +18,6 @@ usage() {
   --install-system-deps   按当前平台尝试安装 elixir、node、postgresql
   --skip-db               跳过 mix ecto.create / mix ecto.migrate
   --skip-frontend         跳过 npm install 和前端构建
-  --skip-gitlab-test      跳过 mix symphony.gitlab.test
   --skip-build            跳过前端 build 和 mix escript.build
   --test                  初始化后运行 mix test
   -h, --help              显示帮助
@@ -36,9 +34,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-frontend)
       SKIP_FRONTEND=1
-      ;;
-    --skip-gitlab-test)
-      SKIP_GITLAB_TEST=1
       ;;
     --skip-build)
       SKIP_BUILD=1
@@ -146,12 +141,6 @@ database_configured() {
     [[ "${SYMPHONY_STORE_BACKEND:-}" == "postgres" ]]
 }
 
-gitlab_configured() {
-  [[ -n "${GITLAB_PROJECT_API_URL:-}" ]] &&
-    [[ -n "${GITLAB_TOKEN:-}" ]] &&
-    [[ "${GITLAB_TOKEN}" != "glpat_xxxxxxxxxxxxxxxxxxxx" ]]
-}
-
 setup_database() {
   if [[ "$SKIP_DB" -eq 1 ]]; then
     step "跳过数据库初始化"
@@ -186,22 +175,6 @@ setup_frontend() {
   fi
 }
 
-setup_gitlab() {
-  if [[ "$SKIP_GITLAB_TEST" -eq 1 ]]; then
-    step "跳过 GitLab 连通性校验"
-    return
-  fi
-
-  if ! gitlab_configured; then
-    step "跳过 GitLab 连通性校验"
-    echo "GITLAB_PROJECT_API_URL 或 GITLAB_TOKEN 未配置，或仍为占位值。"
-    return
-  fi
-
-  step "校验 GitLab 访问"
-  mix symphony.gitlab.test
-}
-
 if [[ "$INSTALL_SYSTEM_DEPS" -eq 1 ]]; then
   install_system_deps
 fi
@@ -227,8 +200,6 @@ if [[ "$SKIP_BUILD" -eq 0 ]]; then
   step "构建 CLI"
   mix escript.build
 fi
-
-setup_gitlab
 
 if [[ "$RUN_TESTS" -eq 1 ]]; then
   step "运行测试"

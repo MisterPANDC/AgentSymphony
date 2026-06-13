@@ -295,19 +295,11 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp gitlab_config_hint do
-    if System.get_env("SYMPHONY_AUTH_MODE") == "gitlab_oidc" do
-      "GitLab project missing. Sign in, choose a repository, then configure its Project Access Token in Symphony settings."
-    else
-      "GitLab configuration missing. Set GITLAB_PROJECT_API_URL and GITLAB_TOKEN."
-    end
+    "GitLab project missing. Sign in, choose a repository, then configure its Project Access Token in Symphony settings."
   end
 
   defp gitlab_token_hint do
-    if System.get_env("SYMPHONY_AUTH_MODE") == "gitlab_oidc" do
-      "GitLab Project Access Token missing. Configure the current repository token in Symphony settings."
-    else
-      "GitLab token missing. Set GITLAB_TOKEN."
-    end
+    "GitLab Project Access Token missing. Configure the current repository token in Symphony settings."
   end
 
   defp reconcile_running_issues(%State{} = state) do

@@ -23,7 +23,7 @@ defmodule SymphonyElixirWeb.WorkflowController do
     with %{} = issue <- find_issue(conn, issue_id),
          {:ok, _workflow} <-
            Store.transition_workflow(issue.id, status,
-             source: "local_ui",
+             source: "user_ui",
              actor: AuthPlug.actor(conn),
              reason: params["reason"]
            ),
@@ -75,7 +75,7 @@ defmodule SymphonyElixirWeb.WorkflowController do
   defp find_issue(conn, id) do
     case current_project_setting_id(conn) do
       nil ->
-        Store.get_issue(id) || Store.get_issue_by_iid(id) || Store.get_issue_by_identifier(id)
+        nil
 
       project_id ->
         Store.list_issues(project_setting_id: project_id)
@@ -101,19 +101,15 @@ defmodule SymphonyElixirWeb.WorkflowController do
     with {:ok, config, auth_opts} <- user_gitlab_context(conn, issue),
          {:ok, raw_issue} <- Client.update_project_issue(config, issue.iid, %{"state_event" => "close"}, auth_opts) do
       raw_issue |> IssueMapper.from_gitlab() |> Store.upsert_issue()
-      Store.record_event("gitlab_issue_closed", "local_ui", %{reason: "workflow done"}, issue_id: issue.id, actor: AuthPlug.actor(conn))
+      Store.record_event("gitlab_issue_closed", "user_ui", %{reason: "workflow done"}, issue_id: issue.id, actor: AuthPlug.actor(conn))
       :ok
     end
   end
 
   defp user_gitlab_context(conn, issue) do
-    if local_user?(conn) do
-      with {:ok, config} <- GitLabConfig.load(), do: {:ok, config, []}
-    else
-      with {:ok, access_token} <- AuthPlug.oauth_access_token(conn),
-           {:ok, config} <- project_config_for_issue(issue) do
-        {:ok, config, [auth: {:bearer, access_token}]}
-      end
+    with {:ok, access_token} <- AuthPlug.oauth_access_token(conn),
+         {:ok, config} <- project_config_for_issue(issue) do
+      {:ok, config, [auth: {:bearer, access_token}]}
     end
   end
 
@@ -128,14 +124,9 @@ defmodule SymphonyElixirWeb.WorkflowController do
 
   defp current_project_setting_id(conn) do
     case AuthPlug.current_user(conn) do
-      %{local?: true} -> nil
       %{project_setting_id: project_setting_id} -> project_setting_id
       _ -> nil
     end
-  end
-
-  defp local_user?(conn) do
-    match?(%{local?: true}, AuthPlug.current_user(conn))
   end
 
   defp normalize_status(status) when is_binary(status), do: status |> String.trim() |> String.downcase()

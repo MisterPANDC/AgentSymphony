@@ -11,7 +11,6 @@ defmodule SymphonyElixir.Auth.ConfigTest do
     GITLAB_OIDC_SCOPES
     SYMPHONY_PUBLIC_URL
     GITLAB_BASE_URL
-    GITLAB_PROJECT_API_URL
   )
 
   setup do
@@ -28,33 +27,39 @@ defmodule SymphonyElixir.Auth.ConfigTest do
     :ok
   end
 
-  test "defaults to local single-user mode" do
-    assert {:ok, config} = Config.load(load_env_file: false)
-    refute Config.oidc_enabled?(config)
-    assert Config.local_user().access_level == 50
+  test "requires OIDC settings by default" do
+    assert {:error, {:missing_oidc_config, missing}} = Config.load(load_env_file: false)
+    assert missing =~ "GITLAB_OIDC_ISSUER or GITLAB_BASE_URL"
+    assert missing =~ "GITLAB_OIDC_CLIENT_ID"
+    assert missing =~ "GITLAB_OIDC_CLIENT_SECRET"
   end
 
   test "validates required OIDC settings" do
     System.put_env("SYMPHONY_AUTH_MODE", "gitlab_oidc")
 
     assert {:error, {:missing_oidc_config, missing}} = Config.load(load_env_file: false)
+    assert missing =~ "GITLAB_OIDC_ISSUER or GITLAB_BASE_URL"
     assert missing =~ "GITLAB_OIDC_CLIENT_ID"
     assert missing =~ "GITLAB_OIDC_CLIENT_SECRET"
   end
 
-  test "builds OIDC config from GitLab project API URL" do
-    System.put_env("SYMPHONY_AUTH_MODE", "gitlab_oidc")
-    System.put_env("GITLAB_PROJECT_API_URL", "https://gitlab.example.com/api/v4/projects/group%2Frepo")
+  test "rejects unsupported auth modes" do
+    System.put_env("SYMPHONY_AUTH_MODE", "password")
+
+    assert {:error, {:unsupported_auth_mode, "password"}} = Config.load(load_env_file: false)
+  end
+
+  test "builds OIDC config from GitLab base URL" do
+    System.put_env("GITLAB_BASE_URL", "https://gitlab.example.com")
     System.put_env("GITLAB_OIDC_CLIENT_ID", "client-id")
     System.put_env("GITLAB_OIDC_CLIENT_SECRET", "client-secret")
     System.put_env("SYMPHONY_PUBLIC_URL", "https://symphony.example.com/")
-    System.put_env("GITLAB_OIDC_SCOPES", "openid,profile,email,read_api")
 
     assert {:ok, config} = Config.load(load_env_file: false)
     assert Config.oidc_enabled?(config)
     assert config.issuer == "https://gitlab.example.com"
     assert config.redirect_uri == "https://symphony.example.com/auth/gitlab/callback"
-    assert config.scopes == ~w(openid profile email read_api)
+    assert config.scopes == ~w(openid profile email api)
   end
 
   test "maps GitLab access levels to roles" do

@@ -4,7 +4,7 @@ GitLab-native 的 Symphony 运行时，用 Elixir/Phoenix 提供本地调度服�
 
 ## 亮点
 
-- **GitLab 原生集成**：支持本地单项目 token 模式，也支持云端 GitLab OIDC 登录、多用户选择已加入 repo、issue 同步、note 同步和必要的 GitLab 写入。
+- **GitLab 原生集成**：通过自建 GitLab OIDC 登录，多用户可选择自己已加入的 repo；issue 同步、note 同步和必要的 GitLab 写入都绑定 GitLab 项目与权限。
 - **内部工作流**：`triage`、`todo`、`in_progress`、`review`、`merging`、`rework`、`done`、`canceled` 等阶段存储在 Symphony 数据库中；依赖阻塞和人工介入作为 issue/run 的阻塞状态单独记录，不依赖 GitLab 付费工作流能力。
 - **持久化运行态**：agent runs、run events、runtime blocks、operator-input、sync cursors 均可落库，重启后可恢复观察。
 - **Linear 风格控制台**：高密度 issue dashboard、issue drawer、blocker editor、agent controls、run history、settings 和 Run Monitor。
@@ -12,18 +12,18 @@ GitLab-native 的 Symphony 运行时，用 Elixir/Phoenix 提供本地调度服�
 
 ## 快速开始
 
-本地单项目模式下，准备好 Elixir/Mix、Node.js/npm，以及一个具备 GitLab API 权限的 token 后：
+准备好 Elixir/Mix、Node.js/npm，并在自建 GitLab 创建 OAuth application 后：
 
 ```bash
 cd symphony
 cp .env.example .env.local
-# 编辑 .env.local，填入 GitLab 项目 API 地址和 token
+# 编辑 .env.local，填入 GitLab OIDC 配置
 
 ./scripts/setup.sh
 ./bin/symphony ./WORKFLOW.md --port 4000
 ```
 
-打开 `http://127.0.0.1:4000` 进入控制台。
+打开 `http://127.0.0.1:4000`，使用 GitLab 登录后进入控制台。
 
 ## 环境要求
 
@@ -32,7 +32,7 @@ cp .env.example .env.local
 | Elixir / Mix | 后端运行时、任务、escript 构建 |
 | Node.js / npm | React 前端依赖安装和构建 |
 | PostgreSQL | 生产/规范持久化后端 |
-| GitLab token / Project Access Token | 本地模式访问 GitLab API；云端 OIDC 模式中由每个项目在设置页保存 Project Access Token |
+| GitLab OAuth application / Project Access Token | OIDC 登录、按用户 OAuth 拉取 repo；每个 repo 的后台同步和 Agent 写入使用设置页保存的 Project Access Token |
 
 项目提供 `mise.toml` 固定 Erlang/Elixir 版本。Linux 或 CI 环境推荐在镜像/主机初始化层预装依赖，再运行项目 setup。
 
@@ -47,58 +47,16 @@ cp .env.example .env.local
 最小配置：
 
 ```env
-GITLAB_PROJECT_API_URL=https://gitlab.example.com/api/v4/projects/group%2Fproject
-GITLAB_TOKEN=glpat_xxxxxxxxxxxxxxxxxxxx
-
 SYMPHONY_BIND_HOST=127.0.0.1
 SYMPHONY_PORT=4000
-```
+SYMPHONY_PUBLIC_URL=http://127.0.0.1:4000
+SYMPHONY_SESSION_SECRET=replace-with-a-stable-random-secret-at-least-64-bytes
+SYMPHONY_TOKEN_ENCRYPTION_SECRET=replace-with-a-stable-random-secret
 
-`GITLAB_PROJECT_API_URL` 填的是 GitLab REST API endpoint，不是浏览器里的项目页面 URL。它不会直接出现在 GitLab 网页界面中，需要根据项目页面 URL 构造：
-
-```text
-项目页面 URL: https://gitlab.example.com/group/project
-API URL:     https://gitlab.example.com/api/v4/projects/group%2Fproject
-```
-
-规则：
-
-1. 取 GitLab 实例根地址，例如 `https://gitlab.example.com`。
-2. 追加固定路径 `/api/v4/projects/`。
-3. 再追加项目标识。可以使用 numeric project id，也可以使用 namespace path。
-4. 如果使用 namespace path，需要把路径里的 `/` 编码成 `%2F`。例如 `group/project` 写成 `group%2Fproject`，`team/subgroup/app` 写成 `team%2Fsubgroup%2Fapp`。
-
-例如项目页面是：
-
-```text
-https://gitlab.example.com/team/subgroup/app
-```
-
-则推荐配置为：
-
-```env
-GITLAB_PROJECT_API_URL=https://gitlab.example.com/api/v4/projects/team%2Fsubgroup%2Fapp
-```
-
-如果已知 GitLab numeric project id，也可以直接使用 id，避免手工编码路径：
-
-```env
-GITLAB_PROJECT_API_URL=https://gitlab.example.com/api/v4/projects/123
-```
-
-不要把 `/api/v4/projects/...` 拼到项目页面 URL 后面。下面这种写法是错误的，因为 `team/subgroup/app` 是项目网页路径，不是 GitLab 实例根地址，`group%2Fproject` 也只是占位示例：
-
-```env
-GITLAB_PROJECT_API_URL=https://gitlab.example.com/team/subgroup/app/api/v4/projects/group%2Fproject
-```
-
-也可以使用拆分配置，让 Symphony 自动处理 project path 编码：
-
-```env
+SYMPHONY_AUTH_MODE=gitlab_oidc
 GITLAB_BASE_URL=https://gitlab.example.com
-GITLAB_PROJECT_PATH=team/subgroup/app
-# 或使用 numeric id:
-# GITLAB_PROJECT_ID=123
+GITLAB_OIDC_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+GITLAB_OIDC_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 启用 PostgreSQL：
@@ -106,23 +64,6 @@ GITLAB_PROJECT_PATH=team/subgroup/app
 ```env
 SYMPHONY_STORE_BACKEND=postgres
 SYMPHONY_DATABASE_URL=postgres://postgres:postgres@localhost:5432/symphony_dev
-```
-
-`GITLAB_TOKEN` 只用于本地单项目模式，不会发送给浏览器；settings 和 monitor API 只返回脱敏状态。
-
-启用 GitLab OIDC 登录：
-
-```env
-SYMPHONY_AUTH_MODE=gitlab_oidc
-SYMPHONY_PUBLIC_URL=https://symphony.example.com
-SYMPHONY_SESSION_SECRET=replace-with-a-stable-random-secret-at-least-64-bytes
-
-GITLAB_OIDC_ISSUER=https://gitlab.example.com
-GITLAB_OIDC_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-GITLAB_OIDC_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-GITLAB_OIDC_SCOPES=openid profile email api
-# 可选；未设置时会复用 SYMPHONY_SESSION_SECRET / SECRET_KEY_BASE
-SYMPHONY_TOKEN_ENCRYPTION_SECRET=replace-with-a-stable-random-secret
 ```
 
 在自建 GitLab 创建 OAuth application，redirect URI 填：
@@ -155,7 +96,6 @@ https://symphony.example.com/auth/gitlab/callback
 3. 如果配置了 PostgreSQL，执行 `mix ecto.create` 和 `mix ecto.migrate`。
 4. 构建前端资源到 `priv/static`。
 5. 构建 `bin/symphony`。
-6. 如果 GitLab 配置完整且 token 不是占位值，执行连通性校验。
 
 常用选项：
 
@@ -164,7 +104,6 @@ https://symphony.example.com/auth/gitlab/callback
 | `./scripts/setup.sh --skip-db` | 跳过数据库 create/migrate |
 | `./scripts/setup.sh --skip-frontend` | 跳过 npm install 和前端构建 |
 | `./scripts/setup.sh --skip-build` | 跳过前端 build 和 escript build |
-| `./scripts/setup.sh --skip-gitlab-test` | 跳过 GitLab 连通性校验 |
 | `./scripts/setup.sh --test` | 初始化后运行 `mix test` |
 | `./scripts/setup.sh --install-system-deps` | best-effort 安装系统依赖，仅建议本地开发使用 |
 
@@ -199,18 +138,6 @@ PostgreSQL 后端测试：
 SYMPHONY_STORE_BACKEND=postgres \
 SYMPHONY_DATABASE_URL=postgres://postgres:postgres@localhost:5432/symphony_test \
 mix test --include postgres
-```
-
-GitLab 配置校验：
-
-```bash
-mix symphony.gitlab.test
-```
-
-交互式写入 GitLab 配置：
-
-```bash
-mix symphony.gitlab.setup
 ```
 
 ## 运行与接口

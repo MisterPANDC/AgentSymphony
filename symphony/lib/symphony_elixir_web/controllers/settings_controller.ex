@@ -118,17 +118,11 @@ defmodule SymphonyElixirWeb.SettingsController do
   end
 
   defp sync_interval do
-    case GitLabConfig.load() do
-      {:ok, config} -> config.sync_interval_ms
-      _ -> 60_000
-    end
+    int_env("SYMPHONY_SYNC_INTERVAL_MS", 60_000, 1)
   end
 
   defp sync_overlap do
-    case GitLabConfig.load() do
-      {:ok, config} -> config.sync_cursor_overlap_seconds
-      _ -> 120
-    end
+    int_env("SYMPHONY_SYNC_CURSOR_OVERLAP_SECONDS", 120, 0)
   end
 
   defp current_identity_id(conn) do
@@ -140,4 +134,17 @@ defmodule SymphonyElixirWeb.SettingsController do
 
   defp error_payload(%Error{} = reason), do: %{type: reason.type, status: reason.status, message: reason.message}
   defp error_payload(reason), do: %{type: reason, message: inspect(reason)}
+
+  defp int_env(name, default, min) do
+    case System.get_env(name) do
+      value when is_binary(value) ->
+        case Integer.parse(value) do
+          {int, ""} when int >= min -> int
+          _ -> default
+        end
+
+      _ ->
+        default
+    end
+  end
 end

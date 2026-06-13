@@ -13,8 +13,7 @@ export function AppShell() {
   const session = useQuery({ queryKey: ["auth-session"], queryFn: getAuthSession, refetchInterval: 30_000 });
   const active = data?.agents.running ?? 0;
   const blocked = data?.blocked.length ?? 0;
-  const tokenMissing =
-    session.data?.auth.enabled && session.data?.project?.project_access_token_status === "missing";
+  const tokenMissing = session.data?.project?.project_access_token_status === "missing";
 
   return (
     <div className="app-grid">

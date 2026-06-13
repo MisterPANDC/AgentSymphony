@@ -14,7 +14,7 @@ defmodule SymphonyElixir.Persistence.IssueDependency do
     belongs_to(:blocked_issue, Issue)
     belongs_to(:blocking_issue, Issue)
 
-    field(:created_by, :string, default: "local_operator")
+    field(:created_by, :string, default: "system")
     field(:reason, :string)
 
     timestamps(type: :utc_datetime_usec)

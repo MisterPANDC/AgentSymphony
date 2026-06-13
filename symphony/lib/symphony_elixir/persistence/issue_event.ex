@@ -5,7 +5,7 @@ defmodule SymphonyElixir.Persistence.IssueEvent do
 
   import Ecto.Changeset
 
-  @sources ~w(gitlab_sync local_ui agent system)
+  @sources ~w(gitlab_sync user_ui agent system)
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id

@@ -88,9 +88,6 @@ defmodule SymphonyElixir.HttpServer do
   end
 
   defp bind_host do
-    case Symphony.GitLab.Config.load() do
-      {:ok, config} -> config.bind_host
-      {:error, _reason} -> System.get_env("SYMPHONY_BIND_HOST") || Config.settings!().server.host
-    end
+    System.get_env("SYMPHONY_BIND_HOST") || Config.settings!().server.host
   end
 end

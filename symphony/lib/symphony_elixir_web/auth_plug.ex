@@ -47,9 +47,6 @@ defmodule SymphonyElixirWeb.AuthPlug do
   @spec actor(Plug.Conn.t()) :: String.t()
   def actor(conn) do
     case conn.assigns[:current_user] do
-      %{local?: true} ->
-        "local_operator"
-
       %{gitlab_user_id: user_id, username: username} ->
         "gitlab:#{user_id}:#{username}"
 
@@ -64,7 +61,6 @@ defmodule SymphonyElixirWeb.AuthPlug do
   @spec current_project(Plug.Conn.t()) :: map() | nil
   def current_project(conn) do
     case current_user(conn) do
-      %{local?: true} -> Store.project()
       %{project_setting_id: project_setting_id} when is_binary(project_setting_id) -> Store.project_by_id(project_setting_id)
       _ -> nil
     end
@@ -80,20 +76,16 @@ defmodule SymphonyElixirWeb.AuthPlug do
   end
 
   defp load_user(conn, %Config{} = config) do
-    if Config.oidc_enabled?(config) do
-      conn
-      |> get_session(:current_user)
-      |> case do
-        nil -> assign(conn, :current_user, nil)
-        user -> refresh_membership_if_stale(conn, config, normalize_session_user(user))
-      end
-    else
-      assign(conn, :current_user, Config.local_user())
+    conn
+    |> get_session(:current_user)
+    |> case do
+      nil -> assign(conn, :current_user, nil)
+      user -> refresh_membership_if_stale(conn, config, normalize_session_user(user))
     end
   end
 
   defp refresh_membership_if_stale(conn, config, user) do
-    if user[:local?] == true or is_nil(user[:project_setting_id]) or fresh_membership?(user) do
+    if is_nil(user[:project_setting_id]) or fresh_membership?(user) do
       assign(conn, :current_user, user)
     else
       do_refresh_membership(conn, config, user)

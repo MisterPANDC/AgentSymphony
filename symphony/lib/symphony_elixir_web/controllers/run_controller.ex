@@ -58,7 +58,7 @@ defmodule SymphonyElixirWeb.RunController do
   defp visible_run(conn, id) do
     case {Store.get_run(id), current_project_setting_id(conn)} do
       {nil, _project_id} -> nil
-      {%{} = run, nil} -> run
+      {%{} = _run, nil} -> nil
       {%{issue: %{gitlab_project_setting_id: project_id}} = run, project_id} -> run
       _ -> nil
     end
@@ -73,7 +73,6 @@ defmodule SymphonyElixirWeb.RunController do
 
   defp current_project_setting_id(conn) do
     case AuthPlug.current_user(conn) do
-      %{local?: true} -> nil
       %{project_setting_id: project_setting_id} -> project_setting_id
       _ -> nil
     end

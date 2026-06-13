@@ -5,29 +5,33 @@ defmodule SymphonyElixir.Tracker.GitLabTest do
   alias SymphonyElixir.Tracker.GitLab
 
   setup do
-    restore_env = put_gitlab_env()
+    previous_secret = System.get_env("SYMPHONY_TOKEN_ENCRYPTION_SECRET")
+    System.put_env("SYMPHONY_TOKEN_ENCRYPTION_SECRET", "tracker-test-secret")
     Application.put_env(:symphony_elixir, :gitlab_req_options, plug: followup_plug())
 
-    Store.upsert_project(%{
-      api_root: "https://gitlab.example.com/api/v4",
-      project_ref: "123",
-      project_id: 123,
-      path_with_namespace: "group/project",
-      name: "Project",
-      web_url: "https://gitlab.example.com/group/project",
-      visibility: "private"
-    })
+    project =
+      Store.upsert_project(%{
+        api_root: "https://gitlab.example.com/api/v4",
+        project_ref: "123",
+        project_id: 123,
+        path_with_namespace: "group/project",
+        name: "Project",
+        web_url: "https://gitlab.example.com/group/project",
+        visibility: "private"
+      })
+
+    assert {:ok, _project} = Store.put_project_access_token(project.id, "test-token")
 
     on_exit(fn ->
-      restore_env.()
+      restore_env("SYMPHONY_TOKEN_ENCRYPTION_SECRET", previous_secret)
       Application.delete_env(:symphony_elixir, :gitlab_req_options)
     end)
 
-    :ok
+    {:ok, project: project}
   end
 
-  test "creates a follow-up issue with related and blocked relationships" do
-    current = seed_issue(10)
+  test "creates a follow-up issue with related and blocked relationships", %{project: project} do
+    current = seed_issue(10, project.id)
 
     assert {:ok, result} =
              GitLab.create_followup_issue(current.id, %{
@@ -58,10 +62,11 @@ defmodule SymphonyElixir.Tracker.GitLabTest do
     assert created.is_blocked == true
   end
 
-  defp seed_issue(iid) do
+  defp seed_issue(iid, project_setting_id) do
     Store.upsert_issue(%{
       gitlab_issue_id: 90_000 + iid,
       gitlab_project_id: 123,
+      gitlab_project_setting_id: project_setting_id,
       iid: iid,
       web_url: "https://gitlab.example.com/group/project/-/issues/#{iid}",
       title: "Issue #{iid}",
@@ -118,21 +123,6 @@ defmodule SymphonyElixir.Tracker.GitLabTest do
     end
   end
 
-  defp put_gitlab_env do
-    keys = ["GITLAB_BASE_URL", "GITLAB_PROJECT_ID", "GITLAB_PROJECT_PATH", "GITLAB_PROJECT_API_URL", "GITLAB_TOKEN"]
-    previous = Map.new(keys, &{&1, System.get_env(&1)})
-
-    System.put_env("GITLAB_BASE_URL", "https://gitlab.example.com")
-    System.put_env("GITLAB_PROJECT_ID", "123")
-    System.delete_env("GITLAB_PROJECT_PATH")
-    System.put_env("GITLAB_PROJECT_API_URL", "https://gitlab.example.com/api/v4/projects/123")
-    System.put_env("GITLAB_TOKEN", "test-token")
-
-    fn ->
-      Enum.each(previous, fn
-        {key, nil} -> System.delete_env(key)
-        {key, value} -> System.put_env(key, value)
-      end)
-    end
-  end
+  defp restore_env(key, nil), do: System.delete_env(key)
+  defp restore_env(key, value), do: System.put_env(key, value)
 end

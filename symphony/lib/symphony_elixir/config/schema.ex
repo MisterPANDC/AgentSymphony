@@ -375,7 +375,7 @@ defmodule SymphonyElixir.Config.Schema do
     tracker = %{
       settings.tracker
       | kind: settings.tracker.kind || "gitlab",
-        api_key: resolve_secret_setting(settings.tracker.api_key, System.get_env("GITLAB_TOKEN")),
+        api_key: resolve_secret_setting(settings.tracker.api_key, nil),
         assignee: resolve_secret_setting(settings.tracker.assignee, nil)
     }
 

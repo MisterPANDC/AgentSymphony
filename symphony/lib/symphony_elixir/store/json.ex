@@ -15,7 +15,7 @@ defmodule SymphonyElixir.Store.Json do
   @priorities ~w(none low medium high urgent)
   @run_statuses ~w(queued starting running blocked succeeded failed canceled stale)
   @block_types ~w(operator_input approval_required mcp_elicitation sandbox_rejection external_failure blocked_by_dependency)
-  @event_sources ~w(gitlab_sync local_ui agent system)
+  @event_sources ~w(gitlab_sync user_ui agent system)
   @relation_types ~w(relates_to)
 
   defstruct [
@@ -451,7 +451,7 @@ defmodule SymphonyElixir.Store.Json do
         state =
           state
           |> put_in([Access.key(:workflow_states), issue_id], workflow)
-          |> append_event("workflow_priority_changed", "local_ui", %{priority: priority}, issue_id: issue_id)
+          |> append_event("workflow_priority_changed", "user_ui", %{priority: priority}, issue_id: issue_id)
           |> persist()
 
         {:reply, {:ok, workflow}, state}
@@ -479,7 +479,7 @@ defmodule SymphonyElixir.Store.Json do
             id: Ecto.UUID.generate(),
             blocked_issue_id: blocked_issue_id,
             blocking_issue_id: blocking_issue_id,
-            created_by: Keyword.get(opts, :actor, "local_operator"),
+            created_by: Keyword.get(opts, :actor, "system"),
             reason: Keyword.get(opts, :reason),
             inserted_at: now(),
             updated_at: now()
@@ -490,10 +490,10 @@ defmodule SymphonyElixir.Store.Json do
             |> put_in([Access.key(:dependencies), dependency_key(blocked_issue_id, blocking_issue_id)], edge)
             |> append_event(
               "dependency_added",
-              Keyword.get(opts, :source, "local_ui"),
+              Keyword.get(opts, :source, "user_ui"),
               Map.take(edge, [:blocking_issue_id, :reason]),
               issue_id: blocked_issue_id,
-              actor: Keyword.get(opts, :actor, "local_operator")
+              actor: Keyword.get(opts, :actor, "system")
             )
             |> persist()
 
@@ -513,7 +513,7 @@ defmodule SymphonyElixir.Store.Json do
       state =
         state
         |> update_in([Access.key(:dependencies)], &Map.delete(&1, key))
-        |> append_event("dependency_removed", "local_ui", %{blocking_issue_id: blocking_issue_id}, issue_id: blocked_issue_id)
+        |> append_event("dependency_removed", "user_ui", %{blocking_issue_id: blocking_issue_id}, issue_id: blocked_issue_id)
         |> persist()
 
       {:reply, :ok, state}
@@ -548,7 +548,7 @@ defmodule SymphonyElixir.Store.Json do
             source_issue_id: source_issue_id,
             target_issue_id: target_issue_id,
             relation_type: relation_type,
-            created_by: Keyword.get(opts, :actor, "local_operator"),
+            created_by: Keyword.get(opts, :actor, "system"),
             reason: Keyword.get(opts, :reason),
             metadata: Keyword.get(opts, :metadata, %{}) || %{},
             inserted_at: now,
@@ -562,10 +562,10 @@ defmodule SymphonyElixir.Store.Json do
             |> put_in([Access.key(:relations), key], relation)
             |> append_event(
               "issue_relation_added",
-              Keyword.get(opts, :source, "local_ui"),
+              Keyword.get(opts, :source, "user_ui"),
               Map.take(relation, [:target_issue_id, :relation_type, :reason, :metadata]),
               issue_id: source_issue_id,
-              actor: Keyword.get(opts, :actor, "local_operator")
+              actor: Keyword.get(opts, :actor, "system")
             )
             |> persist()
 
@@ -738,7 +738,7 @@ defmodule SymphonyElixir.Store.Json do
         state =
           state
           |> put_in([Access.key(:runtime_blocks), block_id], block)
-          |> append_event("runtime_block_resolved", "local_ui", %{block_id: block.id}, issue_id: block.gitlab_issue_id, run_id: block.agent_run_id)
+          |> append_event("runtime_block_resolved", "user_ui", %{block_id: block.id}, issue_id: block.gitlab_issue_id, run_id: block.agent_run_id)
           |> persist()
 
         {:reply, {:ok, block}, state}
@@ -1129,9 +1129,9 @@ defmodule SymphonyElixir.Store.Json do
           state =
             state
             |> put_in([Access.key(:workflow_states), issue_id], workflow)
-            |> append_event("workflow_transitioned", Keyword.get(opts, :source, "local_ui"), %{from: previous_status, to: next_status, reason: Keyword.get(opts, :reason)},
+            |> append_event("workflow_transitioned", Keyword.get(opts, :source, "user_ui"), %{from: previous_status, to: next_status, reason: Keyword.get(opts, :reason)},
               issue_id: issue_id,
-              actor: Keyword.get(opts, :actor, "local_operator")
+              actor: Keyword.get(opts, :actor, "system")
             )
 
           {:ok, workflow, state}

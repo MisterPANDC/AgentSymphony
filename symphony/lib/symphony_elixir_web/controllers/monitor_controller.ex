@@ -11,12 +11,12 @@ defmodule SymphonyElixirWeb.MonitorController do
 
   @spec events(Conn.t(), map()) :: Conn.t()
   def events(conn, _params) do
-    json(conn, %{events: Store.list_events() |> Enum.map(&WebDTO.event/1)})
+    json(conn, %{events: visible_events(conn) |> Enum.map(&WebDTO.event/1)})
   end
 
   @spec blocks(Conn.t(), map()) :: Conn.t()
   def blocks(conn, _params) do
-    json(conn, %{blocks: Store.list_open_runtime_blocks() |> Enum.map(&WebDTO.block/1)})
+    json(conn, %{blocks: visible_blocks(conn) |> Enum.map(&WebDTO.block/1)})
   end
 
   @spec resolve_block(Conn.t(), map()) :: Conn.t()
@@ -71,14 +71,14 @@ defmodule SymphonyElixirWeb.MonitorController do
 
   defp monitor_filters(conn) do
     case current_project_setting_id(conn) do
-      nil -> []
+      nil -> [project_setting_id: "__no_project__", project: nil]
       project_id -> [project_setting_id: project_id, project: AuthPlug.current_project(conn)]
     end
   end
 
   defp run_filters(conn) do
     case current_project_setting_id(conn) do
-      nil -> []
+      nil -> [project_setting_id: "__no_project__"]
       project_id -> [project_setting_id: project_id]
     end
   end
@@ -86,15 +86,37 @@ defmodule SymphonyElixirWeb.MonitorController do
   defp visible_run(conn, id) do
     case {Store.get_run(id), current_project_setting_id(conn)} do
       {nil, _project_id} -> nil
-      {%{} = run, nil} -> run
+      {%{} = _run, nil} -> nil
       {%{issue: %{gitlab_project_setting_id: project_id}} = run, project_id} -> run
       _ -> nil
     end
   end
 
+  defp visible_events(conn) do
+    current_issue_ids(conn)
+    |> case do
+      nil -> []
+      issue_ids -> Enum.filter(Store.list_events(), &MapSet.member?(issue_ids, &1.gitlab_issue_id))
+    end
+  end
+
+  defp visible_blocks(conn) do
+    current_issue_ids(conn)
+    |> case do
+      nil -> []
+      issue_ids -> Enum.filter(Store.list_open_runtime_blocks(), &MapSet.member?(issue_ids, &1.gitlab_issue_id))
+    end
+  end
+
+  defp current_issue_ids(conn) do
+    case current_project_setting_id(conn) do
+      nil -> nil
+      project_id -> Store.list_issues(project_setting_id: project_id) |> MapSet.new(& &1.id)
+    end
+  end
+
   defp current_project_setting_id(conn) do
     case AuthPlug.current_user(conn) do
-      %{local?: true} -> nil
       %{project_setting_id: project_setting_id} -> project_setting_id
       _ -> nil
     end

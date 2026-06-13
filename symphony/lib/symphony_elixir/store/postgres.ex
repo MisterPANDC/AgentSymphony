@@ -356,14 +356,14 @@ defmodule SymphonyElixir.Store.Postgres do
 
         append_event(
           "workflow_transitioned",
-          Keyword.get(opts, :source, "local_ui"),
+          Keyword.get(opts, :source, "user_ui"),
           %{
             from: previous_status,
             to: next_status,
             reason: Keyword.get(opts, :reason)
           },
           issue_id: issue_id,
-          actor: Keyword.get(opts, :actor, "local_operator")
+          actor: Keyword.get(opts, :actor, "system")
         )
 
         workflow
@@ -398,7 +398,7 @@ defmodule SymphonyElixir.Store.Postgres do
           |> Repo.update!()
           |> plain()
 
-        append_event("workflow_priority_changed", "local_ui", %{priority: priority}, issue_id: issue_id)
+        append_event("workflow_priority_changed", "user_ui", %{priority: priority}, issue_id: issue_id)
         {:ok, workflow}
     end
   end
@@ -422,7 +422,7 @@ defmodule SymphonyElixir.Store.Postgres do
         attrs = %{
           blocked_issue_id: blocked_issue_id,
           blocking_issue_id: blocking_issue_id,
-          created_by: Keyword.get(opts, :actor, "local_operator"),
+          created_by: Keyword.get(opts, :actor, "system"),
           reason: Keyword.get(opts, :reason)
         }
 
@@ -435,9 +435,9 @@ defmodule SymphonyElixir.Store.Postgres do
           )
           |> plain()
 
-        append_event("dependency_added", Keyword.get(opts, :source, "local_ui"), Map.take(edge, [:blocking_issue_id, :reason]),
+        append_event("dependency_added", Keyword.get(opts, :source, "user_ui"), Map.take(edge, [:blocking_issue_id, :reason]),
           issue_id: blocked_issue_id,
-          actor: Keyword.get(opts, :actor, "local_operator")
+          actor: Keyword.get(opts, :actor, "system")
         )
 
         {:ok, edge}
@@ -457,7 +457,7 @@ defmodule SymphonyElixir.Store.Postgres do
 
       edge ->
         Repo.delete!(edge)
-        append_event("dependency_removed", "local_ui", %{blocking_issue_id: blocking_issue_id}, issue_id: blocked_issue_id)
+        append_event("dependency_removed", "user_ui", %{blocking_issue_id: blocking_issue_id}, issue_id: blocked_issue_id)
         :ok
     end
   end
@@ -490,7 +490,7 @@ defmodule SymphonyElixir.Store.Postgres do
           source_issue_id: source_issue_id,
           target_issue_id: target_issue_id,
           relation_type: relation_type,
-          created_by: Keyword.get(opts, :actor, "local_operator"),
+          created_by: Keyword.get(opts, :actor, "system"),
           reason: Keyword.get(opts, :reason),
           metadata: Keyword.get(opts, :metadata, %{}) || %{}
         }
@@ -506,10 +506,10 @@ defmodule SymphonyElixir.Store.Postgres do
 
         append_event(
           "issue_relation_added",
-          Keyword.get(opts, :source, "local_ui"),
+          Keyword.get(opts, :source, "user_ui"),
           Map.take(relation, [:target_issue_id, :relation_type, :reason, :metadata]),
           issue_id: source_issue_id,
-          actor: Keyword.get(opts, :actor, "local_operator")
+          actor: Keyword.get(opts, :actor, "system")
         )
 
         {:ok, relation}
@@ -725,7 +725,7 @@ defmodule SymphonyElixir.Store.Postgres do
           |> RuntimeBlock.changeset(%{resolved_at: now()})
           |> Repo.update!()
 
-        append_event("runtime_block_resolved", "local_ui", %{block_id: block.id}, issue_id: block.gitlab_issue_id, run_id: block.agent_run_id)
+        append_event("runtime_block_resolved", "user_ui", %{block_id: block.id}, issue_id: block.gitlab_issue_id, run_id: block.agent_run_id)
         {:ok, decorate_block(block)}
     end
   end

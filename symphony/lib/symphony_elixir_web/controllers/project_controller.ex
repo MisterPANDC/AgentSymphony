@@ -53,16 +53,6 @@ defmodule SymphonyElixirWeb.ProjectController do
 
   def activate(conn, _params), do: error(conn, 400, "missing_project", "Project id is required.")
 
-  defp user_projects(conn, %{local?: true}) do
-    selected_project_id = selected_project_id(conn)
-
-    projects =
-      Store.projects()
-      |> Enum.map(&project_dto(&1, selected_project_id))
-
-    {:ok, projects}
-  end
-
   defp user_projects(conn, user) do
     with {:ok, access_token} <- user_access_token(user),
          {:ok, gitlab} <- gitlab_config(conn),
@@ -103,7 +93,7 @@ defmodule SymphonyElixirWeb.ProjectController do
          gitlab_project_ref: "0",
          gitlab_project_path_param: "0",
          token: nil,
-         source: :split_config,
+         source: :oidc_issuer,
          sync_page_size: 100
        }}
     end
@@ -124,7 +114,7 @@ defmodule SymphonyElixirWeb.ProjectController do
     })
   end
 
-  defp project_dto(project, selected_project_id, stored \\ nil)
+  defp project_dto(project, selected_project_id, stored)
 
   defp project_dto(%{project_id: _} = project, selected_project_id, _stored) do
     %{
@@ -135,7 +125,7 @@ defmodule SymphonyElixirWeb.ProjectController do
       visibility: project.visibility,
       last_activity_at: nil,
       selected: project.id == selected_project_id,
-      local_project_setting_id: project.id,
+      project_setting_id: project.id,
       project_access_token_status: project.project_access_token_status || "missing"
     }
   end
@@ -149,7 +139,7 @@ defmodule SymphonyElixirWeb.ProjectController do
       visibility: raw["visibility"],
       last_activity_at: raw["last_activity_at"],
       selected: stored && stored.id == selected_project_id,
-      local_project_setting_id: stored && stored.id,
+      project_setting_id: stored && stored.id,
       project_access_token_status: (stored && stored.project_access_token_status) || "missing"
     }
   end
@@ -184,8 +174,7 @@ defmodule SymphonyElixirWeb.ProjectController do
       profile_url: user[:profile_url],
       access_level: user[:access_level],
       role: user[:role],
-      project_setting_id: user[:project_setting_id],
-      local: user[:local?] == true
+      project_setting_id: user[:project_setting_id]
     }
   end
 

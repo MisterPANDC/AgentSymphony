@@ -29,7 +29,7 @@ export interface MonitorEventDTO {
 
 export interface MonitorStateDTO {
   runtime: {
-    mode: "local_single_user";
+    mode: "gitlab_oidc";
     appVersion: string | null;
     uptimeSeconds: number;
     bindHost: string;

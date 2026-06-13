@@ -3,7 +3,6 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound, RefreshCcw, Save, TestTube2 } from "lucide-react";
 import { getGitLabSettings, getWorkflowSettings, testGitLabSettings, updateProjectAccessToken } from "../api/settings";
-import { getAuthSession } from "../api/auth";
 import { refreshSync } from "../api/sync";
 import { listRuns } from "../api/runs";
 import { getMonitorState } from "../api/monitor";
@@ -83,7 +82,6 @@ function GitLabSettingsPage() {
   const queryClient = useQueryClient();
   const [projectAccessToken, setProjectAccessToken] = useState("");
   const { data } = useQuery({ queryKey: ["settings", "gitlab"], queryFn: getGitLabSettings });
-  const session = useQuery({ queryKey: ["auth-session"], queryFn: getAuthSession });
   const testMutation = useMutation({ mutationFn: testGitLabSettings });
   const tokenMutation = useMutation({
     mutationFn: updateProjectAccessToken,
@@ -102,11 +100,8 @@ function GitLabSettingsPage() {
   });
   const tokenStatus = data?.project?.project_access_token_status ?? "missing";
   const tokenMissing = tokenStatus === "missing";
-  const oidcEnabled = session.data?.auth.enabled ?? false;
   const tokenSummary = tokenMissing
-    ? oidcEnabled
-      ? "Required before background sync and Agent GitLab writes can run for this repository."
-      : "Not configured for this repository. Local mode can still use the server GitLab token, but cloud/OIDC deployments require this token."
+    ? "Required before background sync and Agent GitLab writes can run for this repository."
     : data?.project?.project_access_token_set_at
       ? `Configured at ${new Date(data.project.project_access_token_set_at).toLocaleString()}. Paste a new token only when rotating credentials.`
       : "Configured for background sync and Agent GitLab writes. Paste a new token only when rotating credentials.";
