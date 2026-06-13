@@ -100,18 +100,23 @@ defmodule SymphonyElixir.Auth.Config do
   end
 
   defp oidc_issuer do
-    blank_to_nil(System.get_env("GITLAB_OIDC_ISSUER")) ||
-      blank_to_nil(System.get_env("GITLAB_BASE_URL"))
+    System.get_env("GITLAB_OIDC_ISSUER")
+    |> blank_to_nil()
+    |> case do
+      nil -> blank_to_nil(System.get_env("GITLAB_BASE_URL"))
+      issuer -> issuer
+    end
+    |> trim_url()
   end
 
   defp public_url do
     System.get_env("SYMPHONY_PUBLIC_URL")
     |> blank_to_nil()
-    |> case do
-      nil -> nil
-      url -> String.trim_trailing(url, "/")
-    end
+    |> trim_url()
   end
+
+  defp trim_url(nil), do: nil
+  defp trim_url(url) when is_binary(url), do: String.trim_trailing(url, "/")
 
   defp redirect_uri(%__MODULE__{public_url: nil}), do: nil
   defp redirect_uri(%__MODULE__{public_url: public_url}), do: public_url <> "/auth/gitlab/callback"

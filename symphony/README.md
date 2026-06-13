@@ -25,6 +25,13 @@ cp .env.example .env.local
 
 打开 `http://127.0.0.1:4000`，使用 GitLab 登录后进入控制台。
 
+注意修改代码后需要重新进行编译
+```bash
+npm --prefix assets run build
+mix escript.build
+./bin/symphony ./WORKFLOW.md --port 4000
+```
+
 ## 环境要求
 
 | 依赖 | 用途 |

@@ -50,7 +50,7 @@ defmodule SymphonyElixir.Auth.ConfigTest do
   end
 
   test "builds OIDC config from GitLab base URL" do
-    System.put_env("GITLAB_BASE_URL", "https://gitlab.example.com")
+    System.put_env("GITLAB_BASE_URL", "https://gitlab.example.com/")
     System.put_env("GITLAB_OIDC_CLIENT_ID", "client-id")
     System.put_env("GITLAB_OIDC_CLIENT_SECRET", "client-secret")
     System.put_env("SYMPHONY_PUBLIC_URL", "https://symphony.example.com/")
