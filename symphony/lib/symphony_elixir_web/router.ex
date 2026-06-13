@@ -15,52 +15,108 @@ defmodule SymphonyElixirWeb.Router do
     plug(:accepts, ["json"])
   end
 
+  pipeline :api_session do
+    plug(:accepts, ["json"])
+    plug(:fetch_session)
+    plug(SymphonyElixirWeb.AuthPlug, :load_current_user)
+  end
+
+  pipeline :api_auth do
+    plug(:accepts, ["json"])
+    plug(:fetch_session)
+    plug(SymphonyElixirWeb.AuthPlug, :load_current_user)
+    plug(SymphonyElixirWeb.AuthPlug, {:require_access, :read})
+  end
+
+  pipeline :api_write do
+    plug(:accepts, ["json"])
+    plug(:fetch_session)
+    plug(SymphonyElixirWeb.AuthPlug, :load_current_user)
+    plug(SymphonyElixirWeb.AuthPlug, {:require_access, :write})
+  end
+
+  pipeline :api_admin do
+    plug(:accepts, ["json"])
+    plug(:fetch_session)
+    plug(SymphonyElixirWeb.AuthPlug, :load_current_user)
+    plug(SymphonyElixirWeb.AuthPlug, {:require_access, :admin})
+  end
+
   scope "/", SymphonyElixirWeb do
-    pipe_through(:api)
+    pipe_through(:browser)
+
+    get("/auth/gitlab", AuthController, :login)
+    get("/auth/gitlab/callback", AuthController, :callback)
+    get("/auth/logout", AuthController, :logout)
+  end
+
+  scope "/", SymphonyElixirWeb do
+    pipe_through(:api_session)
+
+    get("/api/auth/session", AuthController, :session)
+    get("/api/projects", ProjectController, :index)
+    post("/api/projects/:id/activate", ProjectController, :activate)
+  end
+
+  scope "/", SymphonyElixirWeb do
+    pipe_through(:api_auth)
 
     get("/api/issues", IssueController, :index)
     get("/api/issues/:id", IssueController, :show)
     get("/api/issues/:id/notes", IssueController, :notes)
-    post("/api/issues/:id/notes", IssueController, :create_note)
-    patch("/api/issues/:id/gitlab", IssueController, :update_gitlab)
-    patch("/api/issues/:id/workflow", IssueController, :update_workflow)
     get("/api/issues/:id/events", IssueController, :events)
 
     get("/api/workflow/statuses", WorkflowController, :statuses)
-    post("/api/workflow/transitions", WorkflowController, :transition)
     get("/api/issues/:id/blockers", WorkflowController, :blockers)
+
+    get("/api/runs", RunController, :index)
+    get("/api/runs/:id", RunController, :show)
+    get("/api/runs/:id/events", RunController, :events)
+
+    get("/api/monitor/state", MonitorController, :state)
+    get("/api/monitor/events", MonitorController, :events)
+    get("/api/monitor/blocks", MonitorController, :blocks)
+    get("/api/monitor/runs", MonitorController, :runs)
+    get("/api/monitor/runs/:id", MonitorController, :run)
+    get("/api/monitor/runs/:id/events", MonitorController, :run_events)
+
+    get("/api/sync/status", SyncController, :status)
+
+    get("/api/settings/gitlab", SettingsController, :gitlab)
+    get("/api/settings/workflow", SettingsController, :workflow)
+
+    get("/api/v1/state", ObservabilityApiController, :state)
+    get("/api/v1/:issue_identifier", ObservabilityApiController, :issue)
+  end
+
+  scope "/", SymphonyElixirWeb do
+    pipe_through(:api_write)
+
+    post("/api/issues/:id/notes", IssueController, :create_note)
+    patch("/api/issues/:id/gitlab", IssueController, :update_gitlab)
+    patch("/api/issues/:id/workflow", IssueController, :update_workflow)
+
+    post("/api/workflow/transitions", WorkflowController, :transition)
     post("/api/issues/:id/blockers", WorkflowController, :add_blocker)
     delete("/api/issues/:id/blockers/:blocking_issue_id", WorkflowController, :remove_blocker)
 
     post("/api/agents/dispatch", AgentController, :dispatch)
     post("/api/issues/:id/run", AgentController, :run_issue)
-    get("/api/runs", RunController, :index)
-    get("/api/runs/:id", RunController, :show)
-    get("/api/runs/:id/events", RunController, :events)
     post("/api/runs/:id/cancel", RunController, :cancel)
     post("/api/runs/:id/retry", RunController, :retry)
-
-    get("/api/monitor/state", MonitorController, :state)
-    get("/api/monitor/events", MonitorController, :events)
-    get("/api/monitor/blocks", MonitorController, :blocks)
     post("/api/monitor/blocks/:id/resolve", MonitorController, :resolve_block)
-    post("/api/monitor/refresh", MonitorController, :refresh)
-    get("/api/monitor/runs", MonitorController, :runs)
-    get("/api/monitor/runs/:id", MonitorController, :run)
-    get("/api/monitor/runs/:id/events", MonitorController, :run_events)
     post("/api/monitor/runs/:id/cancel", MonitorController, :cancel_run)
-
-    get("/api/sync/status", SyncController, :status)
-    post("/api/sync/refresh", SyncController, :refresh)
-
-    get("/api/settings/gitlab", SettingsController, :gitlab)
-    post("/api/settings/gitlab/test", SettingsController, :test_gitlab)
-    get("/api/settings/workflow", SettingsController, :workflow)
     patch("/api/settings/workflow", SettingsController, :update_workflow)
+  end
 
-    get("/api/v1/state", ObservabilityApiController, :state)
+  scope "/", SymphonyElixirWeb do
+    pipe_through(:api_admin)
+
+    post("/api/monitor/refresh", MonitorController, :refresh)
+    post("/api/sync/refresh", SyncController, :refresh)
+    post("/api/settings/gitlab/test", SettingsController, :test_gitlab)
+    put("/api/settings/gitlab/project-token", SettingsController, :update_project_token)
     post("/api/v1/refresh", ObservabilityApiController, :refresh)
-    get("/api/v1/:issue_identifier", ObservabilityApiController, :issue)
   end
 
   scope "/", SymphonyElixirWeb do

@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Repo.Migrations.CreateIssueRelations do
       add :source_issue_id, references(:gitlab_issues, type: :uuid, on_delete: :delete_all), null: false
       add :target_issue_id, references(:gitlab_issues, type: :uuid, on_delete: :delete_all), null: false
       add :relation_type, :text, null: false
-      add :created_by, :text, null: false, default: "local_operator"
+      add :created_by, :text, null: false, default: "system"
       add :reason, :text
       add :metadata, :map, null: false, default: %{}
 

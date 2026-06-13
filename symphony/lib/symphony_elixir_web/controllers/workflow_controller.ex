@@ -2,8 +2,11 @@ defmodule SymphonyElixirWeb.WorkflowController do
   use Phoenix.Controller, formats: [:json]
 
   alias Plug.Conn
+  alias Symphony.GitLab.{Client, IssueMapper}
+  alias Symphony.GitLab.Config, as: GitLabConfig
   alias SymphonyElixir.Persistence.WorkflowState
-  alias SymphonyElixir.{Store, Tracker}
+  alias SymphonyElixir.Store
+  alias SymphonyElixirWeb.AuthPlug
   alias SymphonyElixirWeb.DTO
 
   @statuses WorkflowState.statuses()
@@ -17,14 +20,14 @@ defmodule SymphonyElixirWeb.WorkflowController do
 
   @spec transition(Conn.t(), map()) :: Conn.t()
   def transition(conn, %{"issue_id" => issue_id, "status" => status} = params) do
-    with %{} = issue <- find_issue(issue_id),
+    with %{} = issue <- find_issue(conn, issue_id),
          {:ok, _workflow} <-
            Store.transition_workflow(issue.id, status,
-             source: "local_ui",
-             actor: "local_operator",
+             source: "user_ui",
+             actor: AuthPlug.actor(conn),
              reason: params["reason"]
            ),
-         :ok <- maybe_close_done_issue(issue.id, status),
+         :ok <- maybe_close_done_issue(conn, issue, status),
          %{} = updated <- Store.get_issue(issue.id) do
       json(conn, %{issue: DTO.issue(updated)})
     else
@@ -37,7 +40,7 @@ defmodule SymphonyElixirWeb.WorkflowController do
 
   @spec blockers(Conn.t(), map()) :: Conn.t()
   def blockers(conn, %{"id" => id}) do
-    case find_issue(id) do
+    case find_issue(conn, id) do
       nil -> error(conn, 404, "issue_not_found", "Issue not found")
       issue -> json(conn, %{blockers: Store.list_blockers(issue.id) |> Enum.map(&DTO.issue_ref/1)})
     end
@@ -45,9 +48,9 @@ defmodule SymphonyElixirWeb.WorkflowController do
 
   @spec add_blocker(Conn.t(), map()) :: Conn.t()
   def add_blocker(conn, %{"id" => id, "blocking_issue_id" => blocking_id} = params) do
-    with %{} = issue <- find_issue(id),
-         %{} = blocking_issue <- find_issue(blocking_id),
-         {:ok, _edge} <- Store.add_blocker(issue.id, blocking_issue.id, reason: params["reason"]) do
+    with %{} = issue <- find_issue(conn, id),
+         %{} = blocking_issue <- find_issue(conn, blocking_id),
+         {:ok, _edge} <- Store.add_blocker(issue.id, blocking_issue.id, actor: AuthPlug.actor(conn), reason: params["reason"]) do
       json(conn, %{blockers: Store.list_blockers(issue.id) |> Enum.map(&DTO.issue_ref/1)})
     else
       nil -> error(conn, 404, "issue_not_found", "Issue not found")
@@ -59,8 +62,8 @@ defmodule SymphonyElixirWeb.WorkflowController do
 
   @spec remove_blocker(Conn.t(), map()) :: Conn.t()
   def remove_blocker(conn, %{"id" => id, "blocking_issue_id" => blocking_id}) do
-    with %{} = issue <- find_issue(id),
-         %{} = blocking_issue <- find_issue(blocking_id),
+    with %{} = issue <- find_issue(conn, id),
+         %{} = blocking_issue <- find_issue(conn, blocking_id),
          :ok <- Store.remove_blocker(issue.id, blocking_issue.id) do
       json(conn, %{blockers: Store.list_blockers(issue.id) |> Enum.map(&DTO.issue_ref/1)})
     else
@@ -69,11 +72,61 @@ defmodule SymphonyElixirWeb.WorkflowController do
     end
   end
 
-  defp find_issue(id), do: Store.get_issue(id) || Store.get_issue_by_iid(id) || Store.get_issue_by_identifier(id)
+  defp find_issue(conn, id) do
+    case current_project_setting_id(conn) do
+      nil ->
+        nil
 
-  defp maybe_close_done_issue(issue_id, status) do
-    if normalize_status(status) == "done", do: Tracker.close_issue(issue_id), else: :ok
-    :ok
+      project_id ->
+        Store.list_issues(project_setting_id: project_id)
+        |> Enum.find(&issue_matches?(&1, id))
+    end
+  end
+
+  defp issue_matches?(issue, id) do
+    issue.id == id or to_string(issue.iid) == to_string(id) or issue.identifier == id
+  end
+
+  defp maybe_close_done_issue(conn, issue, status) do
+    if normalize_status(status) == "done" do
+      close_user_issue(conn, issue)
+    else
+      :ok
+    end
+  end
+
+  defp close_user_issue(_conn, %{gitlab_state: "closed"}), do: :ok
+
+  defp close_user_issue(conn, issue) do
+    with {:ok, config, auth_opts} <- user_gitlab_context(conn, issue),
+         {:ok, raw_issue} <- Client.update_project_issue(config, issue.iid, %{"state_event" => "close"}, auth_opts) do
+      raw_issue |> IssueMapper.from_gitlab() |> Store.upsert_issue()
+      Store.record_event("gitlab_issue_closed", "user_ui", %{reason: "workflow done"}, issue_id: issue.id, actor: AuthPlug.actor(conn))
+      :ok
+    end
+  end
+
+  defp user_gitlab_context(conn, issue) do
+    with {:ok, access_token} <- AuthPlug.oauth_access_token(conn),
+         {:ok, config} <- project_config_for_issue(issue) do
+      {:ok, config, [auth: {:bearer, access_token}]}
+    end
+  end
+
+  defp project_config_for_issue(issue) do
+    with project_id when is_binary(project_id) <- Map.get(issue, :gitlab_project_setting_id),
+         %{} = project <- Store.project_by_id(project_id) do
+      GitLabConfig.from_project_setting(project)
+    else
+      _ -> {:error, :project_not_found}
+    end
+  end
+
+  defp current_project_setting_id(conn) do
+    case AuthPlug.current_user(conn) do
+      %{project_setting_id: project_setting_id} -> project_setting_id
+      _ -> nil
+    end
   end
 
   defp normalize_status(status) when is_binary(status), do: status |> String.trim() |> String.downcase()

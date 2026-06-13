@@ -124,9 +124,6 @@ defmodule SymphonyElixir.Config do
       settings.tracker.kind not in ["gitlab", "memory"] ->
         {:error, {:unsupported_tracker_kind, settings.tracker.kind}}
 
-      settings.tracker.kind == "gitlab" and is_nil(System.get_env("GITLAB_TOKEN")) ->
-        {:error, :missing_gitlab_token}
-
       true ->
         :ok
     end

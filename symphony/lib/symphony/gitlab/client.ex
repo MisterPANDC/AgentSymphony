@@ -9,47 +9,67 @@ defmodule Symphony.GitLab.Client do
 
   @timeout_ms 30_000
 
-  @spec get_project(Config.t()) :: {:ok, map()} | {:error, Error.t()}
-  def get_project(%Config{} = config), do: request(config, :get, project_path(config), [])
+  @type auth :: {:private_token, String.t()} | {:bearer, String.t()}
 
-  @spec list_project_issues(Config.t(), map() | keyword()) :: {:ok, [map()]} | {:error, Error.t()}
-  def list_project_issues(%Config{} = config, params \\ %{}) do
-    paginated_get(config, project_path(config) <> "/issues", params)
+  @spec get_project(Config.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def get_project(%Config{} = config, opts \\ []), do: request(config, :get, project_path(config), opts)
+
+  @spec get_project_by_id(Config.t(), integer() | String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def get_project_by_id(%Config{} = config, project_id, opts \\ []) do
+    request(config, :get, "/projects/#{project_id}", opts)
   end
 
-  @spec get_project_issue(Config.t(), integer() | String.t()) :: {:ok, map()} | {:error, Error.t()}
-  def get_project_issue(%Config{} = config, issue_iid) do
-    request(config, :get, project_path(config) <> "/issues/#{issue_iid}", [])
+  @spec list_user_projects(Config.t(), map() | keyword(), keyword()) :: {:ok, [map()]} | {:error, Error.t()}
+  def list_user_projects(%Config{} = config, params \\ %{}, opts \\ []) do
+    params =
+      params
+      |> Map.new()
+      |> Map.put_new(:membership, true)
+      |> Map.put_new(:simple, true)
+      |> Map.put_new(:order_by, "last_activity_at")
+      |> Map.put_new(:sort, "desc")
+
+    paginated_get(config, "/projects", params, opts)
   end
 
-  @spec create_project_issue(Config.t(), map()) :: {:ok, map()} | {:error, Error.t()}
-  def create_project_issue(%Config{} = config, attrs) when is_map(attrs) do
-    request(config, :post, project_path(config) <> "/issues", json: attrs)
+  @spec list_project_issues(Config.t(), map() | keyword(), keyword()) :: {:ok, [map()]} | {:error, Error.t()}
+  def list_project_issues(%Config{} = config, params \\ %{}, opts \\ []) do
+    paginated_get(config, project_path(config) <> "/issues", params, opts)
   end
 
-  @spec update_project_issue(Config.t(), integer() | String.t(), map()) ::
+  @spec get_project_issue(Config.t(), integer() | String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def get_project_issue(%Config{} = config, issue_iid, opts \\ []) do
+    request(config, :get, project_path(config) <> "/issues/#{issue_iid}", opts)
+  end
+
+  @spec create_project_issue(Config.t(), map(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def create_project_issue(%Config{} = config, attrs, opts \\ []) when is_map(attrs) do
+    request(config, :post, project_path(config) <> "/issues", Keyword.merge(opts, json: attrs))
+  end
+
+  @spec update_project_issue(Config.t(), integer() | String.t(), map(), keyword()) ::
           {:ok, map()} | {:error, Error.t()}
-  def update_project_issue(%Config{} = config, issue_iid, attrs) when is_map(attrs) do
-    request(config, :put, project_path(config) <> "/issues/#{issue_iid}", json: attrs)
+  def update_project_issue(%Config{} = config, issue_iid, attrs, opts \\ []) when is_map(attrs) do
+    request(config, :put, project_path(config) <> "/issues/#{issue_iid}", Keyword.merge(opts, json: attrs))
   end
 
-  @spec list_issue_notes(Config.t(), integer() | String.t(), map() | keyword()) ::
+  @spec list_issue_notes(Config.t(), integer() | String.t(), map() | keyword(), keyword()) ::
           {:ok, [map()]} | {:error, Error.t()}
-  def list_issue_notes(%Config{} = config, issue_iid, params \\ %{}) do
-    paginated_get(config, project_path(config) <> "/issues/#{issue_iid}/notes", params)
+  def list_issue_notes(%Config{} = config, issue_iid, params \\ %{}, opts \\ []) do
+    paginated_get(config, project_path(config) <> "/issues/#{issue_iid}/notes", params, opts)
   end
 
-  @spec create_issue_note(Config.t(), integer() | String.t(), String.t()) ::
+  @spec create_issue_note(Config.t(), integer() | String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, Error.t()}
-  def create_issue_note(%Config{} = config, issue_iid, body) when is_binary(body) do
-    request(config, :post, project_path(config) <> "/issues/#{issue_iid}/notes", json: %{body: body})
+  def create_issue_note(%Config{} = config, issue_iid, body, opts \\ []) when is_binary(body) do
+    request(config, :post, project_path(config) <> "/issues/#{issue_iid}/notes", Keyword.merge(opts, json: %{body: body}))
   end
 
-  @spec validate(Config.t()) :: {:ok, map()} | {:error, Error.t()}
-  def validate(%Config{} = config) do
+  @spec validate(Config.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def validate(%Config{} = config, opts \\ []) do
     with :ok <- validate_api_root(config),
-         {:ok, project} <- get_project(config),
-         {:ok, issues} <- list_project_issues(config, state: "all", per_page: 1) do
+         {:ok, project} <- get_project(config, opts),
+         {:ok, issues} <- list_project_issues(config, %{state: "all", per_page: 1}, opts) do
       {:ok,
        %{
          project: project,
@@ -71,20 +91,20 @@ defmodule Symphony.GitLab.Client do
   def validate_api_root(_config),
     do: {:error, %Error{type: :invalid_config, message: "GitLab API root is missing"}}
 
-  defp paginated_get(config, path, params) do
+  defp paginated_get(config, path, params, opts) do
     params = params |> Map.new() |> Map.put_new(:per_page, config.sync_page_size)
-    do_paginated_get(config, path, params, [])
+    do_paginated_get(config, path, params, opts, [])
   end
 
-  defp do_paginated_get(config, path, params, acc) do
-    case request(config, :get, path, params: params, raw_response: true) do
+  defp do_paginated_get(config, path, params, opts, acc) do
+    case request(config, :get, path, Keyword.merge(opts, params: params, raw_response: true)) do
       {:ok, response} ->
         body = normalize_list_body(response.body)
         next_page = next_page(response)
         acc = acc ++ body
 
         if next_page do
-          do_paginated_get(config, path, Map.put(params, :page, next_page), acc)
+          do_paginated_get(config, path, Map.put(params, :page, next_page), opts, acc)
         else
           {:ok, acc}
         end
@@ -104,7 +124,7 @@ defmodule Symphony.GitLab.Client do
       req_opts = [
         method: method,
         url: config.gitlab_api_root <> path,
-        headers: [{"PRIVATE-TOKEN", config.token}, {"accept", "application/json"}],
+        headers: auth_headers(config, opts),
         receive_timeout: @timeout_ms
       ]
 
@@ -165,6 +185,24 @@ defmodule Symphony.GitLab.Client do
   defp project_path(%Config{gitlab_project_path_param: path_param}) do
     "/projects/#{path_param}"
   end
+
+  defp auth_headers(config, opts) do
+    auth = Keyword.get(opts, :auth) || default_auth(config)
+
+    case auth do
+      {:bearer, token} when is_binary(token) and token != "" ->
+        [{"authorization", "Bearer #{token}"}, {"accept", "application/json"}]
+
+      {:private_token, token} when is_binary(token) and token != "" ->
+        [{"PRIVATE-TOKEN", token}, {"accept", "application/json"}]
+
+      _ ->
+        [{"accept", "application/json"}]
+    end
+  end
+
+  defp default_auth(%Config{token: token}) when is_binary(token) and token != "", do: {:private_token, token}
+  defp default_auth(_config), do: nil
 
   defp req_extra_options do
     Application.get_env(:symphony_elixir, :gitlab_req_options, [])

@@ -81,18 +81,46 @@ defmodule SymphonyElixir.Sync.Poller do
   end
 
   defp run_sync do
-    with {:ok, config} <- Config.load(),
+    case Store.projects() do
+      [] -> {:error, :project_not_selected}
+      projects -> sync_projects(projects)
+    end
+  end
+
+  defp sync_projects(projects) do
+    configured = Enum.filter(projects, &(&1.project_access_token_status == "configured"))
+
+    if configured == [] do
+      put_error_cursor(@issue_cursor, :project_access_token_missing)
+      {:error, :project_access_token_missing}
+    else
+      results = Enum.map(configured, &sync_project/1)
+
+      errors =
+        results
+        |> Enum.filter(&match?({:error, _}, &1))
+        |> Enum.map(fn {:error, reason} -> reason end)
+
+      if errors == [] do
+        summaries = Enum.map(results, fn {:ok, summary} -> summary end)
+        {:ok, %{projects: summaries, issue_count: Enum.sum(Enum.map(summaries, & &1.issue_count))}}
+      else
+        put_error_cursor(@issue_cursor, hd(errors))
+        {:error, {:project_sync_failed, errors}}
+      end
+    end
+  end
+
+  defp sync_project(project) do
+    with {:ok, token} <- Store.project_access_token(project.id),
+         {:ok, config} <- Config.from_project_setting(project, token),
          :ok <- Client.validate_api_root(config),
-         {:ok, project} <- Client.get_project(config),
-         project_setting <- upsert_project(config, project),
+         {:ok, raw_project} <- Client.get_project(config, auth: {:private_token, token}),
+         project_setting <- upsert_project(config, raw_project),
          {:ok, issues} <- sync_issues(config),
          :ok <- put_success_cursor(@issue_cursor, DateTime.utc_now()) do
-      Store.record_event("sync_project_validated", "gitlab_sync", %{project_id: project["id"]})
+      Store.record_event("sync_project_validated", "gitlab_sync", %{project_id: raw_project["id"]})
       {:ok, %{project_id: project_setting.project_id, issue_count: length(issues)}}
-    else
-      {:error, reason} ->
-        put_error_cursor(@issue_cursor, reason)
-        {:error, reason}
     end
   end
 
@@ -150,9 +178,9 @@ defmodule SymphonyElixir.Sync.Poller do
 
   @spec sync_issue_notes(String.t()) :: {:ok, [map()]} | {:error, term()}
   def sync_issue_notes(issue_id) when is_binary(issue_id) do
-    with {:ok, config} <- Config.load(),
-         %{} = issue <- Store.get_issue(issue_id),
-         {:ok, raw_notes} <- Client.list_issue_notes(config, issue.iid, per_page: config.sync_page_size) do
+    with %{} = issue <- Store.get_issue(issue_id),
+         {:ok, config} <- config_for_issue(issue),
+         {:ok, raw_notes} <- Client.list_issue_notes(config, issue.iid, %{per_page: config.sync_page_size}, auth: {:private_token, config.token}) do
       notes =
         Enum.map(raw_notes, fn raw ->
           Store.upsert_note(issue_id, NoteMapper.from_gitlab(raw))
@@ -163,6 +191,18 @@ defmodule SymphonyElixir.Sync.Poller do
     else
       nil -> {:error, :issue_not_found}
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp config_for_issue(issue) do
+    with project_id when is_binary(project_id) <- Map.get(issue, :gitlab_project_setting_id),
+         %{} = project <- Store.project_by_id(project_id),
+         {:ok, token} <- Store.project_access_token(project.id) do
+      Config.from_project_setting(project, token)
+    else
+      nil -> {:error, :project_not_found}
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, :project_access_token_missing}
     end
   end
 
@@ -206,9 +246,15 @@ defmodule SymphonyElixir.Sync.Poller do
   end
 
   defp interval_ms do
-    case Config.load() do
-      {:ok, config} -> config.sync_interval_ms
-      _ -> 60_000
+    case System.get_env("SYMPHONY_SYNC_INTERVAL_MS") do
+      value when is_binary(value) ->
+        case Integer.parse(value) do
+          {int, ""} when int > 0 -> int
+          _ -> 60_000
+        end
+
+      _ ->
+        60_000
     end
   end
 end

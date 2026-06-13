@@ -3,16 +3,17 @@ defmodule SymphonyElixirWeb.RunController do
 
   alias Plug.Conn
   alias SymphonyElixir.Store
+  alias SymphonyElixirWeb.AuthPlug
   alias SymphonyElixirWeb.DTO
 
   @spec index(Conn.t(), map()) :: Conn.t()
   def index(conn, _params) do
-    json(conn, %{runs: Store.list_runs() |> Enum.map(&DTO.run/1)})
+    json(conn, %{runs: Store.list_runs(run_filters(conn)) |> Enum.map(&DTO.run/1)})
   end
 
   @spec show(Conn.t(), map()) :: Conn.t()
   def show(conn, %{"id" => id}) do
-    case Store.get_run(id) do
+    case visible_run(conn, id) do
       nil -> error(conn, 404, "run_not_found", "Run not found")
       run -> json(conn, %{run: DTO.run(run)})
     end
@@ -20,7 +21,7 @@ defmodule SymphonyElixirWeb.RunController do
 
   @spec events(Conn.t(), map()) :: Conn.t()
   def events(conn, %{"id" => id}) do
-    case Store.get_run(id) do
+    case visible_run(conn, id) do
       nil -> error(conn, 404, "run_not_found", "Run not found")
       _run -> json(conn, %{events: Store.list_run_events(id)})
     end
@@ -28,26 +29,52 @@ defmodule SymphonyElixirWeb.RunController do
 
   @spec cancel(Conn.t(), map()) :: Conn.t()
   def cancel(conn, %{"id" => id}) do
-    case Store.update_run(id, %{status: "canceled", finished_at: DateTime.utc_now(), exit_reason: "canceled by operator"}) do
+    case visible_run(conn, id) && Store.update_run(id, %{status: "canceled", finished_at: DateTime.utc_now(), exit_reason: "canceled by operator"}) do
       {:ok, run} ->
-        Store.add_run_event(id, "canceled", "Run canceled by operator", %{})
+        Store.add_run_event(id, "canceled", "Run canceled by operator", %{actor: AuthPlug.actor(conn)})
         json(conn, %{run: DTO.run(Store.get_run(run.id))})
 
       {:error, reason} ->
         error(conn, 404, "run_cancel_failed", inspect(reason))
+
+      nil ->
+        error(conn, 404, "run_not_found", "Run not found")
     end
   end
 
   @spec retry(Conn.t(), map()) :: Conn.t()
   def retry(conn, %{"id" => id}) do
-    case Store.get_run(id) do
+    case visible_run(conn, id) do
       nil ->
         error(conn, 404, "run_not_found", "Run not found")
 
       run ->
         {:ok, retry} = Store.create_run(run.gitlab_issue_id, %{status: "queued", mode: "retry"})
-        Store.add_run_event(retry.id, "queued", "Retry queued by operator", %{previous_run_id: id})
+        Store.add_run_event(retry.id, "queued", "Retry queued by operator", %{previous_run_id: id, actor: AuthPlug.actor(conn)})
         json(conn, %{run: DTO.run(Store.get_run(retry.id))})
+    end
+  end
+
+  defp visible_run(conn, id) do
+    case {Store.get_run(id), current_project_setting_id(conn)} do
+      {nil, _project_id} -> nil
+      {%{} = _run, nil} -> nil
+      {%{issue: %{gitlab_project_setting_id: project_id}} = run, project_id} -> run
+      _ -> nil
+    end
+  end
+
+  defp run_filters(conn) do
+    case current_project_setting_id(conn) do
+      nil -> []
+      project_id -> [project_setting_id: project_id]
+    end
+  end
+
+  defp current_project_setting_id(conn) do
+    case AuthPlug.current_user(conn) do
+      %{project_setting_id: project_setting_id} -> project_setting_id
+      _ -> nil
     end
   end
 

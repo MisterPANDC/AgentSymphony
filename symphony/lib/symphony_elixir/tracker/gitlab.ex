@@ -28,8 +28,8 @@ defmodule SymphonyElixir.Tracker.GitLab do
 
   @impl true
   def create_comment(issue_id, body) when is_binary(issue_id) and is_binary(body) do
-    with {:ok, config} <- Config.load(),
-         %{} = issue <- Store.get_issue(issue_id),
+    with %{} = issue <- Store.get_issue(issue_id),
+         {:ok, config} <- project_gitlab_config(issue),
          {:ok, raw_note} <- Client.create_issue_note(config, issue.iid, body) do
       Store.upsert_note(issue_id, NoteMapper.from_gitlab(raw_note))
       :ok
@@ -53,8 +53,8 @@ defmodule SymphonyElixir.Tracker.GitLab do
 
   @impl true
   def create_followup_issue(current_issue_id, attrs) when is_binary(current_issue_id) and is_map(attrs) do
-    with {:ok, config} <- Config.load(),
-         %{} = current_issue <- Store.get_issue(current_issue_id),
+    with %{} = current_issue <- Store.get_issue(current_issue_id),
+         {:ok, config} <- project_gitlab_config(current_issue),
          {:ok, request} <- followup_issue_request(current_issue, attrs),
          {:ok, raw_issue} <- Client.create_project_issue(config, request.gitlab_attrs) do
       persist_followup_issue(config, current_issue, raw_issue, request)
@@ -76,8 +76,8 @@ defmodule SymphonyElixir.Tracker.GitLab do
   end
 
   defp do_close_issue(issue_id) do
-    with {:ok, config} <- Config.load(),
-         %{} = issue <- Store.get_issue(issue_id),
+    with %{} = issue <- Store.get_issue(issue_id),
+         {:ok, config} <- project_gitlab_config(issue),
          true <- issue.gitlab_state != "closed" || :already_closed,
          {:ok, raw_issue} <- Client.update_project_issue(config, issue.iid, %{"state_event" => "close"}) do
       raw_issue |> IssueMapper.from_gitlab() |> Store.upsert_issue()
@@ -255,6 +255,18 @@ defmodule SymphonyElixir.Tracker.GitLab do
     )
   rescue
     _ -> :ok
+  end
+
+  defp project_gitlab_config(issue) do
+    with project_id when is_binary(project_id) <- Map.get(issue, :gitlab_project_setting_id),
+         %{} = project <- Store.project_by_id(project_id),
+         {:ok, token} <- Store.project_access_token(project.id) do
+      Config.from_project_setting(project, token)
+    else
+      nil -> {:error, :project_not_found}
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, :project_access_token_missing}
+    end
   end
 
   defp required_string(attrs, key) do

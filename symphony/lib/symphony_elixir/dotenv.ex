@@ -1,6 +1,6 @@
 defmodule SymphonyElixir.Dotenv do
   @moduledoc """
-  Minimal `.env.local` loader for local single-user runtime.
+  Minimal `.env.local` loader for Symphony runtime configuration.
 
   Values already present in the process environment win, so shell-provided
   secrets can override the local file without rewriting it.

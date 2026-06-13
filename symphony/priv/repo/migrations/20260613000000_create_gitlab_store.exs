@@ -96,7 +96,7 @@ defmodule SymphonyElixir.Repo.Migrations.CreateGitlabStore do
       add :id, :uuid, primary_key: true
       add :blocked_issue_id, references(:gitlab_issues, type: :uuid, on_delete: :delete_all), null: false
       add :blocking_issue_id, references(:gitlab_issues, type: :uuid, on_delete: :delete_all), null: false
-      add :created_by, :text, null: false, default: "local_operator"
+      add :created_by, :text, null: false, default: "system"
       add :reason, :text
 
       timestamps(type: :utc_datetime_usec)
@@ -119,7 +119,7 @@ defmodule SymphonyElixir.Repo.Migrations.CreateGitlabStore do
 
     create index(:issue_events, [:gitlab_issue_id])
     create index(:issue_events, [:event_type])
-    create constraint(:issue_events, :issue_events_source_check, check: "source in ('gitlab_sync', 'local_ui', 'agent', 'system')")
+    create constraint(:issue_events, :issue_events_source_check, check: "source in ('gitlab_sync', 'user_ui', 'agent', 'system')")
 
     create table(:sync_cursors, primary_key: false) do
       add :id, :uuid, primary_key: true

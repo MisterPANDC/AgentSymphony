@@ -64,6 +64,32 @@ defmodule SymphonyElixir.Store do
   @spec project() :: map() | nil
   def project, do: backend().project()
 
+  @spec projects() :: [map()]
+  def projects, do: backend().projects()
+
+  @spec project_by_id(String.t()) :: map() | nil
+  def project_by_id(id), do: backend().project_by_id(id)
+
+  @spec upsert_gitlab_identity(map()) :: map()
+  def upsert_gitlab_identity(attrs), do: backend().upsert_gitlab_identity(attrs)
+
+  @spec upsert_oauth_token(String.t(), map()) :: map()
+  def upsert_oauth_token(identity_id, attrs), do: backend().upsert_oauth_token(identity_id, attrs)
+
+  @spec oauth_token(String.t()) :: map() | nil
+  def oauth_token(identity_id), do: backend().oauth_token(identity_id)
+
+  @spec upsert_project_membership(String.t(), String.t(), map()) :: map()
+  def upsert_project_membership(identity_id, project_setting_id, attrs),
+    do: backend().upsert_project_membership(identity_id, project_setting_id, attrs)
+
+  @spec put_project_access_token(String.t(), String.t(), String.t() | nil) :: {:ok, map()} | {:error, term()}
+  def put_project_access_token(project_setting_id, token, identity_id \\ nil),
+    do: backend().put_project_access_token(project_setting_id, token, identity_id)
+
+  @spec project_access_token(map() | String.t()) :: {:ok, String.t()} | {:error, term()}
+  def project_access_token(project_or_id), do: backend().project_access_token(project_or_id)
+
   @spec upsert_issue(map()) :: map()
   def upsert_issue(attrs), do: backend().upsert_issue(attrs)
 

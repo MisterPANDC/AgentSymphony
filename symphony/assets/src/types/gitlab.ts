@@ -5,10 +5,13 @@ export interface GitLabSettingsDTO {
     token_status: "configured" | "missing" | "redacted";
   };
   project: {
+    id: string;
     project_id: number | null;
     path_with_namespace: string | null;
     name: string | null;
     web_url: string | null;
     read_only: boolean;
+    project_access_token_status: "configured" | "missing";
+    project_access_token_set_at?: string | null;
   } | null;
 }

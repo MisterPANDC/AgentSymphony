@@ -50,7 +50,7 @@ defmodule Symphony.GitLab.ClientTest do
       gitlab_project_ref: "123",
       gitlab_project_path_param: "123",
       token: "test-token",
-      source: :split_config,
+      source: :project_setting,
       sync_page_size: 2
     }
   end

@@ -17,7 +17,7 @@ defmodule SymphonyElixir.Persistence.IssueRelation do
     belongs_to(:target_issue, Issue)
 
     field(:relation_type, :string)
-    field(:created_by, :string, default: "local_operator")
+    field(:created_by, :string, default: "system")
     field(:reason, :string)
     field(:metadata, :map, default: %{})
 

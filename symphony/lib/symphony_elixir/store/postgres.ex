@@ -7,8 +7,13 @@ defmodule SymphonyElixir.Store.Postgres do
 
   import Ecto.Query
 
+  alias SymphonyElixir.Auth.Config, as: AuthConfig
+  alias SymphonyElixir.Auth.TokenVault
   alias SymphonyElixir.Persistence.AgentRun
   alias SymphonyElixir.Persistence.AgentRunEvent
+  alias SymphonyElixir.Persistence.GitLabIdentity
+  alias SymphonyElixir.Persistence.GitLabOAuthToken
+  alias SymphonyElixir.Persistence.GitLabProjectMembership
   alias SymphonyElixir.Persistence.Issue
   alias SymphonyElixir.Persistence.IssueDependency
   alias SymphonyElixir.Persistence.IssueEvent
@@ -38,12 +43,12 @@ defmodule SymphonyElixir.Store.Postgres do
       |> atomize_keys()
       |> Map.put_new(:read_only, false)
 
-    existing = Repo.one(from(p in ProjectSetting, order_by: [asc: p.inserted_at], limit: 1))
+    existing = find_project_setting(attrs)
 
     (existing || %ProjectSetting{})
     |> ProjectSetting.changeset(attrs)
     |> Repo.insert_or_update!()
-    |> plain()
+    |> project_public()
   end
 
   @spec project() :: map() | nil
@@ -52,13 +57,155 @@ defmodule SymphonyElixir.Store.Postgres do
     |> order_by([p], asc: p.inserted_at)
     |> limit(1)
     |> Repo.one()
+    |> maybe_project_public()
+  end
+
+  @spec projects() :: [map()]
+  def projects do
+    ProjectSetting
+    |> order_by([p], desc: p.last_validated_at, asc: p.path_with_namespace)
+    |> Repo.all()
+    |> Enum.map(&project_public/1)
+  end
+
+  @spec project_by_id(String.t()) :: map() | nil
+  def project_by_id(id) do
+    case Repo.get(ProjectSetting, id) do
+      nil -> nil
+      project -> project_public(project)
+    end
+  end
+
+  @spec upsert_gitlab_identity(map()) :: map()
+  def upsert_gitlab_identity(attrs) do
+    now = now()
+
+    attrs =
+      attrs
+      |> atomize_keys()
+      |> Map.update(:gitlab_user_id, nil, &to_string/1)
+      |> Map.update(:sub, nil, &to_string/1)
+      |> Map.put(:last_login_at, now)
+      |> Map.put_new(:raw_claims, %{})
+
+    identity =
+      Repo.one(
+        from(i in GitLabIdentity,
+          where: i.issuer == ^attrs.issuer and i.gitlab_user_id == ^attrs.gitlab_user_id,
+          limit: 1
+        )
+      )
+
+    (identity || %GitLabIdentity{})
+    |> GitLabIdentity.changeset(attrs)
+    |> Repo.insert_or_update!()
+    |> plain()
+  end
+
+  @spec upsert_oauth_token(String.t(), map()) :: map()
+  def upsert_oauth_token(identity_id, attrs) do
+    now = now()
+
+    with {:ok, encrypted_access_token} <- TokenVault.seal(attrs["access_token"] || attrs[:access_token]),
+         {:ok, encrypted_refresh_token} <- TokenVault.seal(attrs["refresh_token"] || attrs[:refresh_token]) do
+      attrs = %{
+        identity_id: identity_id,
+        encrypted_access_token: encrypted_access_token,
+        encrypted_refresh_token: encrypted_refresh_token || existing_refresh_token(identity_id),
+        scopes: scopes(attrs),
+        token_type: attrs["token_type"] || attrs[:token_type],
+        expires_at: expires_at(attrs, now),
+        last_refreshed_at: now
+      }
+
+      token =
+        Repo.one(from(t in GitLabOAuthToken, where: t.identity_id == ^identity_id, limit: 1))
+
+      (token || %GitLabOAuthToken{})
+      |> GitLabOAuthToken.changeset(attrs)
+      |> Repo.insert_or_update!()
+      |> plain()
+    else
+      {:error, reason} -> raise "failed to seal OAuth token: #{inspect(reason)}"
+    end
+  end
+
+  @spec oauth_token(String.t()) :: map() | nil
+  def oauth_token(identity_id) do
+    GitLabOAuthToken
+    |> where([t], t.identity_id == ^identity_id)
+    |> limit(1)
+    |> Repo.one()
     |> maybe_plain()
   end
+
+  @spec upsert_project_membership(String.t(), String.t(), map()) :: map()
+  def upsert_project_membership(identity_id, project_setting_id, attrs) do
+    raw_access_level = attrs[:access_level] || attrs["access_level"]
+
+    attrs =
+      attrs
+      |> atomize_keys()
+      |> Map.update(:gitlab_user_id, nil, &to_string/1)
+      |> Map.put(:identity_id, identity_id)
+      |> Map.put(:gitlab_project_setting_id, project_setting_id)
+      |> Map.put(:last_checked_at, now())
+      |> Map.put_new(:raw_gitlab, %{})
+      |> Map.update(:role, nil, fn
+        nil -> AuthConfig.role_for_access_level(raw_access_level)
+        role -> role
+      end)
+
+    membership =
+      Repo.one(
+        from(m in GitLabProjectMembership,
+          where: m.identity_id == ^identity_id and m.gitlab_project_setting_id == ^project_setting_id,
+          limit: 1
+        )
+      )
+
+    (membership || %GitLabProjectMembership{})
+    |> GitLabProjectMembership.changeset(attrs)
+    |> Repo.insert_or_update!()
+    |> plain()
+  end
+
+  @spec put_project_access_token(String.t(), String.t(), String.t() | nil) :: {:ok, map()} | {:error, term()}
+  def put_project_access_token(project_setting_id, token, identity_id \\ nil) do
+    with %ProjectSetting{} = project <- Repo.get(ProjectSetting, project_setting_id) || {:error, :project_not_found},
+         {:ok, encrypted_token} <- TokenVault.seal(token) do
+      project =
+        project
+        |> ProjectSetting.changeset(%{
+          encrypted_project_access_token: encrypted_token,
+          project_access_token_set_by_identity_id: identity_id,
+          project_access_token_set_at: now(),
+          read_only: false
+        })
+        |> Repo.update!()
+
+      {:ok, project_public(project)}
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec project_access_token(map() | String.t()) :: {:ok, String.t()} | {:error, term()}
+  def project_access_token(project_id) when is_binary(project_id) do
+    case Repo.get(ProjectSetting, project_id) do
+      nil -> {:error, :project_not_found}
+      project -> project_access_token(project)
+    end
+  end
+
+  def project_access_token(%ProjectSetting{} = project), do: open_project_access_token(project.encrypted_project_access_token)
+  def project_access_token(%{encrypted_project_access_token: encrypted}), do: open_project_access_token(encrypted)
+  def project_access_token(_project), do: {:error, :project_access_token_missing}
 
   @spec upsert_issue(map()) :: map()
   def upsert_issue(attrs) do
     attrs = atomize_keys(attrs)
-    project = current_project!()
+    project = project_for_issue_attrs!(attrs)
 
     attrs =
       attrs
@@ -209,14 +356,14 @@ defmodule SymphonyElixir.Store.Postgres do
 
         append_event(
           "workflow_transitioned",
-          Keyword.get(opts, :source, "local_ui"),
+          Keyword.get(opts, :source, "user_ui"),
           %{
             from: previous_status,
             to: next_status,
             reason: Keyword.get(opts, :reason)
           },
           issue_id: issue_id,
-          actor: Keyword.get(opts, :actor, "local_operator")
+          actor: Keyword.get(opts, :actor, "system")
         )
 
         workflow
@@ -251,7 +398,7 @@ defmodule SymphonyElixir.Store.Postgres do
           |> Repo.update!()
           |> plain()
 
-        append_event("workflow_priority_changed", "local_ui", %{priority: priority}, issue_id: issue_id)
+        append_event("workflow_priority_changed", "user_ui", %{priority: priority}, issue_id: issue_id)
         {:ok, workflow}
     end
   end
@@ -275,7 +422,7 @@ defmodule SymphonyElixir.Store.Postgres do
         attrs = %{
           blocked_issue_id: blocked_issue_id,
           blocking_issue_id: blocking_issue_id,
-          created_by: Keyword.get(opts, :actor, "local_operator"),
+          created_by: Keyword.get(opts, :actor, "system"),
           reason: Keyword.get(opts, :reason)
         }
 
@@ -288,9 +435,9 @@ defmodule SymphonyElixir.Store.Postgres do
           )
           |> plain()
 
-        append_event("dependency_added", Keyword.get(opts, :source, "local_ui"), Map.take(edge, [:blocking_issue_id, :reason]),
+        append_event("dependency_added", Keyword.get(opts, :source, "user_ui"), Map.take(edge, [:blocking_issue_id, :reason]),
           issue_id: blocked_issue_id,
-          actor: Keyword.get(opts, :actor, "local_operator")
+          actor: Keyword.get(opts, :actor, "system")
         )
 
         {:ok, edge}
@@ -310,7 +457,7 @@ defmodule SymphonyElixir.Store.Postgres do
 
       edge ->
         Repo.delete!(edge)
-        append_event("dependency_removed", "local_ui", %{blocking_issue_id: blocking_issue_id}, issue_id: blocked_issue_id)
+        append_event("dependency_removed", "user_ui", %{blocking_issue_id: blocking_issue_id}, issue_id: blocked_issue_id)
         :ok
     end
   end
@@ -343,7 +490,7 @@ defmodule SymphonyElixir.Store.Postgres do
           source_issue_id: source_issue_id,
           target_issue_id: target_issue_id,
           relation_type: relation_type,
-          created_by: Keyword.get(opts, :actor, "local_operator"),
+          created_by: Keyword.get(opts, :actor, "system"),
           reason: Keyword.get(opts, :reason),
           metadata: Keyword.get(opts, :metadata, %{}) || %{}
         }
@@ -359,10 +506,10 @@ defmodule SymphonyElixir.Store.Postgres do
 
         append_event(
           "issue_relation_added",
-          Keyword.get(opts, :source, "local_ui"),
+          Keyword.get(opts, :source, "user_ui"),
           Map.take(relation, [:target_issue_id, :relation_type, :reason, :metadata]),
           issue_id: source_issue_id,
-          actor: Keyword.get(opts, :actor, "local_operator")
+          actor: Keyword.get(opts, :actor, "system")
         )
 
         {:ok, relation}
@@ -578,7 +725,7 @@ defmodule SymphonyElixir.Store.Postgres do
           |> RuntimeBlock.changeset(%{resolved_at: now()})
           |> Repo.update!()
 
-        append_event("runtime_block_resolved", "local_ui", %{block_id: block.id}, issue_id: block.gitlab_issue_id, run_id: block.agent_run_id)
+        append_event("runtime_block_resolved", "user_ui", %{block_id: block.id}, issue_id: block.gitlab_issue_id, run_id: block.agent_run_id)
         {:ok, decorate_block(block)}
     end
   end
@@ -612,6 +759,94 @@ defmodule SymphonyElixir.Store.Postgres do
     |> order_by([p], asc: p.inserted_at)
     |> limit(1)
     |> Repo.one!()
+  end
+
+  defp project_for_issue_attrs!(attrs) do
+    gitlab_project_id = attrs[:gitlab_project_id] || attrs[:project_id]
+
+    cond do
+      is_integer(gitlab_project_id) ->
+        Repo.one(from(p in ProjectSetting, where: p.project_id == ^gitlab_project_id, limit: 1)) || current_project!()
+
+      is_binary(gitlab_project_id) ->
+        case Integer.parse(gitlab_project_id) do
+          {id, ""} -> Repo.one(from(p in ProjectSetting, where: p.project_id == ^id, limit: 1)) || current_project!()
+          _ -> current_project!()
+        end
+
+      true ->
+        current_project!()
+    end
+  end
+
+  defp find_project_setting(%{api_root: api_root, project_id: project_id})
+       when is_binary(api_root) and not is_nil(project_id) do
+    Repo.one(from(p in ProjectSetting, where: p.api_root == ^api_root and p.project_id == ^project_id, limit: 1))
+  end
+
+  defp find_project_setting(%{api_root: api_root, project_ref: project_ref})
+       when is_binary(api_root) and is_binary(project_ref) do
+    Repo.one(from(p in ProjectSetting, where: p.api_root == ^api_root and p.project_ref == ^project_ref, limit: 1))
+  end
+
+  defp find_project_setting(_attrs), do: Repo.one(from(p in ProjectSetting, order_by: [asc: p.inserted_at], limit: 1))
+
+  defp project_public(%ProjectSetting{} = project) do
+    project
+    |> plain()
+    |> Map.drop([:encrypted_project_access_token, :project_access_token_set_by_identity_id])
+    |> Map.put(:project_access_token_status, token_status(project.encrypted_project_access_token))
+  end
+
+  defp maybe_project_public(nil), do: nil
+  defp maybe_project_public(project), do: project_public(project)
+
+  defp open_project_access_token(nil), do: {:error, :project_access_token_missing}
+
+  defp open_project_access_token(encrypted) do
+    case TokenVault.open(encrypted) do
+      {:ok, token} when is_binary(token) and token != "" -> {:ok, token}
+      {:ok, _} -> {:error, :project_access_token_missing}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp token_status(value) when is_binary(value) and value != "", do: "configured"
+  defp token_status(_value), do: "missing"
+
+  defp existing_refresh_token(identity_id) do
+    case Repo.one(from(t in GitLabOAuthToken, where: t.identity_id == ^identity_id, limit: 1)) do
+      nil -> nil
+      token -> token.encrypted_refresh_token
+    end
+  end
+
+  defp scopes(attrs) do
+    scope = attrs["scope"] || attrs[:scope] || attrs["scopes"] || attrs[:scopes] || []
+
+    cond do
+      is_binary(scope) -> String.split(scope, ~r/[\s,]+/, trim: true)
+      is_list(scope) -> Enum.map(scope, &to_string/1)
+      true -> []
+    end
+  end
+
+  defp expires_at(attrs, now) do
+    expires_in = attrs["expires_in"] || attrs[:expires_in]
+
+    case expires_in do
+      seconds when is_integer(seconds) and seconds > 0 ->
+        DateTime.add(now, seconds, :second)
+
+      seconds when is_binary(seconds) ->
+        case Integer.parse(seconds) do
+          {int, ""} when int > 0 -> DateTime.add(now, int, :second)
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
   end
 
   defp ensure_workflow_state(issue_id, status \\ "triage", reason \\ nil) do
@@ -940,6 +1175,7 @@ defmodule SymphonyElixir.Store.Postgres do
         {:status, "blocked"} -> issue.is_blocked == true
         {:status, status} -> issue.workflow_status == status
         {:gitlab_state, state} -> issue.gitlab_state == state
+        {:project_setting_id, project_setting_id} -> issue.gitlab_project_setting_id == project_setting_id
         {:search, search} -> issue_matches_search?(issue, search)
         _ -> true
       end)
@@ -960,6 +1196,7 @@ defmodule SymphonyElixir.Store.Postgres do
     Enum.filter(runs, fn run ->
       Enum.all?(filters, fn
         {:issue_id, issue_id} -> run.gitlab_issue_id == issue_id
+        {:project_setting_id, project_setting_id} -> get_in(run, [:issue, :gitlab_project_setting_id]) == project_setting_id
         _ -> true
       end)
     end)

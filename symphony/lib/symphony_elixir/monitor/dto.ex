@@ -3,12 +3,11 @@ defmodule SymphonyElixir.Monitor.DTO do
   DTO builders for the React Run Monitor and operational JSON APIs.
   """
 
-  alias Symphony.GitLab.Config, as: GitLabConfig
   alias SymphonyElixir.{Config, Orchestrator, Store, Sync.Poller}
 
-  @spec state(timeout()) :: map()
-  def state(snapshot_timeout_ms \\ 15_000) do
-    store = Store.snapshot()
+  @spec state(timeout(), keyword()) :: map()
+  def state(snapshot_timeout_ms \\ 15_000, filters \\ []) do
+    store = Store.snapshot() |> apply_store_filters(filters)
     orchestrator = Orchestrator.snapshot(Orchestrator, snapshot_timeout_ms)
     sync_status = Poller.status()
     gitlab_config = load_gitlab_config()
@@ -25,9 +24,9 @@ defmodule SymphonyElixir.Monitor.DTO do
     }
   end
 
-  @spec v1_state(timeout()) :: map()
-  def v1_state(snapshot_timeout_ms \\ 15_000) do
-    monitor = state(snapshot_timeout_ms)
+  @spec v1_state(timeout(), keyword()) :: map()
+  def v1_state(snapshot_timeout_ms \\ 15_000, filters \\ []) do
+    monitor = state(snapshot_timeout_ms, filters)
 
     %{
       generated_at: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
@@ -67,7 +66,7 @@ defmodule SymphonyElixir.Monitor.DTO do
     endpoint_port = SymphonyElixir.HttpServer.bound_port() || (gitlab_config && gitlab_config.port) || 4000
 
     %{
-      mode: "local_single_user",
+      mode: "gitlab_oidc",
       appVersion: app_version(),
       uptimeSeconds: uptime_seconds(),
       bindHost: (gitlab_config && gitlab_config.bind_host) || settings.server.host,
@@ -77,6 +76,27 @@ defmodule SymphonyElixir.Monitor.DTO do
       workflowLastLoadedAt: workflow.loaded_at,
       workflowLastError: workflow.error
     }
+  end
+
+  defp apply_store_filters(store, filters) do
+    case Keyword.get(filters, :project_setting_id) do
+      nil ->
+        store
+
+      project_setting_id ->
+        issues = Enum.filter(store.issues || [], &(&1[:gitlab_project_setting_id] == project_setting_id))
+        issue_ids = MapSet.new(issues, & &1.id)
+
+        %{
+          store
+          | project: Keyword.get(filters, :project, store.project),
+            issues: issues,
+            runs: Enum.filter(store.runs || [], &MapSet.member?(issue_ids, &1.gitlab_issue_id)),
+            runtime_blocks: Enum.filter(store.runtime_blocks || [], &MapSet.member?(issue_ids, &1.gitlab_issue_id)),
+            open_runtime_blocks: Enum.filter(store.open_runtime_blocks || [], &MapSet.member?(issue_ids, &1.gitlab_issue_id)),
+            events: Enum.filter(store.events || [], &MapSet.member?(issue_ids, &1.gitlab_issue_id))
+        }
+    end
   end
 
   defp gitlab_dto(config, project) do
@@ -244,12 +264,7 @@ defmodule SymphonyElixir.Monitor.DTO do
     }
   end
 
-  defp load_gitlab_config do
-    case GitLabConfig.load() do
-      {:ok, config} -> config
-      _ -> nil
-    end
-  end
+  defp load_gitlab_config, do: nil
 
   defp load_workflow_status do
     case SymphonyElixir.Workflow.current() do
