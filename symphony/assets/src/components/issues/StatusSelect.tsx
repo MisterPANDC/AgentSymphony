@@ -14,8 +14,9 @@ export function StatusSelect({ issueId, value }: { issueId: string; value: Workf
 
   return (
     <select
-      className={`status-pill ${value} cursor-pointer`}
+      className={`status-pill status-select ${value}`}
       value={value}
+      disabled={mutation.isPending}
       onChange={(event) => mutation.mutate(event.target.value as WorkflowStatus)}
     >
       {workflowStatuses.map((status) => (

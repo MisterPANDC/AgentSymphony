@@ -26,16 +26,16 @@ export function IssueNoteComposer({ issueId }: { issueId: string }) {
   }
 
   return (
-    <form className="rounded-md border border-[#d7dce3] bg-[#ffffff] shadow-sm focus-within:border-[#94a3b8]" onSubmit={submit}>
+    <form className="rounded-lg border border-[#dedfe4] bg-[#ffffff] shadow-sm focus-within:border-[#9ca3af] focus-within:ring-4 focus-within:ring-[#9ca3af]/15" onSubmit={submit}>
       <textarea
-        className="min-h-[84px] w-full resize-y rounded-t-md border-0 bg-transparent px-3 py-2 text-sm leading-6 text-[#1f2937] outline-none placeholder:text-[#94a3b8]"
+        className="min-h-[84px] w-full resize-y rounded-t-lg border-0 bg-transparent px-3 py-2 text-sm leading-6 text-[#2f333b] outline-none placeholder:text-[#8a8d96]"
         placeholder="Add a note..."
         value={body}
         disabled={mutation.isPending}
         onChange={(event) => setBody(event.target.value)}
       />
-      <div className="flex min-h-[42px] items-center justify-between gap-3 border-t border-[#e5e7eb] px-2 py-1.5">
-        <div className="min-w-0 text-xs text-[#64748b]">
+      <div className="flex min-h-[40px] items-center justify-between gap-3 border-t border-[#eaebef] px-2 py-1.5">
+        <div className="min-w-0 text-xs text-[#686b73]">
           {mutation.isError ? <span className="text-[#b42318]">{mutation.error.message}</span> : null}
         </div>
         <button className="text-button" type="submit" disabled={!trimmedBody || mutation.isPending}>

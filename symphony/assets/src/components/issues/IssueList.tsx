@@ -1,11 +1,15 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Filter, RefreshCcw } from "lucide-react";
+import { ChevronDown, Filter, RefreshCcw } from "lucide-react";
 import { listIssues } from "../../api/issues";
 import { refreshSync } from "../../api/sync";
-import { issueStatusFilters, type IssueDTO, type IssueStatusFilter } from "../../types/issue";
+import { issueStatusFilters, workflowStatuses, type IssueDTO, type IssueStatusFilter, type WorkflowStatus } from "../../types/issue";
 import { IssueDetailDrawer } from "./IssueDetailDrawer";
 import { IssueRow } from "./IssueRow";
+
+function formatStatus(status: string) {
+  return status.replace("_", " ");
+}
 
 export function IssueList() {
   const [search, setSearch] = useState("");
@@ -21,27 +25,42 @@ export function IssueList() {
     });
   }, [data, search, status]);
 
+  const groupedIssues = useMemo(() => {
+    const groups = new Map<WorkflowStatus, IssueDTO[]>();
+    workflowStatuses.forEach((item) => groups.set(item, []));
+    issues.forEach((issue) => groups.get(issue.workflowStatus)?.push(issue));
+
+    if (status !== "all" && status !== "blocked") {
+      return [[status, groups.get(status) ?? []]] as Array<[WorkflowStatus, IssueDTO[]]>;
+    }
+
+    return workflowStatuses
+      .map((item) => [item, groups.get(item) ?? []] as [WorkflowStatus, IssueDTO[]])
+      .filter(([, groupIssues]) => groupIssues.length > 0);
+  }, [issues, status]);
+
   return (
     <>
       <section className="panel">
         <div className="panel-header panel-header-stack">
           <div>
             <h1 className="text-sm font-semibold">Issues</h1>
-            <p className="text-[12px] text-[#6b7280]">{issues.length} visible</p>
+            <p className="text-[12px] text-[#686b73]">{issues.length} visible</p>
           </div>
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 sm:flex-none sm:flex-nowrap">
-            <div className="text-button flex-1 sm:flex-none">
+            <div className="text-button select-shell flex-1 sm:flex-none">
               <Filter size={14} />
               <select className="min-w-0 flex-1 bg-transparent outline-none" value={status} onChange={(event) => setStatus(event.target.value as IssueStatusFilter)}>
                 {issueStatusFilters.map((item) => (
                   <option key={item} value={item}>
-                    {item.replace("_", " ")}
+                    {formatStatus(item)}
                   </option>
                 ))}
               </select>
+              <ChevronDown size={13} />
             </div>
             <input
-              className="h-8 min-w-0 flex-[1_1_180px] rounded-md border border-[#d7dce3] bg-[#ffffff] px-2 text-sm outline-none sm:w-64 sm:flex-none"
+              className="field-input flex-[1_1_190px] sm:w-64 sm:flex-none"
               placeholder="Search title or description"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -58,27 +77,27 @@ export function IssueList() {
             </button>
           </div>
         </div>
-        <div className="overflow-auto">
-          <table className="dense-table issue-table">
-            <thead>
-              <tr>
-                <th>Issue</th>
-                <th>Title</th>
-                <th>Status</th>
-                <th>GitLab</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading ? (
-                <tr>
-                  <td colSpan={5}>Loading issues</td>
-                </tr>
-              ) : (
-                issues.map((issue) => <IssueRow key={issue.id} issue={issue} onOpen={setSelected} />)
-              )}
-            </tbody>
-          </table>
+        <div className="issue-list">
+          {isLoading ? (
+            <div className="empty-state">Loading issues</div>
+          ) : groupedIssues.length === 0 ? (
+            <div className="empty-state">No issues match this view</div>
+          ) : (
+            groupedIssues.map(([groupStatus, groupItems]) => (
+              <div key={groupStatus} className="issue-group">
+                <div className="issue-group-header">
+                  <ChevronDown size={14} />
+                  <span className="capitalize">{formatStatus(groupStatus)}</span>
+                  <span className="status-pill">{groupItems.length}</span>
+                </div>
+                <div role="list">
+                  {groupItems.map((issue) => (
+                    <IssueRow key={issue.id} issue={issue} onOpen={setSelected} />
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </section>
       <IssueDetailDrawer issue={selected} onClose={() => setSelected(null)} />

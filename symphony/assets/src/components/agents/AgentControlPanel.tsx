@@ -21,16 +21,16 @@ export function AgentControlPanel() {
           <h1 className="flex items-center gap-2 text-sm font-semibold"><Bot size={15} /> Agent Control</h1>
           <button className="text-button" onClick={() => dispatch.mutate()}><Play size={14} /> Dispatch</button>
         </div>
-        <div className="grid grid-cols-2 gap-px bg-[#e5e7eb] sm:grid-cols-4">
+        <div className="metric-grid metric-grid-four">
           {[
             ["Max", monitor.data?.agents.maxConcurrent ?? 0],
             ["Queued", monitor.data?.agents.queued ?? 0],
             ["Running", monitor.data?.agents.running ?? 0],
             ["Blocked", monitor.data?.agents.blocked ?? 0]
           ].map(([label, value]) => (
-            <div key={label} className="bg-[#ffffff] p-3">
-              <div className="text-[11px] text-[#6b7280]">{label}</div>
-              <div className="text-xl font-semibold">{value}</div>
+            <div key={label} className="metric-cell">
+              <div className="metric-label">{label}</div>
+              <div className="metric-value">{value}</div>
             </div>
           ))}
         </div>

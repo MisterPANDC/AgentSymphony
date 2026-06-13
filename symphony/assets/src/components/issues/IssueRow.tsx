@@ -1,4 +1,4 @@
-import { Play } from "lucide-react";
+import { Circle, Play } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { runIssue } from "../../api/agents";
 import type { IssueDTO } from "../../types/issue";
@@ -17,36 +17,36 @@ export function IssueRow({ issue, onOpen }: { issue: IssueDTO; onOpen: (issue: I
   const runDisabled = issue.isBlocked || runMutation.isPending;
 
   return (
-    <tr className="hover:bg-[#f8fafc]">
-      <td className="w-[108px]">
-        <button className="mono text-[#334155]" onClick={() => onOpen(issue)}>
-          {issue.identifier}
+    <article className="issue-row" role="listitem">
+      <div className="issue-row-primary">
+        <button className="issue-row-title" onClick={() => onOpen(issue)}>
+          <Circle size={12} className="issue-state-dot" />
+          <span className="mono issue-identifier">{issue.identifier}</span>
+          <span className="issue-title">{issue.title}</span>
         </button>
-      </td>
-      <td>
-        <button className="block w-full min-w-0 truncate text-left font-medium" onClick={() => onOpen(issue)}>
-          {issue.title}
-        </button>
-        <div className="mt-1 flex flex-wrap gap-1">
-          {issue.isBlocked && <span className="status-pill blocked">blocked</span>}
-          {issue.labels.slice(0, 5).map((label) => (
-            <span key={label} className="status-pill">
-              {label}
-            </span>
-          ))}
-        </div>
-      </td>
-      <td className="w-[150px]">
+        {(issue.isBlocked || issue.activeRunId || issue.labels.length > 0) && (
+          <div className="issue-row-meta">
+            {issue.isBlocked && <span className="status-pill blocked">blocked</span>}
+            {issue.activeRunId && <span className="status-pill in_progress">active run</span>}
+            {issue.labels.slice(0, 4).map((label) => (
+              <span key={label} className="status-pill">
+                {label}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="issue-row-secondary">
         <StatusSelect issueId={issue.id} value={issue.workflowStatus} />
-      </td>
-      <td className="w-[160px]">
+      </div>
+      <div className="issue-row-secondary">
         <GitLabMeta issue={issue} />
-      </td>
-      <td className="w-[48px] text-right">
+      </div>
+      <div className="issue-row-secondary">
         <button className="icon-button" title={issue.isBlocked ? "Issue is blocked" : "Start agent"} disabled={runDisabled} onClick={() => runMutation.mutate()}>
           <Play size={14} />
         </button>
-      </td>
-    </tr>
+      </div>
+    </article>
   );
 }
