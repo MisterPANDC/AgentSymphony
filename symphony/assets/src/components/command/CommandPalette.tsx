@@ -46,21 +46,21 @@ export function CommandPalette() {
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Trigger asChild>
-        <button className="text-button min-w-0 flex-1 justify-start text-[#64748b] sm:max-w-[360px]" title="Command palette">
+        <button className="text-button min-w-0 flex-1 justify-start text-[#686b73] sm:max-w-[360px]" title="Command palette">
           <Search size={15} />
           <span className="truncate">Search issues, runs, settings</span>
-          <span className="ml-auto mono text-[11px] text-[#94a3b8]">⌘K</span>
+          <span className="ml-auto mono text-[11px] text-[#8a8d96]">⌘K</span>
         </button>
       </Dialog.Trigger>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-30 bg-black/10" />
-        <Dialog.Content className="fixed left-1/2 top-16 z-40 w-[min(720px,calc(100vw-32px))] -translate-x-1/2 rounded-md border border-[#d7dce3] bg-[#ffffff] shadow-2xl">
+        <Dialog.Content className="fixed left-1/2 top-16 z-40 w-[min(720px,calc(100vw-32px))] -translate-x-1/2 overflow-hidden rounded-lg border border-[#dedfe4] bg-[#ffffff] shadow-2xl">
           <Dialog.Title className="sr-only">Command palette</Dialog.Title>
-          <div className="flex items-center gap-2 border-b border-[#e5e7eb] px-3 py-2">
-            <Search size={16} className="text-[#64748b]" />
+          <div className="flex items-center gap-2 border-b border-[#eaebef] px-3 py-2">
+            <Search size={16} className="text-[#686b73]" />
             <input
               autoFocus
-              className="h-9 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[#94a3b8]"
+              className="h-9 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[#8a8d96]"
               placeholder="Search pages"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -71,19 +71,19 @@ export function CommandPalette() {
           </div>
           <div className="max-h-[420px] overflow-auto p-2">
             {results.length === 0 ? (
-              <div className="px-2 py-6 text-center text-sm text-[#64748b]">No matching pages</div>
+              <div className="px-2 py-6 text-center text-sm text-[#686b73]">No matching pages</div>
             ) : (
               results.map((command) => (
                 <button
                   key={command.to}
-                  className="flex w-full items-center justify-between gap-4 rounded-md px-3 py-2 text-left hover:bg-[#f1f5f9]"
+                  className="flex w-full items-center justify-between gap-4 rounded-md px-3 py-2 text-left transition-colors hover:bg-[#f4f5f7]"
                   onClick={() => runCommand(command.to)}
                 >
                   <span className="min-w-0">
                     <span className="block truncate text-sm font-medium">{command.label}</span>
-                    <span className="block truncate text-xs text-[#64748b]">{command.description}</span>
+                    <span className="block truncate text-xs text-[#686b73]">{command.description}</span>
                   </span>
-                  <span className="mono shrink-0 text-[11px] text-[#94a3b8]">{command.to}</span>
+                  <span className="mono shrink-0 text-[11px] text-[#8a8d96]">{command.to}</span>
                 </button>
               ))
             )}

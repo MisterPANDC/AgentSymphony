@@ -9,9 +9,9 @@ export function OperationalApiCard({ state }: { state: MonitorStateDTO }) {
       <div className="panel-header"><h2 className="text-sm font-semibold">Operational Debug API</h2></div>
       <div className="space-y-2 p-3">
         {commands.map((command) => (
-          <code key={command} className="block max-w-full overflow-x-auto rounded-md border border-[#e5e7eb] bg-[#f8fafc] p-2 text-xs whitespace-pre">{command}</code>
+          <code key={command} className="block max-w-full overflow-x-auto rounded-md border border-[#eaebef] bg-[#fbfbfc] p-2 text-xs whitespace-pre">{command}</code>
         ))}
-        <pre className="max-h-48 overflow-auto rounded-md border border-[#e5e7eb] bg-[#f8fafc] p-2 text-xs">
+        <pre className="max-h-48 overflow-auto rounded-md border border-[#eaebef] bg-[#fbfbfc] p-2 text-xs">
           {JSON.stringify({ runtime: state.runtime, sync: state.sync, agents: state.agents }, null, 2)}
         </pre>
       </div>

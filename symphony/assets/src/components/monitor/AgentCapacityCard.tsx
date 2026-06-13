@@ -15,11 +15,11 @@ export function AgentCapacityCard({ state }: { state: MonitorStateDTO }) {
       <div className="panel-header">
         <h2 className="text-sm font-semibold">Agent Capacity</h2>
       </div>
-      <div className="grid grid-cols-2 gap-px bg-[#e5e7eb] sm:grid-cols-3">
+      <div className="metric-grid">
         {items.map(([label, value]) => (
-          <div key={label} className="bg-[#ffffff] p-3">
-            <div className="text-[11px] text-[#6b7280]">{label}</div>
-            <div className="text-xl font-semibold">{value}</div>
+          <div key={label} className="metric-cell">
+            <div className="metric-label">{label}</div>
+            <div className="metric-value">{value}</div>
           </div>
         ))}
       </div>
