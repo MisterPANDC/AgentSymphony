@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { runIssue } from "../../api/agents";
 import type { IssueDTO } from "../../types/issue";
 import { GitLabMeta } from "./GitLabMeta";
+import { IssueLabelList } from "./IssueLabelEditor";
 import { StatusIcon } from "./StatusIcon";
 
 export function IssueRow({ issue, onOpen }: { issue: IssueDTO; onOpen: (issue: IssueDTO) => void }) {
@@ -21,10 +22,11 @@ export function IssueRow({ issue, onOpen }: { issue: IssueDTO; onOpen: (issue: I
       <div className="issue-row-primary">
         <button className="issue-row-title" onClick={() => onOpen(issue)}>
           <StatusIcon status={issue.workflowStatus} size={14} />
-          <span className="mono issue-identifier">{issue.identifier}</span>
+          <span className="mono issue-identifier">#{issue.iid}</span>
           <span className="issue-title">{issue.title}</span>
+          <IssueLabelList labels={issue.labels} className="issue-row-title-labels" limit={3} />
         </button>
-        {(issue.isBlocked || issue.activeRunId || issue.labels.length > 0) && (
+        {(issue.isBlocked || issue.activeRunId) && (
           <div className="issue-row-meta">
             {issue.isBlocked && (
               <span className="status-pill blocked">
@@ -38,11 +40,6 @@ export function IssueRow({ issue, onOpen }: { issue: IssueDTO; onOpen: (issue: I
                 active run
               </span>
             )}
-            {issue.labels.slice(0, 4).map((label) => (
-              <span key={label} className="status-pill">
-                {label}
-              </span>
-            ))}
           </div>
         )}
       </div>

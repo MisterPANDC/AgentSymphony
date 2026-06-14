@@ -4,6 +4,7 @@ defmodule SymphonyElixirWeb.IssueController do
   alias Plug.Conn
   alias Symphony.GitLab.{Client, IssueMapper, NoteMapper}
   alias Symphony.GitLab.Config, as: GitLabConfig
+  alias SymphonyElixir.GitLab.IssueLifecycle
   alias SymphonyElixir.Store
   alias SymphonyElixirWeb.AuthPlug
   alias SymphonyElixirWeb.DTO
@@ -108,7 +109,7 @@ defmodule SymphonyElixirWeb.IssueController do
              reason: params["reason"]
            ),
          :ok <- WorkflowTransition.maybe_stop_active_run(issue, status, actor),
-         :ok <- maybe_close_done_issue(conn, issue, status),
+         :ok <- sync_gitlab_lifecycle(conn, issue, status),
          %{} = updated <- Store.get_issue(issue.id) do
       json(conn, %{issue: DTO.issue(updated)})
     else
@@ -314,7 +315,7 @@ defmodule SymphonyElixirWeb.IssueController do
 
     with :ok <- set_created_workflow_status(conn, issue.id, workflow_status),
          %{} = updated <- Store.get_issue(issue.id),
-         :ok <- maybe_close_done_issue(conn, updated, workflow_status),
+         :ok <- sync_gitlab_lifecycle(conn, updated, workflow_status),
          %{} = final_issue <- Store.get_issue(issue.id) do
       {:ok, final_issue}
     else
@@ -354,22 +355,41 @@ defmodule SymphonyElixirWeb.IssueController do
     end
   end
 
-  defp maybe_close_done_issue(conn, issue, status) do
-    if normalize_status(status) == "done" do
-      close_user_issue(conn, issue)
-    else
+  defp sync_gitlab_lifecycle(conn, issue, status) do
+    cond do
+      IssueLifecycle.close_status?(status) ->
+        close_user_issue(conn, issue, IssueLifecycle.close_reason(status))
+
+      IssueLifecycle.reopen_transition?(issue.workflow_status, status) ->
+        reopen_user_issue(conn, issue)
+
+      true ->
+        :ok
+    end
+  end
+
+  defp close_user_issue(_conn, %{gitlab_state: "closed"}, _reason), do: :ok
+
+  defp close_user_issue(conn, issue, reason) do
+    with {:ok, config, auth_opts} <- user_gitlab_context(conn, issue),
+         {:ok, raw_issue} <- Client.update_project_issue(config, issue.iid, %{"state_event" => "close"}, auth_opts) do
+      raw_issue |> IssueMapper.from_gitlab() |> Store.upsert_issue()
+      Store.record_event("gitlab_issue_closed", "user_ui", %{reason: reason}, issue_id: issue.id, actor: AuthPlug.actor(conn))
       :ok
     end
   end
 
-  defp close_user_issue(_conn, %{gitlab_state: "closed"}), do: :ok
+  defp reopen_user_issue(conn, issue) do
+    case IssueLifecycle.reopen_attrs(issue) do
+      :noop ->
+        :ok
 
-  defp close_user_issue(conn, issue) do
-    with {:ok, config, auth_opts} <- user_gitlab_context(conn, issue),
-         {:ok, raw_issue} <- Client.update_project_issue(config, issue.iid, %{"state_event" => "close"}, auth_opts) do
-      raw_issue |> IssueMapper.from_gitlab() |> Store.upsert_issue()
-      Store.record_event("gitlab_issue_closed", "user_ui", %{reason: "workflow done"}, issue_id: issue.id, actor: AuthPlug.actor(conn))
-      :ok
+      attrs ->
+        with {:ok, config, auth_opts} <- user_gitlab_context(conn, issue),
+             {:ok, raw_issue} <- Client.update_project_issue(config, issue.iid, attrs, auth_opts) do
+          raw_issue |> IssueMapper.from_gitlab() |> Store.upsert_issue()
+          :ok
+        end
     end
   end
 
@@ -395,9 +415,6 @@ defmodule SymphonyElixirWeb.IssueController do
       _ -> nil
     end
   end
-
-  defp normalize_status(status) when is_binary(status), do: status |> String.trim() |> String.downcase()
-  defp normalize_status(_status), do: ""
 
   defp error(conn, status, code, message) do
     conn |> put_status(status) |> json(%{error: %{code: code, message: message}})

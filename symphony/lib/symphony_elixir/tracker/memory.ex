@@ -47,6 +47,9 @@ defmodule SymphonyElixir.Tracker.Memory do
     :ok
   end
 
+  @spec sync_issue_lifecycle(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
+  def sync_issue_lifecycle(_issue_id, _previous_state_name, _state_name), do: :ok
+
   @spec create_followup_issue(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def create_followup_issue(current_issue_id, attrs) do
     followup = %{

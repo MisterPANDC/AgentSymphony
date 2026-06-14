@@ -232,7 +232,7 @@ export function IssueBoard() {
             width: dragPreview.width
           }}
         >
-          <span className="mono text-[11px] text-[#686b73]">{draggingIssue.identifier}</span>
+          <span className="mono text-[11px] text-[#686b73]">#{draggingIssue.iid}</span>
           <span className="line-clamp-2 text-sm font-medium leading-5 text-[#1d1d1f]">{draggingIssue.title}</span>
         </div>
       )}

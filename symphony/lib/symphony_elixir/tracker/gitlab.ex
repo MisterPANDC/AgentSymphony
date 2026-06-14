@@ -6,6 +6,7 @@ defmodule SymphonyElixir.Tracker.GitLab do
   @behaviour SymphonyElixir.Tracker
 
   alias Symphony.{GitLab.Client, GitLab.Config, GitLab.IssueMapper, GitLab.NoteMapper}
+  alias SymphonyElixir.GitLab.IssueLifecycle
   alias SymphonyElixir.Store
 
   @followup_keys ~w(title description acceptance_criteria labels assignee_ids milestone_id due_date confidential related_to_current_issue blocked_by_current_issue)a
@@ -41,10 +42,12 @@ defmodule SymphonyElixir.Tracker.GitLab do
 
   @impl true
   def update_issue_state(issue_id, status) when is_binary(issue_id) and is_binary(status) do
+    previous = Store.get_issue(issue_id)
+    previous_status = if previous, do: previous.workflow_status, else: nil
+
     case Store.transition_workflow(issue_id, status, source: "agent", actor: "agent") do
       {:ok, _workflow} ->
-        maybe_close_issue(issue_id, status)
-        :ok
+        sync_issue_lifecycle(issue_id, previous_status, status)
 
       {:error, reason} ->
         {:error, reason}
@@ -67,21 +70,27 @@ defmodule SymphonyElixir.Tracker.GitLab do
   @impl true
   def close_issue(issue_id) when is_binary(issue_id), do: do_close_issue(issue_id)
 
-  defp maybe_close_issue(issue_id, status) do
-    if normalize_status(status) == "done" do
-      do_close_issue(issue_id)
-    else
-      :ok
+  @impl true
+  def sync_issue_lifecycle(issue_id, previous_status, status) when is_binary(issue_id) do
+    cond do
+      IssueLifecycle.close_status?(status) ->
+        do_close_issue(issue_id, IssueLifecycle.close_reason(status))
+
+      IssueLifecycle.reopen_transition?(previous_status, status) ->
+        do_reopen_issue(issue_id)
+
+      true ->
+        :ok
     end
   end
 
-  defp do_close_issue(issue_id) do
+  defp do_close_issue(issue_id, reason \\ "workflow done") do
     with %{} = issue <- Store.get_issue(issue_id),
          {:ok, config} <- project_gitlab_config(issue),
          true <- issue.gitlab_state != "closed" || :already_closed,
          {:ok, raw_issue} <- Client.update_project_issue(config, issue.iid, %{"state_event" => "close"}) do
       raw_issue |> IssueMapper.from_gitlab() |> Store.upsert_issue()
-      Store.record_event("gitlab_issue_closed", "system", %{reason: "workflow done"}, issue_id: issue_id, actor: "orchestrator")
+      Store.record_event("gitlab_issue_closed", "system", %{reason: reason}, issue_id: issue_id, actor: "orchestrator")
       :ok
     else
       :already_closed ->
@@ -101,6 +110,20 @@ defmodule SymphonyElixir.Tracker.GitLab do
     Store.record_event("gitlab_issue_close_failed", "system", %{reason: inspect(reason)}, issue_id: issue_id, actor: "orchestrator")
   rescue
     _ -> :ok
+  end
+
+  defp do_reopen_issue(issue_id) do
+    with %{} = issue <- Store.get_issue(issue_id),
+         attrs when attrs != :noop <- IssueLifecycle.reopen_attrs(issue),
+         {:ok, config} <- project_gitlab_config(issue),
+         {:ok, raw_issue} <- Client.update_project_issue(config, issue.iid, attrs) do
+      raw_issue |> IssueMapper.from_gitlab() |> Store.upsert_issue()
+      :ok
+    else
+      :noop -> :ok
+      nil -> {:error, :issue_not_found}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp followup_issue_request(current_issue, attrs) do
@@ -356,7 +379,4 @@ defmodule SymphonyElixir.Tracker.GitLab do
       {key, Map.get(map, key, Map.get(map, Atom.to_string(key)))}
     end)
   end
-
-  defp normalize_status(status) when is_binary(status), do: status |> String.trim() |> String.downcase()
-  defp normalize_status(_status), do: ""
 end

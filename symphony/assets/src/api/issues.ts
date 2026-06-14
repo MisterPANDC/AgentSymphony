@@ -26,6 +26,20 @@ export function updateIssueWorkflow(id: string, status: WorkflowStatus, reason?:
   });
 }
 
+export function updateIssueLabels(id: string, labels: string[]) {
+  return api<{ issue: IssueDTO }>(`/api/issues/${id}/gitlab`, {
+    method: "PATCH",
+    body: JSON.stringify({ labels: labels.join(",") })
+  });
+}
+
+export function updateIssueTitle(id: string, title: string) {
+  return api<{ issue: IssueDTO }>(`/api/issues/${id}/gitlab`, {
+    method: "PATCH",
+    body: JSON.stringify({ title })
+  });
+}
+
 export function createIssueNote(id: string, body: string) {
   return api<{ notes: NoteDTO[] }>(`/api/issues/${id}/notes`, {
     method: "POST",

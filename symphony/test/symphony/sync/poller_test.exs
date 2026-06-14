@@ -2,6 +2,7 @@ defmodule SymphonyElixir.Sync.PollerTest do
   use ExUnit.Case, async: false
 
   alias SymphonyElixir.Store
+  alias SymphonyElixir.GitLab.IssueLifecycle
   alias SymphonyElixir.Sync.Poller
 
   setup do
@@ -100,6 +101,51 @@ defmodule SymphonyElixir.Sync.PollerTest do
     assert Store.cursors()["gitlab:gitlab_issues_updated_after:#{project.id}"].last_success_at
   end
 
+  test "external GitLab reopen restores canceled issues to triage and adds reopened label" do
+    project_id = 84_000 + System.unique_integer([:positive])
+    iid = 94_000 + System.unique_integer([:positive])
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: external_reopen_plug(project_id, iid))
+
+    project = Store.upsert_project(project_attrs(project_id))
+    assert {:ok, _project} = Store.put_project_access_token(project.id, "test-token")
+
+    issue =
+      Store.upsert_issue(%{
+        gitlab_issue_id: 910_000 + iid,
+        gitlab_project_id: project_id,
+        gitlab_project_setting_id: project.id,
+        iid: iid,
+        web_url: "https://gitlab.example.com/group/project-#{project_id}/-/issues/#{iid}",
+        title: "Canceled issue",
+        description: "Body",
+        description_preview: "Body",
+        gitlab_state: "closed",
+        labels: [],
+        assignees: [],
+        raw_gitlab: %{}
+      })
+
+    assert {:ok, _todo} = Store.transition_workflow(issue.id, "todo", source: "user_ui", reason: "accepted")
+    assert {:ok, _canceled} = Store.transition_workflow(issue.id, "canceled", source: "user_ui", reason: "no longer needed")
+    assert :ok = Poller.reset_issue_cursor(project.id)
+    assert {:ok, %{queued: true}} = Poller.refresh()
+
+    issue =
+      eventually(fn ->
+        case Store.get_issue(issue.id) do
+          %{workflow_status: "triage", gitlab_state: "opened", labels: labels} = issue ->
+            if IssueLifecycle.reopened_label() in labels, do: issue
+
+          _issue ->
+            nil
+        end
+      end)
+
+    assert issue.workflow_status == "triage"
+    assert issue.gitlab_state == "opened"
+    assert IssueLifecycle.reopened_label() in issue.labels
+  end
+
   test "explicit backfill attaches orphaned local issues to their project setting" do
     project_id = 80_000 + System.unique_integer([:positive])
     iid = 90_000 + System.unique_integer([:positive])
@@ -150,6 +196,87 @@ defmodule SymphonyElixir.Sync.PollerTest do
           ])
       end
     end
+  end
+
+  defp external_reopen_plug(project_id, iid) do
+    fn conn ->
+      assert Plug.Conn.get_req_header(conn, "private-token") == ["test-token"]
+
+      cond do
+        conn.method == "GET" and conn.request_path == "/api/v4/projects/#{project_id}" ->
+          Req.Test.json(conn, %{
+            "id" => project_id,
+            "name" => "Project #{project_id}",
+            "path_with_namespace" => "group/project-#{project_id}",
+            "web_url" => "https://gitlab.example.com/group/project-#{project_id}",
+            "visibility" => "private"
+          })
+
+        conn.method == "GET" and conn.request_path == "/api/v4/projects/#{project_id}/issues" ->
+          Req.Test.json(conn, [
+            %{
+              "id" => 910_000 + iid,
+              "project_id" => project_id,
+              "iid" => iid,
+              "web_url" => "https://gitlab.example.com/group/project-#{project_id}/-/issues/#{iid}",
+              "title" => "Canceled issue",
+              "description" => "Body",
+              "state" => "opened",
+              "labels" => [],
+              "assignees" => [],
+              "created_at" => "2026-06-12T19:00:10.517Z",
+              "updated_at" => "2026-06-12T19:01:41.042Z"
+            }
+          ])
+
+        conn.method == "PUT" and conn.request_path == "/api/v4/projects/#{project_id}/issues/#{iid}" ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          payload = Jason.decode!(body)
+          assert payload == %{"add_labels" => IssueLifecycle.reopened_label()}
+
+          Req.Test.json(conn, %{
+            "id" => 910_000 + iid,
+            "project_id" => project_id,
+            "iid" => iid,
+            "web_url" => "https://gitlab.example.com/group/project-#{project_id}/-/issues/#{iid}",
+            "title" => "Canceled issue",
+            "description" => "Body",
+            "state" => "opened",
+            "labels" => [IssueLifecycle.reopened_label()],
+            "assignees" => []
+          })
+
+        conn.method == "GET" and String.ends_with?(conn.request_path, "/issues") ->
+          Req.Test.json(conn, [])
+
+        conn.method == "GET" ->
+          {fallback_project_id, fallback_project_ref} = project_ref_from_path(conn.request_path, project_id)
+
+          Req.Test.json(conn, %{
+            "id" => fallback_project_id,
+            "name" => "Project #{fallback_project_ref}",
+            "path_with_namespace" => "group/project-#{fallback_project_ref}",
+            "web_url" => "https://gitlab.example.com/group/project-#{fallback_project_ref}",
+            "visibility" => "private"
+          })
+      end
+    end
+  end
+
+  defp project_ref_from_path(path, fallback_id) do
+    ref =
+      path
+      |> String.replace_prefix("/api/v4/projects/", "")
+      |> String.split("/", parts: 2)
+      |> hd()
+
+    id =
+      case Integer.parse(ref) do
+        {id, ""} -> id
+        _ -> fallback_id
+      end
+
+    {id, ref}
   end
 
   defp project_attrs(project_id) do

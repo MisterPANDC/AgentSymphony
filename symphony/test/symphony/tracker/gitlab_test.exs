@@ -2,6 +2,7 @@ defmodule SymphonyElixir.Tracker.GitLabTest do
   use ExUnit.Case, async: false
 
   alias SymphonyElixir.Store
+  alias SymphonyElixir.GitLab.IssueLifecycle
   alias SymphonyElixir.Tracker.GitLab
 
   setup do
@@ -62,7 +63,33 @@ defmodule SymphonyElixir.Tracker.GitLabTest do
     assert created.is_blocked == true
   end
 
-  defp seed_issue(iid, project_setting_id) do
+  test "agent transition to canceled closes the GitLab issue", %{project: project} do
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: lifecycle_plug())
+    current = seed_issue(20, project.id)
+
+    assert {:ok, _todo} = Store.transition_workflow(current.id, "todo", reason: "accepted")
+    assert :ok = GitLab.update_issue_state(current.id, "canceled")
+
+    current = Store.get_issue(current.id)
+    assert current.workflow_status == "canceled"
+    assert current.gitlab_state == "closed"
+  end
+
+  test "agent restoration from canceled reopens the GitLab issue with a reopened label", %{project: project} do
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: lifecycle_plug())
+    current = seed_issue(21, project.id, "closed")
+
+    assert {:ok, _todo} = Store.transition_workflow(current.id, "todo", reason: "accepted")
+    assert {:ok, _canceled} = Store.transition_workflow(current.id, "canceled", reason: "no longer needed")
+    assert :ok = GitLab.update_issue_state(current.id, "todo")
+
+    current = Store.get_issue(current.id)
+    assert current.workflow_status == "todo"
+    assert current.gitlab_state == "opened"
+    assert IssueLifecycle.reopened_label() in current.labels
+  end
+
+  defp seed_issue(iid, project_setting_id, gitlab_state \\ "opened") do
     Store.upsert_issue(%{
       gitlab_issue_id: 90_000 + iid,
       gitlab_project_id: 123,
@@ -72,7 +99,7 @@ defmodule SymphonyElixir.Tracker.GitLabTest do
       title: "Issue #{iid}",
       description: "Body #{iid}",
       description_preview: "Body #{iid}",
-      gitlab_state: "opened",
+      gitlab_state: gitlab_state,
       labels: [],
       assignees: [],
       raw_gitlab: %{}
@@ -121,6 +148,39 @@ defmodule SymphonyElixir.Tracker.GitLabTest do
           })
       end
     end
+  end
+
+  defp lifecycle_plug do
+    fn conn ->
+      assert Plug.Conn.get_req_header(conn, "private-token") == ["test-token"]
+      assert conn.method == "PUT"
+
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      payload = Jason.decode!(body)
+
+      case {conn.request_path, payload} do
+        {"/api/v4/projects/123/issues/20", %{"state_event" => "close"}} ->
+          Req.Test.json(conn, gitlab_issue(20, "closed", []))
+
+        {"/api/v4/projects/123/issues/21", %{"state_event" => "reopen", "add_labels" => label}} ->
+          assert label == IssueLifecycle.reopened_label()
+          Req.Test.json(conn, gitlab_issue(21, "opened", [label]))
+      end
+    end
+  end
+
+  defp gitlab_issue(iid, state, labels) do
+    %{
+      "id" => 90_000 + iid,
+      "project_id" => 123,
+      "iid" => iid,
+      "web_url" => "https://gitlab.example.com/group/project/-/issues/#{iid}",
+      "title" => "Issue #{iid}",
+      "description" => "Body #{iid}",
+      "state" => state,
+      "labels" => labels,
+      "assignees" => []
+    }
   end
 
   defp restore_env(key, nil), do: System.delete_env(key)

@@ -73,7 +73,7 @@ export function IssueColumn({
             onPointerDown={(event) => onIssuePointerDown(event, issue)}
           >
             <div className="mb-1 flex min-w-0 items-center gap-1.5">
-              <span className="mono min-w-0 truncate text-[11px] text-[#686b73]">{issue.identifier}</span>
+              <span className="mono min-w-0 truncate text-[11px] text-[#686b73]">#{issue.iid}</span>
               {issue.isBlocked && (
                 <span className="status-pill blocked">
                   <StatusIcon status="blocked" size={12} />

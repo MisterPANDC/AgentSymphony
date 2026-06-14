@@ -1091,7 +1091,12 @@ When GitLab fields change externally:
 - GitLab title/description/labels/assignees/milestone/due date/open-closed state MUST update local read model.
 - Internal workflow status MUST remain unchanged unless an explicit Symphony rule changes it.
 - If a GitLab issue is closed externally, the issue MUST stop being an Agent dispatch candidate.
-- If a GitLab issue is reopened externally, the issue MAY re-enter dispatch only if its internal workflow status is an active candidate status.
+- If a GitLab issue is reopened externally while its internal workflow status is
+  `canceled`, Symphony MUST move the issue back to `triage` and add the
+  `reopen` label.
+- If a GitLab issue is reopened externally from any other internal workflow
+  status, the issue MAY re-enter dispatch only if its internal workflow status is
+  an active candidate status.
 
 ---
 
@@ -1108,7 +1113,7 @@ When GitLab fields change externally:
 | `merging` | Human approved the change; Agent should run the merge/land flow. | Yes |
 | `rework` | Reviewer requested changes; Agent should restart the implementation/review loop. | Yes |
 | `done` | Merge is complete and work is terminal. | No |
-| `canceled` | Work is intentionally stopped. It may be returned to `triage` when a human explicitly reopens it for re-analysis. | No |
+| `canceled` | Work is intentionally stopped. It may be returned to `triage` for re-analysis or `todo` when a human explicitly restores it as ready. | No |
 
 ### 9.2 Status transitions
 
@@ -1133,6 +1138,7 @@ rework -> in_progress
 rework -> review
 rework -> triage
 canceled -> triage
+canceled -> todo
 any non-terminal -> canceled
 ```
 
@@ -1151,6 +1157,7 @@ review -> canceled
 rework -> triage
 rework -> canceled
 canceled -> triage
+canceled -> todo
 any non-terminal -> canceled
 ```
 
@@ -1169,9 +1176,11 @@ Terminal statuses:
 done
 ```
 
-`canceled` is a stopped state, not a dispatch candidate. It MUST NOT transition
-directly back into Agent-owned work states; the only recovery path is
-`canceled -> triage`.
+`canceled` is a stopped state, not a dispatch candidate. When an issue enters
+`canceled`, Symphony SHOULD close the GitLab issue. A canceled issue may be
+restored through `canceled -> triage` for re-analysis or `canceled -> todo` when
+a human explicitly marks it ready again. If the corresponding GitLab issue is
+closed, either restore path MUST reopen it and add the `reopen` label.
 
 The implementation MUST record each transition in `issue_events`.
 
@@ -1204,6 +1213,12 @@ The blocker editor MUST:
 GitLab labels MUST NOT be the workflow source of truth.
 
 The implementation MAY mirror internal status to a GitLab label only when explicitly enabled in settings. If mirroring is enabled, local database status remains authoritative and label sync is best-effort. Label sync failures MUST NOT corrupt workflow status.
+
+`reopen` is a lightweight GitLab-visible marker for issues restored
+after cancellation. It MUST NOT be treated as a workflow status and MUST NOT be
+used as an Agent dispatch condition. The marker SHOULD be added when GitLab
+externally reopens a canceled issue or when Symphony restores a canceled issue to
+`triage` or `todo`.
 
 ---
 
@@ -1327,8 +1342,9 @@ mapping of upstream Symphony's tracker-state handoff semantics:
 Internal `review` MUST NOT automatically close the GitLab issue. Internal
 `done` means the merge/land flow has completed; when an issue enters `done`,
 Symphony SHOULD close the GitLab issue through the server-side GitLab client.
-GitLab close failures MUST be recorded as events and MUST NOT corrupt the
-internal workflow status.
+Internal `canceled` means the work is intentionally stopped; when an issue enters
+`canceled`, Symphony SHOULD also close the GitLab issue. GitLab close failures
+MUST be recorded as events and MUST NOT corrupt the internal workflow status.
 
 When the Agent fails:
 

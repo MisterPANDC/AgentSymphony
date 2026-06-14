@@ -4,6 +4,7 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
   import Plug.Test
 
   alias SymphonyElixir.Store
+  alias SymphonyElixir.GitLab.IssueLifecycle
   alias SymphonyElixirWeb.IssueController
 
   setup do
@@ -110,6 +111,40 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
     end
   end
 
+  test "closes canceled issues and reopens restored canceled issues with a reopened label", %{identity: identity, iid: iid, project: project} do
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: workflow_lifecycle_plug(project.project_ref, project.project_id, iid, identity))
+    issue = seed_issue(iid, project)
+
+    conn =
+      :put
+      |> conn("/api/issues/#{issue.id}/workflow")
+      |> assign_user(identity, project)
+
+    conn = IssueController.update_workflow(conn, %{"id" => issue.id, "status" => "canceled"})
+    assert conn.status == 200
+
+    payload = Jason.decode!(conn.resp_body)
+    assert payload["issue"]["workflowStatus"] == "canceled"
+    assert payload["issue"]["gitlabState"] == "closed"
+
+    issue = Store.get_issue(issue.id)
+    assert issue.workflow_status == "canceled"
+    assert issue.gitlab_state == "closed"
+
+    conn =
+      :put
+      |> conn("/api/issues/#{issue.id}/workflow")
+      |> assign_user(identity, project)
+
+    conn = IssueController.update_workflow(conn, %{"id" => issue.id, "status" => "todo"})
+    assert conn.status == 200
+
+    payload = Jason.decode!(conn.resp_body)
+    assert payload["issue"]["workflowStatus"] == "todo"
+    assert payload["issue"]["gitlabState"] == "opened"
+    assert IssueLifecycle.reopened_label() in payload["issue"]["labels"]
+  end
+
   defp create_issue_plug(project_ref, project_id, iid, token) do
     fn conn ->
       assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer #{token}"]
@@ -135,6 +170,67 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
         "assignees" => []
       })
     end
+  end
+
+  defp workflow_lifecycle_plug(project_ref, project_id, iid, identity) do
+    fn conn ->
+      assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer oauth-token-#{identity.gitlab_user_id}"]
+      assert conn.method == "PUT"
+      assert conn.request_path == "/api/v4/projects/#{project_ref}/issues/#{iid}"
+
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      payload = Jason.decode!(body)
+
+      case payload do
+        %{"state_event" => "close"} ->
+          Req.Test.json(conn, gitlab_issue(project_id, iid, "closed", []))
+
+        %{"state_event" => "reopen", "add_labels" => label} ->
+          assert label == IssueLifecycle.reopened_label()
+          Req.Test.json(conn, gitlab_issue(project_id, iid, "opened", [label]))
+      end
+    end
+  end
+
+  defp seed_issue(iid, project) do
+    Store.upsert_issue(%{
+      gitlab_issue_id: 920_000 + iid,
+      gitlab_project_id: project.project_id,
+      gitlab_project_setting_id: project.id,
+      iid: iid,
+      web_url: "https://gitlab.example.com/group/project/-/issues/#{iid}",
+      title: "Lifecycle issue",
+      description: "Body",
+      description_preview: "Body",
+      gitlab_state: "opened",
+      labels: [],
+      assignees: [],
+      raw_gitlab: %{}
+    })
+  end
+
+  defp gitlab_issue(project_id, iid, state, labels) do
+    %{
+      "id" => 920_000 + iid,
+      "project_id" => project_id,
+      "iid" => iid,
+      "web_url" => "https://gitlab.example.com/group/project/-/issues/#{iid}",
+      "title" => "Lifecycle issue",
+      "description" => "Body",
+      "state" => state,
+      "labels" => labels,
+      "assignees" => []
+    }
+  end
+
+  defp assign_user(conn, identity, project) do
+    Plug.Conn.assign(conn, :current_user, %{
+      identity_id: identity.id,
+      gitlab_user_id: identity.gitlab_user_id,
+      username: identity.username,
+      project_setting_id: project.id,
+      access_level: 30
+    })
   end
 
   defp restore_env(key, nil), do: System.delete_env(key)

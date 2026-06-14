@@ -130,14 +130,15 @@ defmodule SymphonyElixir.Codex.DynamicTool do
 
   defp update_current_issue_state(arguments, opts) do
     with {:ok, issue_id} <- current_issue_id(opts),
+         %{} = issue <- Store.get_issue(issue_id) || {:error, :issue_not_found},
          {:ok, status, reason} <- workflow_status(arguments),
          {:ok, workflow} <-
            Store.transition_workflow(issue_id, status,
              source: "agent",
              actor: "agent",
              reason: reason || "agent tool update"
-           ) do
-      maybe_close_done_issue(issue_id, status)
+           ),
+         :ok <- Tracker.sync_issue_lifecycle(issue_id, issue.workflow_status, status) do
       success_response(%{workflow: workflow})
     else
       {:error, reason} -> failure_response(%{error: %{message: inspect(reason)}})
@@ -220,14 +221,6 @@ defmodule SymphonyElixir.Codex.DynamicTool do
   end
 
   defp require_acceptance_criteria(_value), do: {:error, {:missing_required_followup_field, :acceptance_criteria}}
-
-  defp maybe_close_done_issue(issue_id, status) do
-    if normalize_workflow_status(status) == "done", do: Tracker.close_issue(issue_id), else: :ok
-    :ok
-  end
-
-  defp normalize_workflow_status(status) when is_binary(status), do: status |> String.trim() |> String.downcase()
-  defp normalize_workflow_status(_status), do: ""
 
   defp unsupported_tool_response(other) do
     failure_response(%{

@@ -850,6 +850,102 @@ textarea {
   margin-left: -2px;
 }
 
+.issue-label-list {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  vertical-align: middle;
+}
+
+.issue-label-chip,
+.issue-label-more,
+.issue-label-empty {
+  display: inline-flex;
+  min-height: 20px;
+  max-width: 132px;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #d8dbe2;
+  border-radius: 999px;
+  background: #f6f8fb;
+  padding: 1px 7px;
+  color: #4f5968;
+  font-size: 11px;
+  font-weight: 560;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.issue-label-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.issue-label-more {
+  flex: 0 0 auto;
+  border-color: #e2e4e9;
+  background: #ffffff;
+  color: var(--muted);
+}
+
+.issue-label-empty {
+  border-style: dashed;
+  background: #ffffff;
+  color: var(--muted-2);
+}
+
+.issue-state-badge {
+  --issue-state-bg: #f8f8f9;
+  --issue-state-border: #d7d9df;
+  --issue-state-color: #5c606a;
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--issue-state-border);
+  border-radius: 999px;
+  background: var(--issue-state-bg);
+  padding: 2px 8px 2px 7px;
+  color: var(--issue-state-color);
+  font-size: 12px;
+  font-weight: 620;
+  line-height: 18px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  white-space: nowrap;
+}
+
+.gitlab-state-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+  margin-left: -1px;
+  color: currentColor;
+}
+
+.gitlab-state-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.issue-state-badge--open {
+  --issue-state-bg: #effaf3;
+  --issue-state-border: #bad9c9;
+  --issue-state-color: #2f6849;
+}
+
+.issue-state-badge--closed {
+  --issue-state-bg: #f3f4ff;
+  --issue-state-border: #c8cdf6;
+  --issue-state-color: #555fb1;
+}
+
 .status-pill.triage {
   border-color: #efc4ae;
   color: #9a4c25;
@@ -1805,6 +1901,7 @@ textarea {
 }
 
 .issue-title {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   color: var(--text);
@@ -1813,6 +1910,15 @@ textarea {
   line-height: 20px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.issue-row-title-labels {
+  flex: 0 1 auto;
+  overflow: hidden;
+}
+
+.issue-row-title-labels .issue-label-chip {
+  max-width: 104px;
 }
 
 .issue-row-meta {
@@ -2279,6 +2385,7 @@ textarea {
 .drawer-overlay {
   position: fixed;
   inset: 0;
+  z-index: 60;
   background: rgba(17, 24, 39, 0.16);
 }
 
@@ -2286,6 +2393,7 @@ textarea {
   position: fixed;
   right: 0;
   top: 0;
+  z-index: 70;
   height: 100vh;
   width: 100%;
   max-width: 560px;
@@ -2294,6 +2402,457 @@ textarea {
   background: #ffffff;
   padding: 18px;
   box-shadow: -24px 0 48px rgba(17, 24, 39, 0.12);
+}
+
+.issue-title-editor {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.issue-title-display {
+  display: inline-flex;
+  min-width: 0;
+  max-width: calc(100% - 32px);
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  padding: 0 3px;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.issue-title-display:hover {
+  background: #f6f8fb;
+}
+
+.issue-title-display:hover .issue-detail-title {
+  text-decoration: underline;
+  text-decoration-color: #aeb5c0;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.issue-title-display:focus-visible {
+  background: #f6f8fb;
+  outline: 1px solid #cfd4dc;
+  outline-offset: 1px;
+}
+
+.issue-title-display:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.issue-detail-title {
+  min-width: 1ch;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  color: #1d1d1f;
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 28px;
+}
+
+.issue-title-identifier {
+  flex: 0 0 auto;
+  color: #6f7480;
+  font-size: 13px;
+  font-weight: 620;
+  line-height: 22px;
+}
+
+.issue-title-editor--editing .issue-title-identifier {
+  padding-left: 3px;
+}
+
+.issue-detail-title--hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.issue-title-link,
+.issue-title-confirm {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #69707c;
+  padding: 0;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease,
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.issue-title-link {
+  opacity: 0.82;
+}
+
+.issue-title-link:hover,
+.issue-title-confirm:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.issue-title-link:focus-visible,
+.issue-title-confirm:focus-visible {
+  background: var(--hover);
+  color: var(--text);
+  outline: 1px solid #cfd4dc;
+  outline-offset: 1px;
+}
+
+.issue-title-confirm {
+  color: #2f6849;
+  animation: title-action-in 140ms cubic-bezier(0.2, 0, 0.13, 1);
+}
+
+.issue-title-confirm:hover {
+  background: #e8f4ed;
+  color: #23583c;
+}
+
+.issue-title-input {
+  height: 28px;
+  min-width: 3ch;
+  max-width: min(430px, calc(100% - 48px));
+  flex: 0 1 auto;
+  border: 0;
+  border-bottom: 1px solid #c9ced8;
+  border-radius: 0;
+  background: rgba(248, 250, 252, 0.82);
+  color: #1d1d1f;
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 28px;
+  outline: 0;
+  padding: 0 3px;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.issue-title-editor--editing .issue-title-input {
+  padding-left: 0;
+}
+
+.issue-title-input:focus {
+  border-color: #8f98a8;
+  background: rgba(245, 247, 250, 0.96);
+  box-shadow: inset 0 -1px 0 #8f98a8;
+}
+
+.issue-title-input:disabled {
+  color: #5f6673;
+}
+
+.issue-title-saving {
+  flex: 0 0 auto;
+  color: #7a808b;
+}
+
+.issue-title-error {
+  flex: 0 0 100%;
+  color: #95503f;
+  font-size: 12px;
+  line-height: 17px;
+}
+
+@keyframes title-action-in {
+  from {
+    opacity: 0;
+    transform: scale(0.84);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.label-editor {
+  display: grid;
+  gap: 7px;
+}
+
+.label-editor-header {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.label-editor-header h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  color: #686b73;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
+.label-editor-header h3 > svg {
+  color: #7a808b;
+}
+
+.label-editor-saving {
+  flex: 0 0 auto;
+  color: #7a808b;
+}
+
+.label-editor-body {
+  display: grid;
+  gap: 7px;
+}
+
+.label-editor-input-shell {
+  display: flex;
+  min-height: 36px;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+}
+
+.label-editor-input-shell:focus-within {
+  box-shadow: none;
+}
+
+.label-editor-edit-chip,
+.label-editor-new-chip,
+.label-editor-value-chip {
+  display: inline-flex;
+  min-height: 24px;
+  max-width: 100%;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #d8dbe2;
+  border-radius: 999px;
+  background: #f8fafc;
+  padding: 2px 4px 2px 8px;
+  color: #4f5968;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    padding 160ms ease,
+    transform 160ms ease;
+}
+
+.label-editor-value-chip {
+  padding: 0 9px;
+}
+
+.label-editor-edit-chip {
+  border-color: #cbd1dc;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  animation: label-editor-chip-edit-in 170ms cubic-bezier(0.2, 0, 0.13, 1);
+}
+
+.label-editor-new-chip {
+  border-style: dashed;
+  background: #ffffff;
+  animation: label-editor-chip-edit-in 170ms cubic-bezier(0.2, 0, 0.13, 1);
+}
+
+.label-editor-edit-chip:focus-within,
+.label-editor-new-chip:focus-within,
+.label-editor-value-chip:focus-within {
+  border-color: #cbd1dc;
+  background: #ffffff;
+}
+
+.label-editor-value-chip:hover {
+  border-color: #cbd1dc;
+  background: #ffffff;
+}
+
+.label-editor-value-chip:has(.label-editor-chip-label:focus-visible) {
+  border-color: #bcc5d3;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(99, 114, 139, 0.14);
+}
+
+.label-editor-chip-label {
+  min-width: 0;
+  max-width: min(210px, 42vw);
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 22px;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.label-editor-chip-label > span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.label-editor-chip-label:focus-visible {
+  outline: 0;
+}
+
+.label-editor-chip-label:disabled {
+  cursor: default;
+}
+
+.label-editor-edit-chip input,
+.label-editor-new-chip input {
+  min-width: 0;
+  max-width: min(210px, 42vw);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 18px;
+  outline: none;
+}
+
+.label-editor-new-chip input {
+  color: #4f5968;
+}
+
+.label-editor-edit-chip input::placeholder,
+.label-editor-new-chip input::placeholder {
+  color: var(--muted-2);
+}
+
+.label-editor-edit-chip > button,
+.label-editor-new-chip > button,
+.label-editor-add-chip {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #7a808b;
+  padding: 0;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.label-editor-edit-chip > button:hover,
+.label-editor-new-chip > button:hover:not(:disabled),
+.label-editor-add-chip:hover:not(:disabled) {
+  background: #e9ebf0;
+  color: #424752;
+}
+
+.label-editor-chip-confirm {
+  color: #2f6849;
+  animation: label-editor-action-in 140ms cubic-bezier(0.2, 0, 0.13, 1);
+}
+
+.label-editor-chip-confirm:hover:not(:disabled) {
+  background: #e8f4ed;
+  color: #23583c;
+}
+
+.label-editor-chip-delete:hover:not(:disabled) {
+  background: #f0eeee;
+  color: #6c4f4f;
+}
+
+.label-editor-edit-chip > button:disabled,
+.label-editor-new-chip > button:disabled,
+.label-editor-add-chip:disabled {
+  opacity: 0.5;
+}
+
+.label-editor-edit-chip > button:focus-visible,
+.label-editor-new-chip > button:focus-visible,
+.label-editor-add-chip:focus-visible {
+  outline: 2px solid #c6ccd6;
+  outline-offset: 2px;
+}
+
+.label-editor-new-chip > button {
+  border: 1px solid var(--border-subtle);
+  background: #ffffff;
+}
+
+.label-editor-add-chip {
+  width: 24px;
+  height: 24px;
+  border: 1px dashed #d8dbe2;
+  background: #ffffff;
+}
+
+@keyframes label-editor-chip-edit-in {
+  from {
+    opacity: 0.76;
+    transform: translateY(1px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes label-editor-action-in {
+  from {
+    opacity: 0;
+    transform: scale(0.84);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.label-editor-error {
+  border: 1px solid #e3b9ad;
+  border-radius: 6px;
+  background: #fff3f0;
+  padding: 7px 9px;
+  color: #95503f;
+  font-size: 12px;
+  line-height: 17px;
 }
 
 @media (max-width: 860px) {

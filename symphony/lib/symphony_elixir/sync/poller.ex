@@ -7,6 +7,7 @@ defmodule SymphonyElixir.Sync.Poller do
   require Logger
 
   alias Symphony.GitLab.{Client, Config, IssueMapper, NoteMapper}
+  alias SymphonyElixir.GitLab.IssueLifecycle
   alias SymphonyElixir.{StatusDashboard, Store}
 
   @issue_cursor "gitlab_issues_updated_after"
@@ -189,16 +190,72 @@ defmodule SymphonyElixir.Sync.Poller do
       |> maybe_put_updated_after(config, project_setting)
 
     with {:ok, raw_issues} <- Client.list_project_issues(config, params) do
-      issues =
-        Enum.map(raw_issues, fn raw ->
-          raw
-          |> IssueMapper.from_gitlab()
-          |> Map.put(:gitlab_project_setting_id, project_setting.id)
-          |> Store.upsert_issue()
-        end)
+      existing_by_iid =
+        project_setting.id
+        |> local_project_issues_by_iid()
+
+      issues = Enum.map(raw_issues, &sync_issue(config, project_setting, existing_by_iid, &1))
 
       {:ok, issues}
     end
+  end
+
+  defp sync_issue(config, project_setting, existing_by_iid, raw) do
+    attrs =
+      raw
+      |> IssueMapper.from_gitlab()
+      |> Map.put(:gitlab_project_setting_id, project_setting.id)
+
+    previous = Map.get(existing_by_iid, attrs.iid)
+    issue = Store.upsert_issue(attrs)
+
+    if IssueLifecycle.external_reopen?(previous, issue) do
+      restore_externally_reopened_issue(config, issue)
+    else
+      issue
+    end
+  end
+
+  defp restore_externally_reopened_issue(config, issue) do
+    case Store.transition_workflow(issue.id, "triage",
+           source: "gitlab_sync",
+           actor: "gitlab_sync",
+           reason: "GitLab issue reopened"
+         ) do
+      {:ok, _workflow} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Failed to restore externally reopened issue workflow: issue_id=#{issue.id} reason=#{inspect(reason)}")
+    end
+
+    issue = Store.get_issue(issue.id) || issue
+    ensure_reopened_label(config, issue)
+  end
+
+  defp ensure_reopened_label(config, issue) do
+    case IssueLifecycle.reopen_attrs(issue) do
+      :noop ->
+        issue
+
+      attrs ->
+        case Client.update_project_issue(config, issue.iid, attrs) do
+          {:ok, raw_issue} ->
+            raw_issue
+            |> IssueMapper.from_gitlab()
+            |> Map.put(:gitlab_project_setting_id, issue.gitlab_project_setting_id)
+            |> Store.upsert_issue()
+
+          {:error, reason} ->
+            Logger.warning("Failed to add reopened label to GitLab issue: issue_id=#{issue.id} reason=#{inspect(reason)}")
+            issue
+        end
+    end
+  end
+
+  defp local_project_issues_by_iid(project_setting_id) do
+    Store.list_issues(project_setting_id: project_setting_id)
+    |> Map.new(&{&1.iid, &1})
   end
 
   defp maybe_put_updated_after(params, config, project_setting) do
