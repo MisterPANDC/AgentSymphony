@@ -17,7 +17,7 @@ Conflict rule:
 
 ## 1. Problem Statement
 
-Symphony currently treats Linear as the tracker integration described by upstream `SPEC.md`. The migration changes Symphony into a GitLab-native service that continuously tracks issues from one GitLab project, stores GitLab issue snapshots locally, maintains Symphony-owned workflow state separately from GitLab, and exposes a high-density dashboard for controlling agents and issue workflow.
+Symphony currently treats Linear as the tracker integration described by upstream `SPEC.md`. The migration changes Symphony into a GitLab-native service where users sign in with GitLab OAuth/OIDC, choose GitLab projects they can access, store GitLab issue snapshots locally, maintain Symphony-owned workflow state separately from GitLab, and use a high-density dashboard for controlling agents and issue workflow.
 
 A conforming implementation MUST satisfy all of the following goals:
 
@@ -33,30 +33,39 @@ A conforming implementation MUST satisfy all of the following goals:
    - GitLab access MUST be implemented as first-class Elixir modules.
    - The browser frontend MUST NOT receive, store, or call with a GitLab access token.
 
-3. **Track exactly one GitLab project by default**
-   - The default deployment mode is local single-user mode.
-   - The application MUST track one configured GitLab project.
-   - The implementation MUST NOT require a multi-user login system, OAuth login, organization membership, RBAC, or team permission model in the default mode.
-   - Multi-project and multi-user features are outside the default scope.
+3. **Use GitLab OAuth/OIDC for multi-user access**
+   - The default runtime mode MUST be `gitlab_oidc`.
+   - Users MUST sign in through the configured GitLab OAuth/OIDC provider.
+   - Symphony MUST list and activate projects from the signed-in user's GitLab project membership.
+   - The active project MUST be stored in the user's Symphony session, and read/write/admin API access MUST be scoped to that active project.
+   - Symphony MUST NOT implement an independent organization, invitation, password, or team RBAC system for this migration.
 
-4. **Use GitLab REST API as the external issue source**
+4. **Support multiple GitLab projects safely**
+   - Symphony MAY persist many GitLab project settings for one GitLab instance.
+   - A user MAY switch between GitLab projects they can access without signing out.
+   - Per-project data such as Project Access Token status, issue sync state, unsynced issues, and issue cursors MUST NOT leak across projects.
+   - GitLab issue sync cursors MUST be scoped per `gitlab_project_settings.id`.
+
+5. **Use GitLab REST API as the external issue source**
    - GitLab project issues are the external work item source.
    - GitLab issue title, description, labels, assignees, milestone, due date, open/closed state, and notes/comments are external GitLab facts.
    - Symphony MUST call GitLab REST API under `/api/v4`.
    - Symphony MUST authenticate to GitLab from the server side only.
+   - User-initiated GitLab writes MUST use the signed-in user's OAuth access token.
+   - Background sync and Agent GitLab writes MUST use the selected project's Project Access Token.
 
-5. **Maintain Symphony workflow state internally**
+6. **Maintain Symphony workflow state internally**
    - Symphony workflow statuses such as `triage`, `todo`, `in_progress`, `review`, `merging`, `rework`, `done`, and `canceled` MUST be stored in the Symphony database.
    - Blocker/dependency relationships and issue-level blocked state MUST be stored or derived in the Symphony database separately from workflow status.
-   - Dashboard ordering, run state, dispatch state, blocked/operator-input state, and sync cursors MUST be stored in the Symphony database.
+   - Dashboard ordering, run state, dispatch state, blocked/operator-input state, project memberships, encrypted token records, and sync cursors MUST be stored in the Symphony database.
    - GitLab paid workflow/blocker/status features MUST NOT be required for the core workflow.
 
-6. **Provide a Linear-like control frontend**
+7. **Provide a Linear-like control frontend**
    - The frontend MUST be implemented with TypeScript + React.
    - The frontend MUST provide a high-density issue dashboard, issue detail drawer, internal status controls, blocker editor, Agent control panel, run history, settings, and a dedicated runtime monitoring area.
    - The frontend MUST replicate the control efficiency of Linear-style dashboards without copying Linear trademarks, proprietary icons, brand assets, or protected visual details.
 
-7. **Provide a dedicated Run Monitor area**
+8. **Provide a dedicated Run Monitor area**
    - The new frontend MUST contain a top-level running/observability area named **Run Monitor**.
    - Run Monitor MUST include the information exposed by the original Elixir prototype Web dashboard: runtime state, blocked/operator-input state, JSON operational debugging, HTTP observability entrypoint, tracker-provided issue links, and manual refresh.
    - Run Monitor MUST be part of the new TypeScript + React frontend, not a separate legacy LiveView dashboard.
@@ -73,55 +82,89 @@ A conforming implementation MUST NOT implement the following in this migration:
 - GitLab webhook receiver.
 - GitLab project hook installer.
 - A generic issue-tracker abstraction that keeps both Linear and GitLab providers alive.
-- A complete user login system in default local mode.
-- OAuth login in default local mode.
-- Team RBAC in default local mode.
-- Multi-tenant project switching in default local mode.
+- Local single-project runtime configured only by `GITLAB_TOKEN`.
+- Password login, user invitations, organizations, or team RBAC separate from GitLab.
+- Fine-grained issue or note visibility rules beyond selected-project GitLab membership.
+- Cross-GitLab-instance tenancy in one running Symphony process.
 - GitLab GraphQL as the primary tracker integration.
 - GitLab Premium/Ultimate-only issue blocking as a required feature.
 - GitLab issue boards as the workflow source of truth.
 - GitLab labels as the workflow source of truth.
 - Browser-side GitLab API calls.
-- Browser-side GitLab token storage.
+- Browser-side raw OAuth token or Project Access Token storage.
 - A separate legacy LiveView dashboard as the primary UI.
 
 ---
 
-## 3. Default deployment mode
+## 3. Authentication and Project Access
 
-### 3.1 Local single-user mode
+### 3.1 GitLab OAuth/OIDC mode
 
-The default runtime mode is `local_single_user`.
+The default runtime mode is `gitlab_oidc`. Unsupported auth modes MUST fail explicitly.
 
-In this mode:
+Required behavior:
 
-- One local operator controls Symphony.
-- One GitLab project is configured.
-- One GitLab API token is configured on the server.
-- The Phoenix HTTP server binds to `127.0.0.1` by default.
-- The browser frontend is served by the Phoenix backend or by a local dev Vite server proxying to Phoenix.
-- No account table is required.
-- No password login is required.
-- No user invitation, organization, role, team, or membership feature is required.
-- All actions are attributed internally to `local_operator` unless GitLab returns a different external author for synced notes.
+- Symphony MUST use GitLab OAuth/OIDC authorization-code login.
+- The redirect URI MUST be `${SYMPHONY_PUBLIC_URL}/auth/gitlab/callback`.
+- The configured issuer/public URL MUST be normalized without trailing slashes.
+- Default OAuth/OIDC scopes MUST be `openid profile email api`.
+- The session MUST identify the GitLab identity, selected project, effective access level, and last membership check time.
+- GitLab identity records MUST be unique by `(issuer, gitlab_user_id)` and `(issuer, sub)`.
+- OAuth access and refresh tokens MUST be encrypted at rest.
+- OAuth access tokens MUST be refreshed before expiry when a refresh token is available.
 
-### 3.2 Exposure guard
+### 3.2 Project selection and membership
 
-The implementation MUST set the default bind host to loopback:
+After login, Symphony MUST list projects through GitLab REST using the signed-in user's OAuth token:
 
-```env
-SYMPHONY_BIND_HOST=127.0.0.1
+```text
+GET /projects?membership=true&simple=true&order_by=last_activity_at&sort=desc
 ```
 
-If the bind host is changed to `0.0.0.0` or another non-loopback interface, the implementation MUST require a simple shared secret:
+When a user activates a project, Symphony MUST:
+
+1. Upsert a `gitlab_project_settings` row for the GitLab project.
+2. Validate the user's membership with `GET /projects/:id/members/all/:user_id`.
+3. Persist the membership in `gitlab_project_memberships`.
+4. Store the active `project_setting_id` and effective `access_level` in the session.
+5. Reset that project's issue sync cursor so newly selected project data can be fetched.
+
+The permission model MUST use GitLab numeric `access_level` as the durable authorization signal. Role names such as Reporter, Developer, and Maintainer are display labels derived from that number.
+
+Default thresholds:
 
 ```env
-SYMPHONY_SHARED_SECRET=change-me
+SYMPHONY_AUTH_MIN_ACCESS_LEVEL=20
+SYMPHONY_AUTH_WRITE_ACCESS_LEVEL=30
+SYMPHONY_AUTH_ADMIN_ACCESS_LEVEL=40
 ```
 
-The shared secret is not a full login system. It is a local deployment exposure guard. The browser MUST send it through a server-issued session cookie or an `X-Symphony-Secret` header during local development. The GitLab token MUST never be sent to the browser.
+Meaning:
 
-### 3.3 Default command
+- `read`: GitLab Reporter (`20`) or above.
+- `write`: GitLab Developer (`30`) or above.
+- `admin`: GitLab Maintainer (`40`) or above.
+
+Membership checks MAY be cached briefly, but protected API requests MUST refresh stale membership and drop the session if the user no longer has enough GitLab access.
+
+### 3.3 Project Access Tokens
+
+Each selected project needs a GitLab Project Access Token for background and Agent operations.
+
+Required behavior:
+
+- Admin users MAY set the selected project's Project Access Token from `/settings/gitlab`.
+- The backend MUST validate the token before saving it.
+- The token MUST be encrypted at rest.
+- The token MUST be returned to the frontend only as `configured` or `missing`.
+- Background issue/note sync MUST use the Project Access Token.
+- Agent-created GitLab notes, issue close/reopen, and follow-up issue creation MUST use the Project Access Token.
+- User-initiated issue edits and comments from the UI MUST use the signed-in user's OAuth token.
+- If a selected project has no Project Access Token, project browsing MAY work from already synced data, but sync and Agent GitLab writes MUST fail clearly with `project_access_token_missing`.
+
+This boundary is intentional: Project Access Tokens give background sync and Agents a stable project-scoped credential without borrowing one user's OAuth token. Project Access Tokens SHOULD be scoped to the minimum GitLab permissions the project needs.
+
+### 3.4 HTTP runtime
 
 The main runtime command MUST keep the original local-run ergonomics:
 
@@ -131,142 +174,91 @@ The main runtime command MUST keep the original local-run ergonomics:
 
 When `--port` is present, Symphony MUST start the Phoenix HTTP service, serve the React control frontend, expose the JSON API, and expose Run Monitor.
 
+The implementation SHOULD bind to loopback by default:
+
+```env
+SYMPHONY_BIND_HOST=127.0.0.1
+```
+
+If the service is exposed beyond loopback, `SYMPHONY_PUBLIC_URL`, `SYMPHONY_SESSION_SECRET`, `SYMPHONY_TOKEN_ENCRYPTION_SECRET`, and GitLab OAuth redirect URI configuration MUST match the externally reachable URL.
+
 ---
 
 ## 4. Configuration
 
-### 4.1 Required GitLab configuration
+### 4.1 Required OAuth/OIDC configuration
 
-The implementation MUST support the following fastest setup path:
+The implementation MUST support `.env.local` at the Elixir app root and load it in development and local runtime mode. `.env.local` MUST be listed in `.gitignore`.
 
-```env
-GITLAB_PROJECT_API_URL=http://gitlab.local/api/v4/projects/123
-GITLAB_TOKEN=glpat_xxxxxxxxxxxxxxxxxxxx
-```
-
-`GITLAB_PROJECT_API_URL` is the preferred local single-project configuration. It MUST be parsed into:
-
-- `gitlab_base_url`: `http://gitlab.local`
-- `gitlab_api_root`: `http://gitlab.local/api/v4`
-- `gitlab_project_ref`: `123`
-
-The project reference MAY be either:
+Minimum configuration:
 
 ```env
-GITLAB_PROJECT_API_URL=http://gitlab.local/api/v4/projects/123
+SYMPHONY_BIND_HOST=127.0.0.1
+SYMPHONY_PORT=4000
+SYMPHONY_PUBLIC_URL=http://127.0.0.1:4000
+SYMPHONY_SESSION_SECRET=replace-with-a-stable-random-secret-at-least-64-bytes
+SYMPHONY_TOKEN_ENCRYPTION_SECRET=replace-with-a-stable-random-secret
+
+SYMPHONY_AUTH_MODE=gitlab_oidc
+GITLAB_BASE_URL=https://gitlab.example.com
+GITLAB_OIDC_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+GITLAB_OIDC_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+SYMPHONY_DATABASE_URL=postgres://postgres:postgres@localhost:5432/symphony_dev
 ```
 
-or a URL-encoded namespace path:
+`GITLAB_OIDC_ISSUER` MAY be used instead of `GITLAB_BASE_URL` when the OAuth/OIDC issuer differs from the public GitLab base URL. If both are present, `GITLAB_OIDC_ISSUER` is the issuer used for discovery and ID token validation.
+
+### 4.2 Permission configuration
+
+Permission thresholds MUST be configurable:
 
 ```env
-GITLAB_PROJECT_API_URL=http://gitlab.local/api/v4/projects/my-group%2Fmy-project
+SYMPHONY_AUTH_MIN_ACCESS_LEVEL=20
+SYMPHONY_AUTH_WRITE_ACCESS_LEVEL=30
+SYMPHONY_AUTH_ADMIN_ACCESS_LEVEL=40
 ```
 
-The implementation MUST also support explicit split configuration for scripted deployment:
+Defaults MUST mean Reporter can read, Developer can write, and Maintainer can administer Symphony project settings.
 
-```env
-GITLAB_BASE_URL=http://gitlab.local
-GITLAB_PROJECT_ID=123
-GITLAB_TOKEN=glpat_xxxxxxxxxxxxxxxxxxxx
-```
+### 4.3 Token source and storage
 
-or:
+The implementation MUST NOT require or use `GITLAB_TOKEN` for the normal runtime.
 
-```env
-GITLAB_BASE_URL=http://gitlab.local
-GITLAB_PROJECT_PATH=my-group/my-project
-GITLAB_TOKEN=glpat_xxxxxxxxxxxxxxxxxxxx
-```
+Token rules:
 
-If both `GITLAB_PROJECT_API_URL` and split configuration are present, `GITLAB_PROJECT_API_URL` MUST take precedence unless `GITLAB_PROJECT_API_URL` is invalid.
+- OAuth access/refresh tokens are obtained through GitLab OAuth/OIDC and encrypted in `gitlab_oauth_tokens`.
+- Project Access Tokens are entered per selected project in Settings and encrypted in `gitlab_project_settings`.
+- The browser frontend MUST NOT receive raw OAuth tokens or Project Access Tokens.
+- Tokens MUST NOT appear in frontend source, frontend build output, browser local storage, browser session storage, IndexedDB, URL query parameters, rendered HTML, logs, Run Monitor DTOs, or error responses.
+- Token DTOs MUST expose only status values such as `configured`, `missing`, or validation errors.
 
-### 4.2 Token source
-
-The implementation MUST read the GitLab token only from server-side configuration:
-
-```env
-GITLAB_TOKEN=...
-```
-
-The implementation MUST NOT store `GITLAB_TOKEN` in frontend source, frontend build output, browser local storage, browser session storage, IndexedDB, URL query parameters, or rendered HTML.
-
-The implementation SHOULD use a GitLab project access token for self-managed GitLab installations because it is scoped to one project. A personal access token MAY be used when project access tokens are unavailable. For full operation, the token MUST have permission to:
-
-- Read the configured project.
-- Read project issues.
-- Read project issue notes.
-- Create issue notes.
-- Update issue title/description/labels/state when Symphony exposes such actions.
-- Close and reopen issues when Symphony exposes such actions.
-
-A token with read-only API permissions MUST put Symphony in read-only tracker mode. In read-only tracker mode:
-
-- Sync MUST work.
-- Dashboard viewing MUST work.
-- Internal workflow state changes MAY still work because they only update the Symphony database.
-- GitLab note creation, GitLab issue update, GitLab close, and GitLab reopen actions MUST be disabled with a clear UI error.
-
-### 4.3 Local env file
-
-The implementation MUST support `.env.local` at the Elixir app root.
-
-Required behavior:
-
-- `.env.local` MUST be loaded in development and local runtime mode.
-- `.env.local` MUST be listed in `.gitignore`.
-- `mix symphony.gitlab.setup` MUST create or update `.env.local`.
-- `mix symphony.gitlab.setup` MUST prompt for `GITLAB_PROJECT_API_URL`.
-- `mix symphony.gitlab.setup` MUST read `GITLAB_TOKEN` from a hidden terminal prompt.
-- `mix symphony.gitlab.setup` MUST NOT echo the token.
-- `mix symphony.gitlab.setup` MUST print the detected host, API root, and project ref, but MUST redact the token.
-
-Example setup interaction:
-
-```text
-$ mix symphony.gitlab.setup
-GitLab project API URL: http://gitlab.local/api/v4/projects/123
-GitLab token: ********
-Wrote .env.local
-Detected API root: http://gitlab.local/api/v4
-Detected project: 123
-Run: mix symphony.gitlab.test
-```
-
-### 4.4 Validation task
-
-The implementation MUST provide:
-
-```bash
-mix symphony.gitlab.test
-```
-
-This task MUST:
-
-1. Load `.env.local` and process environment.
-2. Parse GitLab configuration.
-3. Validate that the API root contains `/api/v4`.
-4. Call `GET /projects/:id` for the configured project.
-5. Call `GET /projects/:id/issues?per_page=1&state=all`.
-6. Print project name, project web URL, default branch if present, token permission mode, and issue API reachability.
-7. Redact token values from all output.
-8. Exit non-zero on auth failure, project not found, invalid API URL, network failure, or missing config.
-
-### 4.5 Runtime configuration keys
+### 4.4 Runtime configuration keys
 
 The implementation MUST support these keys:
 
 ```env
-# GitLab
-GITLAB_PROJECT_API_URL=http://gitlab.local/api/v4/projects/123
-GITLAB_BASE_URL=http://gitlab.local
-GITLAB_PROJECT_ID=123
-GITLAB_PROJECT_PATH=my-group/my-project
-GITLAB_TOKEN=glpat_xxx
+# Auth
+SYMPHONY_AUTH_MODE=gitlab_oidc
+GITLAB_BASE_URL=https://gitlab.example.com
+GITLAB_OIDC_ISSUER=https://gitlab.example.com
+GITLAB_OIDC_CLIENT_ID=...
+GITLAB_OIDC_CLIENT_SECRET=...
+GITLAB_OIDC_SCOPES=openid profile email api
+SYMPHONY_PUBLIC_URL=http://127.0.0.1:4000
+SYMPHONY_SESSION_SECRET=...
+SYMPHONY_TOKEN_ENCRYPTION_SECRET=...
+
+# Authorization thresholds
+SYMPHONY_AUTH_MIN_ACCESS_LEVEL=20
+SYMPHONY_AUTH_WRITE_ACCESS_LEVEL=30
+SYMPHONY_AUTH_ADMIN_ACCESS_LEVEL=40
+
+# Persistence
+SYMPHONY_DATABASE_URL=postgres://postgres:postgres@localhost:5432/symphony_dev
 
 # Symphony local HTTP
 SYMPHONY_BIND_HOST=127.0.0.1
 SYMPHONY_PORT=4000
-SYMPHONY_SHARED_SECRET=
 
 # Sync
 SYMPHONY_SYNC_INTERVAL_MS=60000
@@ -278,6 +270,17 @@ SYMPHONY_WORKSPACE_ROOT=~/code/workspaces
 SYMPHONY_LOGS_ROOT=./log
 CODEX_COMMAND="codex app-server"
 ```
+
+PostgreSQL MUST be the default persistence backend. The JSON store MAY remain available only when explicitly selected for tests or one-off local tooling.
+
+### 4.5 Settings validation
+
+The backend MUST expose GitLab settings validation for the selected project:
+
+- `GET /api/settings/gitlab` MUST return selected project metadata and token status.
+- `POST /api/settings/gitlab/test` MUST validate the selected project's Project Access Token.
+- `PUT /api/settings/gitlab/project-token` MUST validate, encrypt, and save a new Project Access Token.
+- All settings responses MUST redact secrets.
 
 ---
 
@@ -297,7 +300,8 @@ CODEX_COMMAND="codex app-server"
 │                    Elixir / Phoenix Backend                    │
 │                                                                │
 │  Symphony.GitLab.Client       -> GitLab REST API               │
-│  Symphony.GitLab.Config       -> local project/token config    │
+│  Symphony.GitLab.Config       -> selected project config       │
+│  Symphony.Auth                -> GitLab OIDC, sessions, tokens │
 │  Symphony.Tracker             -> GitLab issue read model       │
 │  Symphony.Workflow            -> internal status/blockers      │
 │  Symphony.Sync.Poller         -> polling-only GitLab sync      │
@@ -310,6 +314,7 @@ CODEX_COMMAND="codex app-server"
 ┌──────────────────────────────▼─────────────────────────────────┐
 │                           PostgreSQL                           │
 │                                                                │
+│  gitlab_identities / gitlab_oauth_tokens / memberships         │
 │  gitlab_project_settings / gitlab_issues / gitlab_issue_notes  │
 │  issue_workflow_states / issue_dependencies / issue_events     │
 │  agent_runs / agent_run_events / runtime_blocks / sync_cursors │
@@ -318,7 +323,10 @@ CODEX_COMMAND="codex app-server"
 ┌──────────────────────────────▼─────────────────────────────────┐
 │                         GitLab REST API                        │
 │                                                                │
+│  /.well-known/openid-configuration and /oauth/token            │
+│  /api/v4/projects                                              │
 │  /api/v4/projects/:id                                          │
+│  /api/v4/projects/:id/members/all/:user_id                     │
 │  /api/v4/projects/:id/issues                                   │
 │  /api/v4/projects/:id/issues/:issue_iid                        │
 │  /api/v4/projects/:id/issues/:issue_iid/notes                  │
@@ -349,18 +357,21 @@ The sync system MUST support:
 
 | Data type | Source of truth | Required behavior |
 |---|---|---|
-| Project identity | GitLab | Store GitLab project `id`, `path_with_namespace`, `web_url`, and API root after validation. |
+| User identity | GitLab OIDC | Store issuer, GitLab user id, username, profile fields, and raw claims. |
+| User project access | GitLab membership | Store effective `access_level`; derive display role names from GitLab's numeric value. |
+| Project identity | GitLab | Store GitLab project `id`, `path_with_namespace`, `web_url`, and API root after activation or validation. |
 | Issue identity | GitLab | Store GitLab global `id` and project-local `iid`; use `iid` for issue endpoint calls. |
 | Title / description | GitLab | Sync into read model; update through GitLab API when edited from Symphony. |
 | Labels / assignees / milestone / due date | GitLab | Sync and display; do not use as workflow truth. |
 | Open / closed state | GitLab | Sync and display; closed issues are not dispatch candidates. |
-| Notes/comments | GitLab | Sync issue notes; Agent comments are posted through backend GitLab client. |
+| Notes/comments | GitLab | Sync issue notes; user comments use user OAuth, Agent comments use the Project Access Token. |
 | Workflow status | Symphony DB | Store and mutate internally. |
 | Blocker/dependency | Symphony DB | Store and mutate internally. |
 | Agent run state | Symphony DB | Store current and historical runs internally. |
 | Runtime blocked/operator-input state | Symphony DB + runtime process state | Persist enough to survive restart; expose in Run Monitor. |
 | Dashboard rank/order/views | Symphony DB | Store locally. |
-| Sync cursors/errors | Symphony DB | Store locally and expose in Settings + Run Monitor. |
+| Sync cursors/errors | Symphony DB | Store locally; issue cursors are per project and exposed in Settings + Run Monitor. |
+| OAuth and Project Access Tokens | Symphony DB encrypted fields | Never expose raw token values to browser DTOs, logs, or monitor APIs. |
 
 ---
 
@@ -381,6 +392,8 @@ The client MUST expose typed Elixir functions for required operations:
 
 ```elixir
 get_project(config)
+get_project_by_id(config, project_id)
+list_user_projects(config, params)
 list_project_issues(config, params)
 get_project_issue(config, issue_iid)
 create_project_issue(config, attrs)
@@ -399,20 +412,23 @@ The client MUST build URLs under:
 {gitlab_base_url}/api/v4
 ```
 
-The project identifier in path parameters MUST be either:
+For selected-project operations, the project identifier in path parameters MUST be either:
 
 - Numeric project ID, or
 - URL-encoded namespace/project path.
 
-When `GITLAB_PROJECT_PATH=my-group/my-project` is used, the client MUST URL-encode `/` as `%2F` before building project API paths.
+When a namespace path such as `my-group/my-project` is used, the client MUST URL-encode `/` as `%2F` before building project API paths.
 
 ### 6.3 Authentication
 
-The client MUST send access tokens with the `PRIVATE-TOKEN` header by default:
+The client MUST support both GitLab auth styles used by Symphony:
 
 ```text
 PRIVATE-TOKEN: <redacted>
+Authorization: Bearer <redacted>
 ```
+
+Project Access Token calls MUST use `PRIVATE-TOKEN`. Signed-in user calls MUST use `Authorization: Bearer`.
 
 The client MUST redact token values from:
 
@@ -481,7 +497,7 @@ The client MUST treat `401` and `403` as configuration/auth failures visible in 
 
 ### 7.1 `gitlab_project_settings`
 
-Stores the single configured GitLab project.
+Stores GitLab projects that have been activated in Symphony.
 
 Required fields:
 
@@ -497,13 +513,103 @@ visibility text
 last_validated_at utc_datetime_usec
 last_validation_error text
 read_only boolean not null default false
+encrypted_project_access_token text
+project_access_token_set_by_identity_id uuid
+project_access_token_set_at utc_datetime_usec
 inserted_at utc_datetime_usec
 updated_at utc_datetime_usec
 ```
 
-The GitLab token MUST NOT be stored in this table. Token storage is environment/local secret configuration only for this migration.
+Required constraints:
 
-### 7.2 `gitlab_issues`
+```text
+unique(api_root, project_id) where project_id is not null
+unique(api_root, project_ref)
+```
+
+Project Access Tokens MAY be stored in this table only as encrypted values. API responses MUST expose only `project_access_token_status`.
+
+### 7.2 GitLab auth tables
+
+`gitlab_identities` stores signed-in GitLab users.
+
+Required fields:
+
+```text
+id uuid primary key
+issuer text not null
+gitlab_user_id text not null
+sub text not null
+username text not null
+name text
+email text
+avatar_url text
+profile_url text
+raw_claims jsonb not null default '{}'
+last_login_at utc_datetime_usec not null
+inserted_at utc_datetime_usec
+updated_at utc_datetime_usec
+```
+
+Required constraints:
+
+```text
+unique(issuer, gitlab_user_id)
+unique(issuer, sub)
+```
+
+`gitlab_oauth_tokens` stores encrypted OAuth tokens per identity.
+
+Required fields:
+
+```text
+id uuid primary key
+identity_id uuid not null
+encrypted_access_token text not null
+encrypted_refresh_token text
+scopes text[] not null default '{}'
+token_type text
+expires_at utc_datetime_usec
+last_refreshed_at utc_datetime_usec
+inserted_at utc_datetime_usec
+updated_at utc_datetime_usec
+```
+
+Required constraint:
+
+```text
+unique(identity_id)
+```
+
+`gitlab_project_memberships` stores the latest GitLab membership check per identity/project.
+
+Required fields:
+
+```text
+id uuid primary key
+identity_id uuid not null
+gitlab_project_setting_id uuid not null
+gitlab_user_id text not null
+username text not null
+name text
+access_level integer not null
+expires_at date
+state text
+last_checked_at utc_datetime_usec not null
+raw_gitlab jsonb not null default '{}'
+inserted_at utc_datetime_usec
+updated_at utc_datetime_usec
+```
+
+Required constraint:
+
+```text
+unique(identity_id, gitlab_project_setting_id)
+```
+
+The schema MUST NOT persist role strings as the authorization source; role names are derived from `access_level`.
+
+### 7.3 `gitlab_issues`
 
 Required fields:
 
@@ -540,7 +646,7 @@ unique(gitlab_project_setting_id, iid)
 unique(gitlab_project_setting_id, gitlab_issue_id)
 ```
 
-### 7.3 `gitlab_issue_notes`
+### 7.4 `gitlab_issue_notes`
 
 Required fields:
 
@@ -566,7 +672,7 @@ Required constraint:
 unique(gitlab_issue_id, note_id)
 ```
 
-### 7.4 `issue_workflow_states`
+### 7.5 `issue_workflow_states`
 
 Required fields:
 
@@ -607,7 +713,7 @@ high
 urgent
 ```
 
-### 7.5 `issue_dependencies`
+### 7.6 `issue_dependencies`
 
 Required fields:
 
@@ -615,7 +721,7 @@ Required fields:
 id uuid primary key
 blocked_issue_id uuid not null
 blocking_issue_id uuid not null
-created_by text not null default 'local_operator'
+created_by text not null default 'system'
 reason text
 inserted_at utc_datetime_usec
 updated_at utc_datetime_usec
@@ -630,7 +736,7 @@ check(blocked_issue_id != blocking_issue_id)
 
 The implementation MUST reject dependency cycles.
 
-### 7.6 `issue_events`
+### 7.7 `issue_events`
 
 Stores local state changes and GitLab sync observations.
 
@@ -643,6 +749,7 @@ event_type text not null
 source text not null
 actor text
 payload jsonb not null default '{}'
+run_id uuid
 inserted_at utc_datetime_usec
 ```
 
@@ -650,12 +757,12 @@ Allowed `source` values:
 
 ```text
 gitlab_sync
-local_ui
+user_ui
 agent
 system
 ```
 
-### 7.7 `sync_cursors`
+### 7.8 `sync_cursors`
 
 Required fields:
 
@@ -681,11 +788,13 @@ unique(source, cursor_name)
 Required cursor names:
 
 ```text
-gitlab_issues_updated_after
+gitlab_issues_updated_after:<gitlab_project_setting_id>
 gitlab_notes_last_full_sync_at
 ```
 
-### 7.8 `agent_runs`
+The legacy/global `gitlab_issues_updated_after` cursor MAY exist only for aggregate errors or migration/reset compatibility. Incremental issue sync MUST read and update the project-scoped cursor.
+
+### 7.9 `agent_runs`
 
 Required fields:
 
@@ -728,7 +837,7 @@ Required constraint:
 unique(gitlab_issue_id, run_number)
 ```
 
-### 7.9 `agent_run_events`
+### 7.10 `agent_run_events`
 
 Required fields:
 
@@ -759,7 +868,7 @@ canceled
 heartbeat
 ```
 
-### 7.10 `runtime_blocks`
+### 7.11 `runtime_blocks`
 
 Persists runtime blocked/operator-input state that the original Elixir prototype exposed only as runtime state.
 
@@ -798,22 +907,27 @@ A block with `resolved_at is null` MUST appear in Run Monitor.
 
 On startup, the sync process MUST:
 
-1. Load and validate GitLab config.
-2. Validate the configured project.
-3. Upsert `gitlab_project_settings`.
-4. Fetch project issues with `state=all`.
-5. Page through all results.
-6. Upsert `gitlab_issues`.
-7. Create missing `issue_workflow_states` with default status `triage`.
-8. Record sync events.
-9. Update `sync_cursors`.
-10. Broadcast UI updates through PubSub.
+1. Load persisted GitLab project settings.
+2. Select projects whose Project Access Token status is `configured`.
+3. For each configured project, decrypt the Project Access Token server-side.
+4. Validate the GitLab API root and project with the Project Access Token.
+5. Upsert refreshed `gitlab_project_settings` metadata.
+6. Backfill old issue records that are missing `gitlab_project_setting_id` when the project can be identified.
+7. Fetch project issues with `state=all`.
+8. Page through all results.
+9. Upsert `gitlab_issues`.
+10. Create missing `issue_workflow_states` with default status `triage`.
+11. Record sync events.
+12. Update that project's `sync_cursors` entry.
+13. Broadcast UI updates through PubSub.
+
+If no project has a configured Project Access Token, sync MUST fail clearly with `project_access_token_missing` and MUST NOT attempt GitLab issue sync with a user OAuth token.
 
 ### 8.2 Incremental issue sync
 
-The sync process MUST run at `SYMPHONY_SYNC_INTERVAL_MS`.
+The sync process MUST run at `SYMPHONY_SYNC_INTERVAL_MS` and iterate over all projects with configured Project Access Tokens.
 
-Incremental sync MUST use `updated_after` with cursor overlap:
+Incremental sync MUST use each project's own issue cursor with `updated_after` and cursor overlap:
 
 ```text
 updated_after = last_success_at - SYMPHONY_SYNC_CURSOR_OVERLAP_SECONDS
@@ -831,12 +945,15 @@ updated_after=<iso8601 datetime>
 
 The upsert logic MUST be idempotent.
 
+When a project is activated or its Project Access Token is updated, Symphony MUST reset that project's issue cursor to avoid hiding local records whose previous incremental cursor moved past GitLab's `updated_at`.
+
 ### 8.3 Notes sync
 
-Notes sync MUST support two paths:
+Notes sync MUST support these paths:
 
-1. Issue detail sync: when the user opens an issue detail drawer, fetch notes for that issue.
-2. Periodic recent sync: on a configurable cadence, fetch notes for recently changed issues.
+1. Issue detail sync: when the user opens an issue detail drawer, fetch notes for that issue using the signed-in user's OAuth token.
+2. Agent/tool sync: when an Agent needs current notes, fetch notes for the issue using the selected project's Project Access Token.
+3. Periodic recent sync MAY fetch notes for recently changed issues if implemented.
 
 The implementation MUST use:
 
@@ -845,9 +962,54 @@ GET /projects/:id/issues/:issue_iid/notes
 POST /projects/:id/issues/:issue_iid/notes
 ```
 
-Agent-created comments MUST be posted through `create_issue_note/3` and then inserted into local `gitlab_issue_notes` after GitLab returns the created note.
+User-created comments MUST use the signed-in user's OAuth token. Agent-created comments MUST be posted through `create_issue_note/3` with the selected project's Project Access Token and then inserted into local `gitlab_issue_notes` after GitLab returns the created note.
 
-### 8.4 Agent-created follow-up issues
+### 8.4 User-created issues from UI
+
+The frontend MUST allow users with write access to create GitLab issues from:
+
+1. The Issues view.
+2. Each workflow status column in the Board view.
+
+The backend MUST expose:
+
+```text
+POST /api/issues
+```
+
+User-created issues MUST use the signed-in user's OAuth token and MUST be
+scoped to the current selected GitLab project. The browser frontend MUST NOT
+call GitLab directly.
+
+The UI creation request MUST require:
+
+```text
+title
+workflow_status
+```
+
+The request MAY include:
+
+```text
+description
+labels
+assignee_ids
+milestone_id
+due_date
+confidential
+```
+
+When the user creates from the Issues view, the dialog MUST include a workflow
+status selector. When the user creates from a Board column, the new issue MUST
+be initialized to that column's workflow status. The backend MAY reach the
+requested workflow status by applying valid Symphony workflow transitions after
+GitLab returns the created issue, and it MUST record those transitions in
+`issue_events`.
+
+User-created issues MUST NOT create follow-up source links, dependency edges, or
+current-issue notes unless the user explicitly performs those actions later.
+
+### 8.5 Agent-created follow-up issues
 
 The GitLab migration MUST preserve the upstream workflow behavior where an
 Agent can capture out-of-scope follow-up work without expanding the current
@@ -855,7 +1017,7 @@ issue scope.
 
 Agent-created follow-up issues MUST be created through
 `create_project_issue/2`, not through arbitrary GitLab REST calls. The
-operation MUST be scoped to the current configured GitLab project.
+operation MUST be scoped to the current selected GitLab project.
 
 The implementation MUST use:
 
@@ -903,7 +1065,7 @@ If GitLab issue creation succeeds but local persistence fails, the
 implementation MUST record the persistence error in Run Monitor and retry local
 upsert on the next sync. It MUST NOT silently drop the created issue.
 
-### 8.5 Manual refresh
+### 8.6 Manual refresh
 
 The backend MUST expose a manual refresh endpoint used by Run Monitor and Settings:
 
@@ -913,7 +1075,7 @@ POST /api/sync/refresh
 
 Manual refresh MUST enqueue or execute a sync job. It MUST NOT require or simulate external GitLab events.
 
-### 8.6 Conflict behavior
+### 8.7 Conflict behavior
 
 When GitLab fields change externally:
 
@@ -1069,10 +1231,11 @@ update_current_issue_state
 create_followup_issue
 ```
 
-The tools MUST be scoped to the current configured project and current issue.
-`create_followup_issue` MAY create a new issue in the current configured
-project, but it MUST require explicit title, description, and acceptance
-criteria, and it MUST initialize the new issue as internal status `triage`.
+The tools MUST be scoped to the current selected project and current issue.
+`create_followup_issue` MAY create a new issue in the current selected
+project through that project's Project Access Token, but it MUST require
+explicit title, description, and acceptance criteria, and it MUST initialize
+the new issue as internal status `triage`.
 The tool surface MUST NOT expose arbitrary GitLab REST calls to the agent by
 default.
 
@@ -1141,6 +1304,9 @@ The new React frontend MUST consume Symphony backend APIs, not GitLab APIs.
 Required API groups:
 
 ```text
+/auth/*
+/api/auth/*
+/api/projects/*
 /api/issues/*
 /api/workflow/*
 /api/agents/*
@@ -1151,7 +1317,33 @@ Required API groups:
 /api/v1/*              # operational compatibility/debug surface
 ```
 
-### 11.2 Issue APIs
+The API MUST enforce selected-project access through the session:
+
+- Unauthenticated API calls MUST return `authentication_required` and a GitLab login URL.
+- Read endpoints MUST require GitLab access level `SYMPHONY_AUTH_MIN_ACCESS_LEVEL`.
+- User write endpoints MUST require `SYMPHONY_AUTH_WRITE_ACCESS_LEVEL`.
+- Administrative settings, sync refresh, and operational refresh endpoints MUST require `SYMPHONY_AUTH_ADMIN_ACCESS_LEVEL`.
+
+User-initiated GitLab writes from these APIs MUST use the user's OAuth token, not the Project Access Token.
+
+### 11.2 Auth and project APIs
+
+Required endpoints:
+
+```text
+GET    /auth/gitlab
+GET    /auth/gitlab/callback
+GET    /auth/logout
+GET    /api/auth/session
+GET    /api/projects
+POST   /api/projects/:id/activate
+```
+
+`GET /api/projects` MUST list projects visible through the signed-in user's GitLab membership. `POST /api/projects/:id/activate` MUST validate membership, persist the membership, update the session, and reset that project's issue cursor.
+
+`GET /api/auth/session` MUST return auth mode, login/logout URLs, public GitLab user fields, derived permissions, and the active project. Project DTOs MUST include GitLab `id`, `name`, `path_with_namespace`, `web_url`, selection state, `project_setting_id`, and `project_access_token_status`.
+
+### 11.3 Issue APIs
 
 Required endpoints:
 
@@ -1169,7 +1361,7 @@ GET    /api/issues/:id/events
 
 `PATCH /api/issues/:id/gitlab` MUST update GitLab fields through the server-side GitLab client and then update the local read model.
 
-### 11.3 Workflow APIs
+### 11.4 Workflow APIs
 
 Required endpoints:
 
@@ -1181,7 +1373,7 @@ POST   /api/issues/:id/blockers
 DELETE /api/issues/:id/blockers/:blocking_issue_id
 ```
 
-### 11.4 Agent APIs
+### 11.5 Agent APIs
 
 Required endpoints:
 
@@ -1195,7 +1387,7 @@ GET    /api/runs/:id
 GET    /api/runs/:id/events
 ```
 
-### 11.5 Sync APIs
+### 11.6 Sync APIs
 
 Required endpoints:
 
@@ -1204,18 +1396,19 @@ GET    /api/sync/status
 POST   /api/sync/refresh
 ```
 
-### 11.6 Settings APIs
+### 11.7 Settings APIs
 
 Required endpoints:
 
 ```text
 GET    /api/settings/gitlab
 POST   /api/settings/gitlab/test
+PUT    /api/settings/gitlab/project-token
 GET    /api/settings/workflow
 PATCH  /api/settings/workflow
 ```
 
-Settings APIs MUST redact secrets.
+Settings APIs MUST redact secrets. Project-token updates MUST validate the token before encrypting and saving it for the selected project.
 
 ---
 
@@ -1281,7 +1474,7 @@ Run Monitor overview MUST include the following panels:
 1. **Runtime Overview**
    - App version or git SHA when available.
    - Uptime.
-   - Local mode.
+   - Auth/runtime mode.
    - Bind host and port.
    - Workflow file path.
    - Workflow file load status.
@@ -1314,7 +1507,7 @@ Run Monitor overview MUST include the following panels:
 
 5. **GitLab Sync Health**
    - Configured GitLab API root.
-   - Configured project ref.
+   - Active project ref.
    - Project name and web URL.
    - Last successful issue sync.
    - Last attempted sync.
@@ -1342,7 +1535,7 @@ The backend MUST provide a typed monitor DTO.
 ```ts
 export interface MonitorStateDTO {
   runtime: {
-    mode: "local_single_user";
+    mode: "gitlab_oidc";
     appVersion: string | null;
     uptimeSeconds: number;
     bindHost: string;
@@ -1353,8 +1546,8 @@ export interface MonitorStateDTO {
     workflowLastError: string | null;
   };
   gitlab: {
-    apiRoot: string;
-    projectRef: string;
+    apiRoot: string | null;
+    projectRef: string | null;
     projectId: number | null;
     projectName: string | null;
     projectWebUrl: string | null;
@@ -1501,7 +1694,7 @@ A conforming implementation MUST pass these checks:
 6. `/api/v1/refresh` triggers refresh.
 7. A blocked Codex run appears in Run Monitor and persists after orchestrator restart.
 8. A run row links to the GitLab issue `web_url`.
-9. No GitLab token appears in page HTML, DTOs, logs, or browser storage.
+9. No raw OAuth token or Project Access Token appears in page HTML, DTOs, logs, or browser storage.
 
 ---
 
@@ -1518,7 +1711,7 @@ Vite
 TanStack Query
 React Router
 Tailwind CSS
-Radix UI or shadcn/ui primitives
+Radix UI primitives where needed
 ```
 
 Phoenix LiveView MUST NOT be the primary dashboard implementation for the migrated UI.
@@ -1565,8 +1758,12 @@ src/
     routes.tsx
     queryClient.ts
   components/
+    auth/AuthGate.tsx
+    auth/RepoPicker.tsx
+    auth/UserMenu.tsx
     layout/AppShell.tsx
     layout/Sidebar.tsx
+    layout/ProjectSwitcher.tsx
     command/CommandPalette.tsx
     issues/IssueList.tsx
     issues/IssueRow.tsx
@@ -1588,6 +1785,7 @@ src/
     monitor/OperationalApiCard.tsx
     sync/SyncStatusBadge.tsx
   api/
+    auth.ts
     client.ts
     issues.ts
     workflow.ts
@@ -1619,6 +1817,17 @@ export type WorkflowStatus =
   | "done"
   | "canceled";
 
+export interface IssueRelationRef {
+  issueId: string;
+  iid: number;
+  identifier: string;
+  title: string;
+  status: WorkflowStatus;
+  reason?: string | null;
+  relationType?: string | null;
+  direction?: string | null;
+}
+
 export interface IssueDTO {
   id: string;
   iid: number;
@@ -1627,6 +1836,7 @@ export interface IssueDTO {
   gitlabProjectId: number;
   webUrl: string;
   title: string;
+  description: string | null;
   descriptionPreview: string | null;
   gitlabState: "opened" | "closed";
   workflowStatus: WorkflowStatus;
@@ -1638,13 +1848,12 @@ export interface IssueDTO {
     name: string;
     avatarUrl: string | null;
   }>;
-  blockers: Array<{
-    issueId: string;
-    iid: number;
-    identifier: string;
-    title: string;
-    status: WorkflowStatus;
-  }>;
+  blockers: IssueRelationRef[];
+  relations: {
+    related: IssueRelationRef[];
+    blocks: IssueRelationRef[];
+    blockedBy: IssueRelationRef[];
+  };
   isBlocked: boolean;
   unresolvedBlockerCount: number;
   openRuntimeBlockCount: number;
@@ -1671,11 +1880,13 @@ The frontend MUST support:
 - Start Agent on issue.
 - Cancel active run.
 - Retry failed run.
+- Create a GitLab issue from the Issues view with a selectable workflow status.
+- Create a GitLab issue from a Board column initialized to that column's workflow status.
 - Change internal workflow status.
 - Add/remove blockers.
 - View notes/comments.
-- Post note when GitLab token has write permission.
-- See read-only mode when GitLab token lacks write permission.
+- Post notes with the signed-in user's OAuth token when the user has GitLab write permission.
+- See Project Access Token missing or validation errors when background/Agent GitLab access is unavailable.
 - Jump from issue to run history.
 - Jump from run history to issue.
 - Jump from blocked Run Monitor row to issue and run detail.
@@ -1689,18 +1900,21 @@ The frontend MUST support:
 `/settings/gitlab` MUST display:
 
 - Configured API root.
-- Configured project ref.
+- Active project ref.
 - Validated project ID.
 - Project path with namespace.
 - Project web URL.
-- Token status as `configured` or `missing`, never the token value.
-- Token mode as `read_write`, `read_only`, or `invalid` when detectable.
+- Project Access Token status as `configured` or `missing`, never the token value.
+- Project Access Token permission mode when detectable, including conservative values such as `read_only_or_read_write`.
 - Last validation time.
 - Last validation error.
 - Test connection button.
 - Manual sync button.
+- Project Access Token input for admin users.
 
-The page MUST instruct the local operator to use `.env.local` or `mix symphony.gitlab.setup` to change secrets. It MUST NOT provide a browser form that stores the GitLab token through the frontend in this migration.
+The page MAY accept a Project Access Token for the active project from admin users. The raw token MUST be sent only to the backend validation endpoint, encrypted before persistence, and never returned to the frontend after the request completes.
+
+OAuth/OIDC client secrets, session secrets, token encryption secrets, and database configuration MUST remain server-side `.env.local` or deployment configuration.
 
 ### 14.2 Workflow settings page
 
@@ -1763,90 +1977,83 @@ Allowed references:
 
 ## 16. Project layout
 
-Target layout:
+Required layout shape:
 
 ```text
-elixir/
+symphony/
+  assets/
+    package.json
+    vite.config.ts
+    src/
+      api/
+      app/
+      components/
+        auth/
+        layout/
+        issues/
+        agents/
+        monitor/
+        sync/
+      styles/
+      types/
+  config/
   lib/
+    mix/
     symphony/
       gitlab/
         client.ex
         config.ex
         issue_mapper.ex
         note_mapper.ex
-      tracker/
-        gitlab_tracker.ex
-        issue_read_model.ex
-      workflow/
-        state_machine.ex
-        blockers.ex
-      sync/
-        poller.ex
-        issue_sync.ex
-        note_sync.ex
-        cursor.ex
-      agent/
-        dispatcher.ex
-        runner.ex
-        run_store.ex
+        error.ex
+    symphony_elixir/
+      auth/
+      codex/
       monitor/
-        state.ex
-        runtime_blocks.ex
-        dto.ex
-      web/
-        controllers/
-          issue_controller.ex
-          workflow_controller.ex
-          agent_controller.ex
-          run_controller.ex
-          monitor_controller.ex
-          sync_controller.ex
-          settings_controller.ex
-          v1_debug_controller.ex
-        endpoint.ex
-        router.ex
-  assets/
-    package.json
-    vite.config.ts
-    src/
-      app/
-      components/
-      api/
-      types/
+      persistence/
+      store/
+      sync/
+      tracker/
+    symphony_elixir_web/
+      controllers/
+      auth_plug.ex
+      endpoint.ex
+      router.ex
   priv/
     repo/
       migrations/
     static/
+  scripts/
+    setup.sh
   test/
     symphony/
+      auth/
       gitlab/
       sync/
       workflow/
-      agent/
-      monitor/
-    symphony_web/
+      store/
+  WORKFLOW.md
 ```
 
 ---
 
 ## 17. Implementation phases
 
-### Phase 1 — Runtime boundary and configuration
+### Phase 1 — OAuth/OIDC auth and runtime configuration
 
 Required work:
 
-1. Add GitLab config parser.
+1. Add GitLab OAuth/OIDC config.
 2. Add `.env.local` loading.
-3. Add `mix symphony.gitlab.setup`.
-4. Add `mix symphony.gitlab.test`.
-5. Add local single-user mode defaults.
-6. Add exposure guard for non-loopback bind host.
+3. Add session secret and token encryption secret handling.
+4. Add GitLab identity, OAuth token, and membership persistence.
+5. Add auth routes and session API.
 
 Acceptance:
 
-- A local operator can configure `GITLAB_PROJECT_API_URL` and `GITLAB_TOKEN` in less than two minutes.
-- `mix symphony.gitlab.test` validates the project and issue API.
-- Token values are redacted.
+- Users can sign in with GitLab OAuth/OIDC.
+- OAuth tokens are encrypted at rest.
+- Browser DTOs never expose raw token values.
 
 ### Phase 2 — Remove Linear runtime dependencies
 
@@ -1864,7 +2071,24 @@ Acceptance:
 - Runtime code does not call Linear.
 - Tests fail on accidental Linear runtime imports.
 
-### Phase 3 — GitLab REST client and persistence
+### Phase 3 — Project selection, membership, and credentials
+
+Required work:
+
+1. List user projects from GitLab with OAuth bearer auth.
+2. Activate a project and persist `gitlab_project_settings`.
+3. Validate and persist GitLab project membership.
+4. Gate read/write/admin APIs by GitLab `access_level`.
+5. Add Project Access Token settings flow.
+6. Encrypt Project Access Tokens and expose only status.
+
+Acceptance:
+
+- A user can switch projects without signing out.
+- Reporter/Developer/Maintainer thresholds gate APIs correctly.
+- A Project Access Token can be saved for one project without leaking into another.
+
+### Phase 4 — GitLab REST client and persistence
 
 Required work:
 
@@ -1883,23 +2107,25 @@ Acceptance:
 - Pagination is tested.
 - `id` vs `iid` behavior is tested.
 
-### Phase 4 — Polling sync
+### Phase 5 — Polling sync
 
 Required work:
 
-1. Implement startup full sync.
-2. Implement incremental sync using `updated_after`.
+1. Implement startup sync over projects with configured Project Access Tokens.
+2. Implement incremental sync using project-scoped `updated_after` cursors.
 3. Implement cursor overlap.
-4. Implement manual refresh.
-5. Implement sync status reporting.
+4. Reset a project's cursor after project activation and Project Access Token updates.
+5. Implement manual refresh.
+6. Implement sync status reporting.
 
 Acceptance:
 
-- New GitLab issues appear in the dashboard after polling or manual refresh.
+- New GitLab issues appear in the selected project after polling or manual refresh.
 - Updated GitLab issues update local read model.
+- One project's cursor, token status, and unsynced state cannot affect another project.
 - Sync errors appear in Settings and Run Monitor.
 
-### Phase 5 — Internal workflow and blockers
+### Phase 6 — Internal workflow and blockers
 
 Required work:
 
@@ -1915,7 +2141,7 @@ Acceptance:
 - Blocked issues do not dispatch.
 - Dependencies survive restart.
 
-### Phase 6 — Agent runner migration
+### Phase 7 — Agent runner migration
 
 Required work:
 
@@ -1923,7 +2149,7 @@ Required work:
 2. Update prompt variables.
 3. Persist agent runs and run events.
 4. Persist runtime blocked/operator-input state.
-5. Post GitLab notes for run summaries when write permission exists.
+5. Post GitLab notes for run summaries through the Project Access Token when available.
 6. Provide a narrow `create_followup_issue` tool for Agent-created follow-up work.
 7. Remove Linear tool assumptions from repo skills.
 
@@ -1932,31 +2158,32 @@ Acceptance:
 - A `todo` GitLab issue can be claimed and run.
 - Agent run history persists.
 - Operator-input blocked state appears after restart.
-- Agent-created follow-up issues are created in the configured GitLab project
-  and enter internal `triage`.
+- Agent-created follow-up issues are created in the current selected GitLab project and enter internal `triage`.
 - No Linear prompt fields remain.
 
-### Phase 7 — React control frontend
+### Phase 8 — React control frontend
 
 Required work:
 
 1. Add Vite + React + TypeScript frontend.
-2. Implement issue dashboard.
-3. Implement board view.
-4. Implement issue detail drawer.
-5. Implement Agent control panel.
-6. Implement run history.
-7. Implement settings pages.
-8. Implement GitLab linkouts.
+2. Implement auth gate, repo picker, user menu, and project switcher.
+3. Implement issue dashboard.
+4. Implement board view.
+5. Implement issue detail drawer.
+6. Implement Agent control panel.
+7. Implement run history.
+8. Implement settings pages.
+9. Implement GitLab linkouts.
 
 Acceptance:
 
-- Operator can browse GitLab project issues locally.
-- Operator can change internal workflow status.
-- Operator can start/cancel/retry runs.
-- Operator can open GitLab issue links.
+- Users must sign in before using protected dashboard APIs.
+- Users can browse and switch GitLab projects they can access.
+- Users can change internal workflow status when their GitLab access permits it.
+- Users can start/cancel/retry runs when their GitLab access permits it.
+- Users can open GitLab issue links.
 
-### Phase 8 — Run Monitor
+### Phase 9 — Run Monitor
 
 Required work:
 
@@ -1967,15 +2194,16 @@ Required work:
 5. Implement React Run Monitor pages and panels.
 6. Add PubSub/WebSocket/SSE live updates or polling fallback.
 7. Link active/blocked runs to GitLab issue URLs.
+8. Scope monitor data to the selected project.
 
 Acceptance:
 
 - `--port` starts React UI and JSON operational APIs.
-- `/monitor` shows runtime, sync, agent, block, workspace, and debug API status.
+- `/monitor` shows runtime, sync, agent, block, workspace, and debug API status for the selected project.
 - `/api/v1/state` is usable from curl.
 - Blocked runs persist and appear after restart.
 
-### Phase 9 — Hardening and tests
+### Phase 10 — Hardening and tests
 
 Required work:
 
@@ -1983,8 +2211,8 @@ Required work:
 2. Add LiveView removal/static guard tests where applicable.
 3. Add frontend component tests for Run Monitor and issue dashboard.
 4. Add token redaction tests.
-5. Add local setup task tests.
-6. Add documentation for self-managed GitLab local setup.
+5. Add auth threshold, project switching, and project-scoped cursor tests.
+6. Add documentation for self-managed GitLab OAuth/OIDC setup.
 
 Acceptance:
 
@@ -2001,13 +2229,19 @@ Acceptance:
 
 Required coverage:
 
-- GitLab config parsing.
-- Project API URL parsing.
-- URL encoding for project paths.
+- GitLab OAuth/OIDC config validation.
+- OIDC issuer/public URL trailing-slash normalization.
+- JWT ID token validation.
+- OAuth token encryption and refresh behavior.
+- GitLab project config from selected project settings.
+- URL encoding for namespace project paths.
 - Token redaction.
 - GitLab client error normalization.
 - GitLab issue mapper.
 - GitLab note mapper.
+- GitLab access-level role derivation.
+- Project membership persistence.
+- Project Access Token encryption/status projection.
 - Workflow transitions.
 - Dependency cycle detection.
 - Dispatch candidate selection.
@@ -2017,12 +2251,17 @@ Required coverage:
 
 Required coverage with fake GitLab server:
 
+- OIDC discovery, authorization callback, token exchange, and userinfo handling.
+- `GET /projects?membership=true` project listing.
+- `GET /projects/:id/members/all/:user_id` membership validation.
 - `GET /projects/:id` validation.
 - `GET /projects/:id/issues` pagination.
-- `updated_after` incremental sync.
+- Project-scoped `updated_after` incremental sync.
+- Cursor reset after project activation and Project Access Token updates.
 - `GET /projects/:id/issues/:issue_iid/notes`.
 - `POST /projects/:id/issues/:issue_iid/notes`.
 - Auth failure.
+- Insufficient project access.
 - Rate limit failure.
 - Network failure.
 
@@ -2030,6 +2269,8 @@ Required coverage with fake GitLab server:
 
 Required coverage:
 
+- Auth gate renders sign-in when unauthenticated.
+- Repo picker and project switcher render GitLab projects and activation state.
 - Issue list renders workflow status from Symphony DTO.
 - Status change calls Symphony workflow API, not GitLab API.
 - Run Monitor renders active runs.
@@ -2037,6 +2278,7 @@ Required coverage:
 - Run Monitor renders sync errors.
 - Run Monitor links to GitLab issue URLs.
 - Settings page redacts token.
+- Settings page shows Project Access Token status without exposing the token value.
 
 ### 18.4 End-to-end local test
 
@@ -2050,18 +2292,22 @@ The local e2e test SHOULD start:
 
 The test MUST prove:
 
-1. Setup config validates.
-2. Issue sync imports a GitLab issue.
-3. The issue appears in dashboard.
-4. Internal status changes to `todo`.
-5. Agent run starts.
-6. Stub runner creates a follow-up issue.
-7. The follow-up issue appears in the dashboard with internal status `triage`.
-8. Run appears in Run Monitor.
-9. Stub runner blocks for operator input.
-10. Block appears in Run Monitor and `/api/v1/state`.
-11. Restart preserves block.
-12. Operator cancels or resolves block.
+1. GitLab OAuth/OIDC login succeeds.
+2. The user sees only GitLab projects returned by membership listing.
+3. Activating a project validates membership and stores the selected project.
+4. Saving a Project Access Token validates and redacts it.
+5. Issue sync imports a GitLab issue for that project.
+6. Switching to another project uses a separate issue cursor and project token status.
+7. The issue appears in dashboard.
+8. Internal status changes to `todo`.
+9. Agent run starts.
+10. Stub runner creates a follow-up issue in the selected project.
+11. The follow-up issue appears in the dashboard with internal status `triage`.
+12. Run appears in Run Monitor.
+13. Stub runner blocks for operator input.
+14. Block appears in Run Monitor and `/api/v1/state`.
+15. Restart preserves block.
+16. Operator cancels or resolves block.
 
 ---
 
@@ -2071,27 +2317,30 @@ The repository MUST include local setup docs with these sections:
 
 ```text
 Self-managed GitLab local setup
-Create project access token
+Create GitLab OAuth application
 Configure .env.local
-Run mix symphony.gitlab.test
 Start Symphony with --port
 Open dashboard
+Sign in with GitLab
+Select a repo
+Create and save a Project Access Token
+Test GitLab settings
 Use Run Monitor
 Troubleshooting auth errors
-Troubleshooting project path encoding
-Troubleshooting read-only token mode
+Troubleshooting OIDC issuer/redirect URI mismatch
+Troubleshooting Project Access Token permissions
 ```
 
 The docs MUST include this minimal quickstart:
 
 ```bash
-cd elixir
-mix setup
-mix symphony.gitlab.setup
-mix symphony.gitlab.test
+cd symphony
+cp .env.example .env.local
+./scripts/setup.sh
 ./bin/symphony ./WORKFLOW.md --port 4000
-open http://127.0.0.1:4000
 ```
+
+The quickstart MUST tell the operator to configure GitLab OAuth/OIDC values in `.env.local`, then sign in, select a repo, and save that repo's Project Access Token from Settings.
 
 ---
 
@@ -2101,30 +2350,34 @@ A migration is conforming only when every item below is true:
 
 1. Symphony boots without Linear configuration.
 2. Runtime code does not call Linear.
-3. `GITLAB_PROJECT_API_URL` + `GITLAB_TOKEN` is enough to configure a local single-project deployment.
-4. `mix symphony.gitlab.setup` creates `.env.local` with token redaction.
-5. `mix symphony.gitlab.test` validates the configured GitLab project and issue API.
-6. GitLab REST API is called only from Elixir backend modules.
-7. Browser frontend never receives the GitLab token.
-8. GitLab issues sync through polling.
-9. GitLab issue creation works through the backend for constrained follow-up issues.
-10. GitLab notes sync and note creation work through the backend.
-11. No GitLab event receiver or project hook is required.
-12. Internal workflow states are stored in Symphony DB.
-13. Blocker/dependency relationships are stored in Symphony DB.
-14. Closed GitLab issues are not dispatch candidates.
-15. Agent dispatch uses GitLab issue read model plus internal workflow state.
-16. Agent runs are persisted.
-17. Runtime blocked/operator-input state is persisted.
-18. TypeScript + React dashboard exists.
-19. Issue list, board, detail drawer, Agent panel, run history, and settings exist.
-20. Run Monitor exists as a top-level frontend area.
-21. Run Monitor includes runtime overview, sync health, active runs, blocked queue, workspace/log info, manual refresh, and operational JSON debug info.
-22. `/api/v1/state`, `/api/v1/:issue_identifier`, and `/api/v1/refresh` exist for local operational debugging.
-23. Run Monitor issue identifiers link to GitLab `web_url` when the URL is `http` or `https`.
-24. Token redaction tests pass.
-25. Fake GitLab integration tests pass.
-26. No runtime Linear dependency remains.
+3. GitLab OAuth/OIDC login is required for normal dashboard access.
+4. GitLab identities, OAuth tokens, memberships, and Project Access Tokens are persisted with raw tokens encrypted.
+5. Browser frontend never receives raw OAuth tokens or Project Access Tokens.
+6. Users can list and activate GitLab projects from their GitLab membership.
+7. Read/write/admin APIs are gated by GitLab numeric `access_level`.
+8. Project Access Token settings are per project and never leak across projects.
+9. GitLab REST API is called only from Elixir backend modules.
+10. GitLab issues sync through polling.
+11. GitLab issue cursors are scoped per project.
+12. GitLab issue creation works through the backend for constrained follow-up issues.
+13. GitLab notes sync and note creation work through the backend.
+14. No GitLab event receiver or project hook is required.
+15. Internal workflow states are stored in Symphony DB.
+16. Blocker/dependency relationships are stored in Symphony DB.
+17. Closed GitLab issues are not dispatch candidates.
+18. Agent dispatch uses GitLab issue read model plus internal workflow state.
+19. Agent runs are persisted.
+20. Runtime blocked/operator-input state is persisted.
+21. TypeScript + React dashboard exists.
+22. Auth gate, repo picker, user menu, and project switcher exist.
+23. Issue list, board, detail drawer, Agent panel, run history, and settings exist.
+24. Run Monitor exists as a top-level frontend area.
+25. Run Monitor includes runtime overview, sync health, active runs, blocked queue, workspace/log info, manual refresh, and operational JSON debug info.
+26. `/api/v1/state`, `/api/v1/:issue_identifier`, and `/api/v1/refresh` exist for operational debugging.
+27. Run Monitor issue identifiers link to GitLab `web_url` when the URL is `http` or `https`.
+28. Token redaction tests pass.
+29. Fake GitLab integration tests pass.
+30. No runtime Linear dependency remains.
 
 ---
 
