@@ -92,6 +92,7 @@ defmodule SymphonyElixirWeb.Router do
   scope "/", SymphonyElixirWeb do
     pipe_through(:api_write)
 
+    post("/api/issues", IssueController, :create)
     post("/api/issues/:id/notes", IssueController, :create_note)
     patch("/api/issues/:id/gitlab", IssueController, :update_gitlab)
     patch("/api/issues/:id/workflow", IssueController, :update_workflow)

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, ChevronDown, Filter, RefreshCcw } from "lucide-react";
+import { Check, ChevronDown, Filter, Plus, RefreshCcw } from "lucide-react";
 import { listIssues } from "../../api/issues";
 import { refreshSync } from "../../api/sync";
 import { issueStatusFilters, workflowStatuses, type IssueDTO, type IssueStatusFilter, type WorkflowStatus } from "../../types/issue";
+import { CreateIssueDialog } from "./CreateIssueDialog";
 import { IssueDetailDrawer } from "./IssueDetailDrawer";
 import { IssueRow } from "./IssueRow";
 import { formatStatusLabel, StatusIcon } from "./StatusIcon";
@@ -15,6 +16,7 @@ export function IssueList() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [selected, setSelected] = useState<IssueDTO | null>(null);
   const { data, isLoading, refetch } = useQuery({ queryKey: ["issues"], queryFn: () => listIssues() });
+  const createDefaultStatus: WorkflowStatus = status !== "all" && status !== "blocked" ? status : "triage";
 
   useEffect(() => {
     if (!filterOpen) {
@@ -121,6 +123,16 @@ export function IssueList() {
               placeholder="Search title or description"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
+            />
+            <CreateIssueDialog
+              defaultStatus={createDefaultStatus}
+              onCreated={setSelected}
+              trigger={
+                <button className="text-button" type="button">
+                  <Plus size={14} />
+                  New issue
+                </button>
+              }
             />
             <button
               className="icon-button"

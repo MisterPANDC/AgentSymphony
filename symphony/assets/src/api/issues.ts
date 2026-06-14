@@ -1,9 +1,23 @@
 import { api } from "./client";
 import type { IssueDTO, NoteDTO, WorkflowStatus } from "../types/issue";
 
+export interface CreateIssueInput {
+  title: string;
+  description?: string;
+  labels?: string;
+  workflowStatus: WorkflowStatus;
+}
+
 export const listIssues = (params = "") => api<{ issues: IssueDTO[] }>(`/api/issues${params}`);
 export const getIssue = (id: string) => api<{ issue: IssueDTO }>(`/api/issues/${id}`);
 export const getIssueNotes = (id: string) => api<{ notes: NoteDTO[] }>(`/api/issues/${id}/notes`);
+
+export function createIssue(input: CreateIssueInput) {
+  return api<{ issue: IssueDTO }>("/api/issues", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
 
 export function updateIssueWorkflow(id: string, status: WorkflowStatus, reason?: string) {
   return api<{ issue: IssueDTO }>(`/api/issues/${id}/workflow`, {

@@ -69,7 +69,7 @@ export function CommandPalette() {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
-            <Dialog.Close className="icon-button" title="Close command palette">
+            <Dialog.Close className="dialog-close-button" title="Close command palette">
               <X size={15} />
             </Dialog.Close>
           </div>

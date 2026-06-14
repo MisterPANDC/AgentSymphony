@@ -1,29 +1,71 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown } from "lucide-react";
 import { updateIssueWorkflow } from "../../api/issues";
 import { workflowStatuses, type WorkflowStatus } from "../../types/issue";
 import { formatStatusLabel, StatusIcon } from "./StatusIcon";
 
-export function StatusSelect({ issueId, value }: { issueId: string; value: WorkflowStatus }) {
-  const queryClient = useQueryClient();
+interface WorkflowStatusSelectProps {
+  value: WorkflowStatus;
+  onChange: (status: WorkflowStatus) => void;
+  disabled?: boolean;
+  menuAlign?: "start" | "end";
+  shellClassName?: string;
+  triggerClassName?: string;
+}
+
+export function WorkflowStatusSelect({
+  value,
+  onChange,
+  disabled = false,
+  menuAlign = "end",
+  shellClassName = "",
+  triggerClassName = ""
+}: WorkflowStatusSelectProps) {
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuPanelRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
-  const mutation = useMutation({
-    mutationFn: (status: WorkflowStatus) => updateIssueWorkflow(issueId, status, "changed from dashboard"),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["issues"] });
-      queryClient.invalidateQueries({ queryKey: ["monitor-state"] });
+  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
+
+  const updateMenuPosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) {
+      return;
     }
-  });
+
+    const viewportMargin = 8;
+    const menuOffset = 6;
+    const menuWidth = 192;
+    const fullMenuHeight = workflowStatuses.length * 36 + 2;
+    const rect = trigger.getBoundingClientRect();
+    const containingBlock = findFixedContainingBlock(trigger);
+    const availableBelow = window.innerHeight - rect.bottom - viewportMargin;
+    const availableAbove = rect.top - viewportMargin;
+    const placeAbove = availableBelow < fullMenuHeight && availableAbove > availableBelow;
+    const availableSpace = placeAbove ? availableAbove : availableBelow;
+    const maxHeight = Math.max(48, Math.min(fullMenuHeight, availableSpace - menuOffset));
+    const preferredLeft = menuAlign === "start" ? rect.left : rect.right - menuWidth;
+    const maxLeft = Math.max(viewportMargin, window.innerWidth - menuWidth - viewportMargin);
+    const viewportLeft = Math.min(Math.max(viewportMargin, preferredLeft), maxLeft);
+    const viewportTop = placeAbove ? rect.top - menuOffset - maxHeight : rect.bottom + menuOffset;
+
+    setMenuStyle({
+      left: viewportLeft - containingBlock.left,
+      maxHeight,
+      top: viewportTop - containingBlock.top,
+      width: menuWidth
+    });
+  }, [menuAlign]);
 
   useEffect(() => {
     if (!open) {
       return;
     }
 
-    function onPointerDown(event: PointerEvent) {
-      if (!menuRef.current?.contains(event.target as Node)) {
+    function onDocumentClick(event: MouseEvent) {
+      const target = event.target as Node;
+      if (!menuRef.current?.contains(target) && !menuPanelRef.current?.contains(target)) {
         setOpen(false);
       }
     }
@@ -34,27 +76,38 @@ export function StatusSelect({ issueId, value }: { issueId: string; value: Workf
       }
     }
 
-    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("click", onDocumentClick);
     document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", updateMenuPosition);
+    window.addEventListener("scroll", updateMenuPosition, true);
     return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("click", onDocumentClick);
       document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", updateMenuPosition);
+      window.removeEventListener("scroll", updateMenuPosition, true);
     };
-  }, [open]);
+  }, [open, updateMenuPosition]);
+
+  useLayoutEffect(() => {
+    if (open) {
+      updateMenuPosition();
+    }
+  }, [open, updateMenuPosition]);
 
   function selectStatus(status: WorkflowStatus) {
     setOpen(false);
     if (status !== value) {
-      mutation.mutate(status);
+      onChange(status);
     }
   }
 
   return (
-    <div className="status-select-shell" ref={menuRef}>
+    <div className={`status-select-shell${shellClassName ? ` ${shellClassName}` : ""}`} ref={menuRef}>
       <button
-        className={`status-select-trigger ${value}${open ? " is-open" : ""}`}
+        ref={triggerRef}
+        className={`status-select-trigger ${value}${open ? " is-open" : ""}${triggerClassName ? ` ${triggerClassName}` : ""}`}
         type="button"
-        disabled={mutation.isPending}
+        disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
@@ -64,7 +117,7 @@ export function StatusSelect({ issueId, value }: { issueId: string; value: Workf
         <ChevronDown className="status-select-chevron" size={12} />
       </button>
       {open && (
-        <div className="status-select-menu" role="menu">
+        <div className="status-select-menu" ref={menuPanelRef} role="menu" style={menuStyle}>
           {workflowStatuses.map((status) => {
             const selected = status === value;
 
@@ -75,6 +128,10 @@ export function StatusSelect({ issueId, value }: { issueId: string; value: Workf
                 type="button"
                 role="menuitemradio"
                 aria-checked={selected}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  selectStatus(status);
+                }}
                 onClick={() => selectStatus(status)}
               >
                 <StatusIcon status={status} size={14} />
@@ -87,4 +144,31 @@ export function StatusSelect({ issueId, value }: { issueId: string; value: Workf
       )}
     </div>
   );
+}
+
+function findFixedContainingBlock(element: HTMLElement) {
+  let parent = element.parentElement;
+  while (parent && parent !== document.body) {
+    const style = window.getComputedStyle(parent);
+    if (style.transform !== "none" || style.filter !== "none" || style.perspective !== "none") {
+      const rect = parent.getBoundingClientRect();
+      return { left: rect.left, top: rect.top };
+    }
+    parent = parent.parentElement;
+  }
+
+  return { left: 0, top: 0 };
+}
+
+export function StatusSelect({ issueId, value }: { issueId: string; value: WorkflowStatus }) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: (status: WorkflowStatus) => updateIssueWorkflow(issueId, status, "changed from dashboard"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["issues"] });
+      queryClient.invalidateQueries({ queryKey: ["monitor-state"] });
+    }
+  });
+
+  return <WorkflowStatusSelect value={value} onChange={(status) => mutation.mutate(status)} disabled={mutation.isPending} />;
 }

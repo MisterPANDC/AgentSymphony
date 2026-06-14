@@ -551,6 +551,39 @@ textarea {
   background: var(--hover);
 }
 
+.dialog-close-button {
+  display: inline-flex;
+  height: 28px;
+  width: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #5f636d;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.dialog-close-button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.dialog-close-button:active {
+  background: #eceef2;
+}
+
+.dialog-close-button:focus-visible {
+  background: var(--hover);
+  color: var(--text);
+  outline: 1px solid #cfd4dc;
+  outline-offset: 1px;
+}
+
 .text-button {
   display: inline-flex;
   height: 28px;
@@ -604,7 +637,8 @@ textarea {
 .field-input:focus,
 .text-button:focus-visible,
 .icon-button:focus-visible,
-.status-pill:focus-visible {
+.status-pill:focus-visible,
+.board-add-issue-button:focus-visible {
   border-color: var(--focus);
   box-shadow: 0 0 0 3px rgba(156, 163, 175, 0.18);
   outline: none;
@@ -1477,16 +1511,22 @@ textarea {
 }
 
 .status-select-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 45;
+  position: fixed;
+  z-index: 60;
   width: 192px;
-  overflow: hidden;
+  max-height: calc(100vh - 16px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 18px 42px rgba(17, 24, 39, 0.13);
+}
+
+.status-select-menu::-webkit-scrollbar {
+  display: none;
 }
 
 .status-select-option {
@@ -1669,6 +1709,253 @@ textarea {
   gap: 8px;
   background: var(--panel-subtle);
   padding: 10px;
+}
+
+.board-add-issue-button {
+  display: flex;
+  min-height: 30px;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  padding: 0 7px;
+  color: #777b85;
+  font-size: 13px;
+  line-height: 18px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.board-column-body:hover .board-add-issue-button,
+.board-column:focus-within .board-add-issue-button,
+.board-add-issue-button[data-state="open"] {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.board-add-issue-button:hover,
+.board-add-issue-button:focus-visible,
+.board-add-issue-button[data-state="open"] {
+  border-color: var(--border-subtle);
+  background: #ffffff;
+  color: var(--text);
+}
+
+.board-add-issue-button svg {
+  flex: 0 0 auto;
+  color: #7b7f89;
+}
+
+.create-issue-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgba(17, 24, 39, 0.1);
+}
+
+.create-issue-dialog {
+  position: fixed;
+  top: 48px;
+  left: 50%;
+  z-index: 40;
+  height: min(520px, calc(100vh - 64px));
+  width: min(720px, calc(100vw - 32px));
+  overflow: hidden;
+  transform: translateX(-50%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 22px 58px rgba(17, 24, 39, 0.18);
+}
+
+.create-issue-dialog form {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.create-issue-titlebar {
+  display: flex;
+  flex: 0 0 auto;
+  min-height: 56px;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 8px 10px 8px 14px;
+}
+
+.create-issue-titlebar svg {
+  flex: 0 0 auto;
+}
+
+.create-issue-title-input {
+  height: 38px;
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 570;
+  line-height: 24px;
+  outline: none;
+}
+
+.create-issue-title-input::placeholder {
+  color: var(--muted-2);
+  font-weight: 540;
+}
+
+.create-issue-meta-row {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: #fbfbfc;
+  padding: 8px 12px;
+}
+
+.create-issue-meta-control {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.create-issue-meta-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 620;
+  line-height: 16px;
+}
+
+.create-issue-body {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 10px;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: auto;
+  padding: 12px 14px 14px;
+}
+
+.create-issue-textarea {
+  min-height: 0;
+  resize: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 4px 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 20px;
+  outline: none;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.create-issue-textarea::placeholder {
+  color: var(--muted-2);
+}
+
+.create-issue-textarea:focus {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.create-issue-status-select {
+  height: 28px;
+  min-width: 154px;
+}
+
+.create-issue-status-trigger {
+  height: 28px;
+  min-width: 154px;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 0 7px;
+  font-size: 12.5px;
+}
+
+.create-issue-label-control {
+  flex: 1 1 240px;
+}
+
+.create-issue-label-input-shell {
+  display: grid;
+  height: 28px;
+  min-width: 180px;
+  width: 100%;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 0 7px;
+  color: var(--muted-2);
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.create-issue-label-input-shell:focus-within {
+  border-color: #cfd4dc;
+}
+
+.create-issue-label-input-shell input {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.create-issue-label-input-shell input::placeholder {
+  color: var(--muted-2);
+}
+
+.create-issue-error {
+  border: 1px solid #e3b9ad;
+  border-radius: 7px;
+  background: #fff3f0;
+  padding: 8px 10px;
+  color: #95503f;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.create-issue-footer {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--border-subtle);
+  background: #fbfbfc;
+  padding: 8px 12px;
+}
+
+.create-issue-submit {
+  border-color: #c8ccd5;
+  background: #f7f8fa;
 }
 
 .board-count {

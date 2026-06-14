@@ -1,7 +1,17 @@
+import { Plus } from "lucide-react";
 import type { IssueDTO, WorkflowStatus } from "../../types/issue";
+import { CreateIssueDialog } from "./CreateIssueDialog";
 import { formatStatusLabel, StatusIcon } from "./StatusIcon";
 
-export function IssueColumn({ status, issues }: { status: WorkflowStatus; issues: IssueDTO[] }) {
+export function IssueColumn({
+  status,
+  issues,
+  onIssueCreated
+}: {
+  status: WorkflowStatus;
+  issues: IssueDTO[];
+  onIssueCreated?: (issue: IssueDTO) => void;
+}) {
   return (
     <section className="panel board-column min-h-[320px]">
       <div className="panel-header">
@@ -26,6 +36,16 @@ export function IssueColumn({ status, issues }: { status: WorkflowStatus; issues
             <h3 className="line-clamp-2 text-sm font-medium leading-5 text-[#1d1d1f]">{issue.title}</h3>
           </article>
         ))}
+        <CreateIssueDialog
+          defaultStatus={status}
+          onCreated={onIssueCreated}
+          trigger={
+            <button className="board-add-issue-button" type="button">
+              <Plus size={14} />
+              <span>New issue</span>
+            </button>
+          }
+        />
       </div>
     </section>
   );
