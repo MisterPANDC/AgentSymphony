@@ -1,4 +1,5 @@
 import type { IssueDTO, IssueRelationRef } from "../../types/issue";
+import { formatStatusLabel, StatusIcon } from "./StatusIcon";
 
 export function BlockerEditor({ issue }: { issue: IssueDTO }) {
   return (
@@ -25,7 +26,10 @@ function RelationGroup({ title, empty, items }: { title: string; empty: string; 
             <div key={`${title}-${item.issueId}`} className="issue-card min-w-0 px-2 py-1 text-sm">
               <div className="flex min-w-0 items-center justify-between gap-2">
                 <span className="mono min-w-0 truncate text-[12px] text-[#4f535c]">{item.identifier}</span>
-                <span className={`status-pill ${item.status}`}>{item.status}</span>
+                <span className={`status-pill ${item.status}`}>
+                  <StatusIcon status={item.status} size={12} />
+                  {formatStatusLabel(item.status)}
+                </span>
               </div>
               <div className="mt-1 truncate text-xs text-[#686b73]">{item.title}</div>
             </div>

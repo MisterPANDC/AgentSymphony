@@ -1,21 +1,45 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, Filter, RefreshCcw } from "lucide-react";
+import { Check, ChevronDown, Filter, RefreshCcw } from "lucide-react";
 import { listIssues } from "../../api/issues";
 import { refreshSync } from "../../api/sync";
 import { issueStatusFilters, workflowStatuses, type IssueDTO, type IssueStatusFilter, type WorkflowStatus } from "../../types/issue";
 import { IssueDetailDrawer } from "./IssueDetailDrawer";
 import { IssueRow } from "./IssueRow";
-
-function formatStatus(status: string) {
-  return status.replace("_", " ");
-}
+import { formatStatusLabel, StatusIcon } from "./StatusIcon";
 
 export function IssueList() {
+  const filterRef = useRef<HTMLDivElement>(null);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<IssueStatusFilter>("all");
+  const [filterOpen, setFilterOpen] = useState(false);
   const [selected, setSelected] = useState<IssueDTO | null>(null);
   const { data, isLoading, refetch } = useQuery({ queryKey: ["issues"], queryFn: () => listIssues() });
+
+  useEffect(() => {
+    if (!filterOpen) {
+      return;
+    }
+
+    function onPointerDown(event: PointerEvent) {
+      if (!filterRef.current?.contains(event.target as Node)) {
+        setFilterOpen(false);
+      }
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setFilterOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [filterOpen]);
 
   const issues = useMemo(() => {
     return (data?.issues ?? []).filter((issue) => {
@@ -41,23 +65,56 @@ export function IssueList() {
 
   return (
     <>
-      <section className="panel">
+      <section className="panel issue-list-panel">
         <div className="panel-header panel-header-stack">
           <div>
             <h1 className="text-sm font-semibold">Issues</h1>
             <p className="text-[12px] text-[#686b73]">{issues.length} visible</p>
           </div>
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 sm:flex-none sm:flex-nowrap">
-            <div className="text-button select-shell flex-1 sm:flex-none">
-              <Filter size={14} />
-              <select className="min-w-0 flex-1 bg-transparent outline-none" value={status} onChange={(event) => setStatus(event.target.value as IssueStatusFilter)}>
-                {issueStatusFilters.map((item) => (
-                  <option key={item} value={item}>
-                    {formatStatus(item)}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown size={13} />
+            <div className="issue-filter flex-1 sm:flex-none" ref={filterRef}>
+              <button
+                className={`text-button issue-filter-trigger${filterOpen ? " is-open" : ""}`}
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={filterOpen}
+                onClick={() => setFilterOpen((value) => !value)}
+              >
+                <Filter size={14} />
+                <StatusIcon status={status} size={14} />
+                <span className="issue-filter-trigger-label">{formatStatusLabel(status)}</span>
+                <ChevronDown size={13} />
+              </button>
+              {filterOpen && (
+                <div className="issue-filter-menu" role="menu">
+                  <div className="issue-filter-menu-header">Status</div>
+                  <div className="issue-filter-list">
+                    {issueStatusFilters.map((item) => {
+                      const selectedFilter = item === status;
+
+                      return (
+                        <button
+                          key={item}
+                          className={`issue-filter-row${selectedFilter ? " is-selected" : ""}`}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={selectedFilter}
+                          onClick={() => {
+                            setStatus(item);
+                            setFilterOpen(false);
+                          }}
+                        >
+                          <span className="issue-filter-row-label">
+                            <StatusIcon status={item} size={14} />
+                            <span>{formatStatusLabel(item)}</span>
+                          </span>
+                          {selectedFilter && <Check size={14} />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
             <input
               className="field-input flex-[1_1_190px] sm:w-64 sm:flex-none"
@@ -87,7 +144,8 @@ export function IssueList() {
               <div key={groupStatus} className="issue-group">
                 <div className="issue-group-header">
                   <ChevronDown size={14} />
-                  <span className="capitalize">{formatStatus(groupStatus)}</span>
+                  <StatusIcon status={groupStatus} size={14} />
+                  <span>{formatStatusLabel(groupStatus)}</span>
                   <span className="status-pill">{groupItems.length}</span>
                 </div>
                 <div role="list">

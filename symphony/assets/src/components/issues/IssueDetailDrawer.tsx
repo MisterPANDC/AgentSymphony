@@ -7,6 +7,7 @@ import { BlockerEditor } from "./BlockerEditor";
 import { GitLabMeta } from "./GitLabMeta";
 import { IssueNoteComposer } from "./IssueNoteComposer";
 import { StatusSelect } from "./StatusSelect";
+import { StatusIcon } from "./StatusIcon";
 
 export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; onClose: () => void }) {
   const { data } = useQuery({
@@ -28,7 +29,12 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <GitLabMeta issue={issue} />
                     <StatusSelect issueId={issue.id} value={issue.workflowStatus} />
-                    {issue.isBlocked && <span className="status-pill blocked">blocked</span>}
+                    {issue.isBlocked && (
+                      <span className="status-pill blocked">
+                        <StatusIcon status="blocked" size={12} />
+                        blocked
+                      </span>
+                    )}
                   </div>
                 </div>
                 <Dialog.Close className="icon-button" title="Close">

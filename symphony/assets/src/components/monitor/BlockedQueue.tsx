@@ -2,6 +2,7 @@ import { CheckCircle2 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { resolveBlock } from "../../api/monitor";
 import type { RuntimeBlockDTO } from "../../types/monitor";
+import { StatusIcon } from "../issues/StatusIcon";
 
 export function BlockedQueue({ blocks }: { blocks: RuntimeBlockDTO[] }) {
   const queryClient = useQueryClient();
@@ -14,7 +15,10 @@ export function BlockedQueue({ blocks }: { blocks: RuntimeBlockDTO[] }) {
     <section className="panel">
       <div className="panel-header">
         <h2 className="text-sm font-semibold">Blocked / Needs Operator Input</h2>
-        <span className={`status-pill ${blocks.length ? "blocked" : "done"}`}>{blocks.length}</span>
+        <span className={`status-pill ${blocks.length ? "blocked" : "done"}`}>
+          <StatusIcon status={blocks.length ? "blocked" : "done"} size={12} />
+          {blocks.length}
+        </span>
       </div>
       <div className="overflow-auto">
         <table className="dense-table">
@@ -27,7 +31,12 @@ export function BlockedQueue({ blocks }: { blocks: RuntimeBlockDTO[] }) {
             ) : blocks.map((block) => (
               <tr key={block.id}>
                 <td><a href={block.issueWebUrl} target="_blank" rel="noreferrer">{block.issueIdentifier}</a></td>
-                <td><span className="status-pill blocked">{block.blockType}</span></td>
+                <td>
+                  <span className="status-pill blocked">
+                    <StatusIcon status="blocked" size={12} />
+                    {block.blockType}
+                  </span>
+                </td>
                 <td className="max-w-[420px] truncate">{block.message}</td>
                 <td>{block.insertedAt}</td>
                 <td><button className="icon-button" title="Resolve block" onClick={() => mutation.mutate(block.id)}><CheckCircle2 size={14} /></button></td>

@@ -1,11 +1,15 @@
 import type { MonitorStateDTO } from "../../types/monitor";
+import { StatusIcon } from "../issues/StatusIcon";
 
 export function RuntimeOverviewCard({ state }: { state: MonitorStateDTO }) {
   return (
     <section className="panel">
       <div className="panel-header">
         <h2 className="text-sm font-semibold">Runtime Overview</h2>
-        <span className="status-pill done max-w-full truncate">{state.runtime.mode}</span>
+        <span className="status-pill done max-w-full truncate">
+          <StatusIcon status="done" size={12} />
+          {state.runtime.mode}
+        </span>
       </div>
       <dl className="grid grid-cols-[96px_minmax(0,1fr)] gap-x-4 gap-y-2 p-3 text-sm">
         <dt className="text-[#686b73]">Uptime</dt>

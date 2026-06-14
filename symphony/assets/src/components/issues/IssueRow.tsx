@@ -1,9 +1,9 @@
-import { Circle, Play } from "lucide-react";
+import { Play } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { runIssue } from "../../api/agents";
 import type { IssueDTO } from "../../types/issue";
 import { GitLabMeta } from "./GitLabMeta";
-import { StatusSelect } from "./StatusSelect";
+import { StatusIcon } from "./StatusIcon";
 
 export function IssueRow({ issue, onOpen }: { issue: IssueDTO; onOpen: (issue: IssueDTO) => void }) {
   const queryClient = useQueryClient();
@@ -20,14 +20,24 @@ export function IssueRow({ issue, onOpen }: { issue: IssueDTO; onOpen: (issue: I
     <article className="issue-row" role="listitem">
       <div className="issue-row-primary">
         <button className="issue-row-title" onClick={() => onOpen(issue)}>
-          <Circle size={12} className="issue-state-dot" />
+          <StatusIcon status={issue.workflowStatus} size={14} />
           <span className="mono issue-identifier">{issue.identifier}</span>
           <span className="issue-title">{issue.title}</span>
         </button>
         {(issue.isBlocked || issue.activeRunId || issue.labels.length > 0) && (
           <div className="issue-row-meta">
-            {issue.isBlocked && <span className="status-pill blocked">blocked</span>}
-            {issue.activeRunId && <span className="status-pill in_progress">active run</span>}
+            {issue.isBlocked && (
+              <span className="status-pill blocked">
+                <StatusIcon status="blocked" size={12} />
+                blocked
+              </span>
+            )}
+            {issue.activeRunId && (
+              <span className="status-pill in_progress">
+                <StatusIcon status="in_progress" size={12} />
+                active run
+              </span>
+            )}
             {issue.labels.slice(0, 4).map((label) => (
               <span key={label} className="status-pill">
                 {label}
@@ -35,9 +45,6 @@ export function IssueRow({ issue, onOpen }: { issue: IssueDTO; onOpen: (issue: I
             ))}
           </div>
         )}
-      </div>
-      <div className="issue-row-secondary">
-        <StatusSelect issueId={issue.id} value={issue.workflowStatus} />
       </div>
       <div className="issue-row-secondary">
         <GitLabMeta issue={issue} />

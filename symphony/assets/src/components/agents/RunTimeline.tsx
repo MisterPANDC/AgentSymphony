@@ -1,4 +1,5 @@
 import type { AgentRunDTO } from "../../types/run";
+import { statusIconForRunStatus, StatusIcon } from "../issues/StatusIcon";
 
 export function RunTimeline({ runs }: { runs: AgentRunDTO[] }) {
   return (
@@ -12,7 +13,12 @@ export function RunTimeline({ runs }: { runs: AgentRunDTO[] }) {
               <tr key={run.id}>
                 <td className="mono">#{run.runNumber}</td>
                 <td>{run.issueIdentifier}</td>
-                <td><span className={`status-pill ${run.status}`}>{run.status}</span></td>
+                <td>
+                  <span className={`status-pill ${run.status}`}>
+                    <StatusIcon status={statusIconForRunStatus(run.status)} size={12} />
+                    {run.status}
+                  </span>
+                </td>
                 <td>{run.startedAt ?? "n/a"}</td>
                 <td>{run.finishedAt ?? "n/a"}</td>
               </tr>

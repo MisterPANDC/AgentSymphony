@@ -1,5 +1,6 @@
 import { Square } from "lucide-react";
 import type { AgentRunDTO } from "../../types/run";
+import { statusIconForRunStatus, StatusIcon } from "../issues/StatusIcon";
 
 export function ActiveRunsTable({ runs }: { runs: AgentRunDTO[] }) {
   return (
@@ -25,7 +26,12 @@ export function ActiveRunsTable({ runs }: { runs: AgentRunDTO[] }) {
             ) : runs.map((run) => (
               <tr key={run.id}>
                 <td><a href={run.issueWebUrl} target="_blank" rel="noreferrer">{run.issueIdentifier}</a></td>
-                <td><span className={`status-pill ${run.status}`}>{run.status}</span></td>
+                <td>
+                  <span className={`status-pill ${run.status}`}>
+                    <StatusIcon status={statusIconForRunStatus(run.status)} size={12} />
+                    {run.status}
+                  </span>
+                </td>
                 <td className="mono max-w-[280px] truncate">{run.workspacePath ?? "pending"}</td>
                 <td>{run.lastHeartbeatAt ?? run.startedAt ?? "n/a"}</td>
                 <td><button className="icon-button" title="Cancel run"><Square size={13} /></button></td>
