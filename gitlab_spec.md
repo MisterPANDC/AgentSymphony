@@ -999,12 +999,21 @@ due_date
 confidential
 ```
 
+The requested `workflow_status` MUST be one of the user-creatable initial statuses:
+
+```text
+triage
+todo
+```
+
 When the user creates from the Issues view, the dialog MUST include a workflow
-status selector. When the user creates from a Board column, the new issue MUST
-be initialized to that column's workflow status. The backend MAY reach the
-requested workflow status by applying valid Symphony workflow transitions after
-GitLab returns the created issue, and it MUST record those transitions in
-`issue_events`.
+status selector restricted to the user-creatable initial statuses. When the user
+creates from a Board column whose status is user-creatable, the new issue MUST be
+initialized to that column's workflow status. Board columns for terminal or
+workflow-controlled statuses, including `canceled`, MUST NOT offer direct
+creation into that column. The backend MAY reach the requested workflow status by
+applying valid user dashboard transitions after GitLab returns the created issue,
+and it MUST record those transitions in `issue_events`.
 
 User-created issues MUST NOT create follow-up source links, dependency edges, or
 current-issue notes unless the user explicitly performs those actions later.
@@ -1099,7 +1108,7 @@ When GitLab fields change externally:
 | `merging` | Human approved the change; Agent should run the merge/land flow. | Yes |
 | `rework` | Reviewer requested changes; Agent should restart the implementation/review loop. | Yes |
 | `done` | Merge is complete and work is terminal. | No |
-| `canceled` | Work is intentionally stopped. | No |
+| `canceled` | Work is intentionally stopped. It may be returned to `triage` when a human explicitly reopens it for re-analysis. | No |
 
 ### 9.2 Status transitions
 
@@ -1123,6 +1132,7 @@ merging -> review
 rework -> in_progress
 rework -> review
 rework -> triage
+canceled -> triage
 any non-terminal -> canceled
 ```
 
@@ -1140,6 +1150,7 @@ review -> rework
 review -> canceled
 rework -> triage
 rework -> canceled
+canceled -> triage
 any non-terminal -> canceled
 ```
 
@@ -1156,8 +1167,11 @@ Terminal statuses:
 
 ```text
 done
-canceled
 ```
+
+`canceled` is a stopped state, not a dispatch candidate. It MUST NOT transition
+directly back into Agent-owned work states; the only recovery path is
+`canceled -> triage`.
 
 The implementation MUST record each transition in `issue_events`.
 
@@ -1910,8 +1924,8 @@ The frontend MUST support:
 - Start Agent on issue.
 - Cancel active run.
 - Retry failed run.
-- Create a GitLab issue from the Issues view with a selectable workflow status.
-- Create a GitLab issue from a Board column initialized to that column's workflow status.
+- Create a GitLab issue from the Issues view with a selectable user-creatable workflow status.
+- Create a GitLab issue from a user-creatable Board column initialized to that column's workflow status.
 - Change internal workflow status.
 - Add/remove blockers.
 - View notes/comments.

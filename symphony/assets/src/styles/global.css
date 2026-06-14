@@ -440,6 +440,7 @@ textarea {
   display: flex;
   min-width: 0;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 12px;
   border: 1px solid #ead7a0;
@@ -455,8 +456,25 @@ textarea {
   flex: 0 0 auto;
 }
 
-.token-banner a {
+.token-banner-message {
+  min-width: 0;
+  flex: 1 1 320px;
+}
+
+.token-banner-actions {
+  display: inline-flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
   margin-left: auto;
+}
+
+.token-banner a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   color: #3d5366;
   font-weight: 620;
   white-space: nowrap;
@@ -1678,6 +1696,10 @@ textarea {
   overflow: visible;
 }
 
+.issue-list-panel > .panel-header {
+  border-radius: 7px 7px 0 0;
+}
+
 .issue-list {
   overflow: visible;
   border-radius: 0 0 8px 8px;
@@ -1694,18 +1716,45 @@ textarea {
 
 .issue-group-header {
   display: flex;
+  width: 100%;
   min-height: 32px;
   align-items: center;
   gap: 7px;
+  border: 0;
   padding: 0 12px;
   background: #fbfbfc;
   color: #4f535c;
+  cursor: pointer;
   font-size: 12px;
   font-weight: 560;
+  text-align: left;
+  transition: background-color 120ms ease;
 }
 
-.issue-group-header > svg {
+.issue-group-header:hover {
+  background: #f4f5f7;
+}
+
+.issue-group-header:focus-visible {
+  box-shadow: inset 0 0 0 2px rgba(156, 163, 175, 0.22);
+  outline: none;
+}
+
+.issue-group-chevron {
   color: #8b8f98;
+  transition: transform 120ms ease;
+}
+
+.issue-group-count {
+  color: #8a8d96;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+}
+
+.issue-group.is-collapsed .issue-group-chevron {
+  transform: rotate(-90deg);
 }
 
 .issue-row {
@@ -1888,13 +1937,6 @@ textarea {
 
 .board-column.is-drag-over.is-drop-denied .board-column-body {
   background: #f1f1f2;
-}
-
-.board-header-meta {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 6px;
 }
 
 .board-add-issue-button {
@@ -2142,15 +2184,6 @@ textarea {
 .create-issue-submit {
   border-color: #c8ccd5;
   background: #f7f8fa;
-}
-
-.board-count {
-  display: inline-block;
-  color: #5c606a;
-  font-size: 11px;
-  font-weight: 620;
-  font-variant-numeric: tabular-nums;
-  line-height: 16px;
 }
 
 .board-drag-notice {

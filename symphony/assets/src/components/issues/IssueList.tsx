@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, Filter, Plus, RefreshCcw } from "lucide-react";
 import { listIssues } from "../../api/issues";
 import { refreshSync } from "../../api/sync";
-import { issueStatusFilters, workflowStatuses, type IssueDTO, type IssueStatusFilter, type WorkflowStatus } from "../../types/issue";
+import { canUserCreateIssueInStatus, issueStatusFilters, workflowStatuses, type IssueDTO, type IssueStatusFilter, type WorkflowStatus } from "../../types/issue";
 import { CreateIssueDialog } from "./CreateIssueDialog";
 import { IssueDetailDrawer } from "./IssueDetailDrawer";
 import { IssueRow } from "./IssueRow";
@@ -15,10 +15,11 @@ export function IssueList() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<IssueStatusFilter>("all");
   const [filterOpen, setFilterOpen] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<WorkflowStatus>>(() => new Set());
   const { data, isLoading, refetch } = useQuery({ queryKey: ["issues"], queryFn: () => listIssues() });
   const allIssues = data?.issues ?? [];
   const { selectedIssue, openIssue, closeIssue } = useIssueDetailSelection(allIssues);
-  const createDefaultStatus: WorkflowStatus = status !== "all" && status !== "blocked" ? status : "triage";
+  const createDefaultStatus: WorkflowStatus = status !== "all" && status !== "blocked" && canUserCreateIssueInStatus(status) ? status : "triage";
 
   useEffect(() => {
     if (!filterOpen) {
@@ -66,6 +67,18 @@ export function IssueList() {
       .map((item) => [item, groups.get(item) ?? []] as [WorkflowStatus, IssueDTO[]])
       .filter(([, groupIssues]) => groupIssues.length > 0);
   }, [issues, status]);
+
+  function toggleGroup(groupStatus: WorkflowStatus) {
+    setCollapsedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(groupStatus)) {
+        next.delete(groupStatus);
+      } else {
+        next.add(groupStatus);
+      }
+      return next;
+    });
+  }
 
   return (
     <>
@@ -154,21 +167,34 @@ export function IssueList() {
           ) : groupedIssues.length === 0 ? (
             <div className="empty-state">No issues match this view</div>
           ) : (
-            groupedIssues.map(([groupStatus, groupItems]) => (
-              <div key={groupStatus} className="issue-group">
-                <div className="issue-group-header">
-                  <ChevronDown size={14} />
-                  <StatusIcon status={groupStatus} size={14} />
-                  <span>{formatStatusLabel(groupStatus)}</span>
-                  <span className="status-pill">{groupItems.length}</span>
+            groupedIssues.map(([groupStatus, groupItems]) => {
+              const collapsed = collapsedGroups.has(groupStatus);
+              const groupId = `issue-group-${groupStatus}`;
+
+              return (
+                <div key={groupStatus} className={`issue-group${collapsed ? " is-collapsed" : ""}`}>
+                  <button
+                    className="issue-group-header"
+                    type="button"
+                    aria-controls={groupId}
+                    aria-expanded={!collapsed}
+                    onClick={() => toggleGroup(groupStatus)}
+                  >
+                    <ChevronDown className="issue-group-chevron" size={14} />
+                    <StatusIcon status={groupStatus} size={14} />
+                    <span>{formatStatusLabel(groupStatus)}</span>
+                    <span className="issue-group-count">{groupItems.length}</span>
+                  </button>
+                  {!collapsed && (
+                    <div id={groupId} role="list">
+                      {groupItems.map((issue) => (
+                        <IssueRow key={issue.id} issue={issue} onOpen={openIssue} />
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div role="list">
-                  {groupItems.map((issue) => (
-                    <IssueRow key={issue.id} issue={issue} onOpen={openIssue} />
-                  ))}
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </section>

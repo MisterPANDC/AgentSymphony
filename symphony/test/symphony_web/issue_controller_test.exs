@@ -47,7 +47,7 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
     {:ok, identity: identity, iid: iid, project: project}
   end
 
-  test "creates an issue with the selected workflow status using user OAuth", %{identity: identity, iid: iid, project: project} do
+  test "creates an issue with a user-creatable workflow status using user OAuth", %{identity: identity, iid: iid, project: project} do
     conn =
       :post
       |> conn("/api/issues")
@@ -62,24 +62,52 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
     conn =
       IssueController.create(conn, %{
         "title" => "Create from board",
-        "description" => "Created from the board review column.",
+        "description" => "Created from the board todo column.",
         "labels" => "frontend, bug",
-        "workflowStatus" => "review"
+        "workflowStatus" => "todo"
       })
 
     assert conn.status == 201
 
     payload = Jason.decode!(conn.resp_body)
     assert payload["issue"]["title"] == "Create from board"
-    assert payload["issue"]["workflowStatus"] == "review"
+    assert payload["issue"]["workflowStatus"] == "todo"
     assert payload["issue"]["labels"] == ["frontend", "bug"]
 
     issue = Store.get_issue_by_iid(iid)
     assert issue.gitlab_project_setting_id == project.id
-    assert issue.workflow_status == "review"
+    assert issue.workflow_status == "todo"
 
     transitions = Store.list_events(issue_id: issue.id) |> Enum.filter(&(&1.event_type == "workflow_transitioned"))
-    assert transitions |> Enum.map(& &1.payload.to) |> Enum.reverse() == ["todo", "in_progress", "review"]
+    assert transitions |> Enum.map(& &1.payload.to) |> Enum.reverse() == ["todo"]
+    assert Enum.all?(transitions, &(&1.source == "user_ui"))
+  end
+
+  test "rejects non-initial statuses during issue creation", %{identity: identity, iid: iid, project: project} do
+    for workflow_status <- ["review", "canceled"] do
+      conn =
+        :post
+        |> conn("/api/issues")
+        |> Plug.Conn.assign(:current_user, %{
+          identity_id: identity.id,
+          gitlab_user_id: identity.gitlab_user_id,
+          username: identity.username,
+          project_setting_id: project.id,
+          access_level: 30
+        })
+
+      conn =
+        IssueController.create(conn, %{
+          "title" => "Create directly in #{workflow_status}",
+          "workflowStatus" => workflow_status
+        })
+
+      assert conn.status == 400
+
+      payload = Jason.decode!(conn.resp_body)
+      assert payload["error"]["code"] == "invalid_workflow_status"
+      assert Store.get_issue_by_iid(iid) == nil
+    end
   end
 
   defp create_issue_plug(project_ref, project_id, iid, token) do
@@ -92,7 +120,7 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
       payload = Jason.decode!(body)
 
       assert payload["title"] == "Create from board"
-      assert payload["description"] == "Created from the board review column."
+      assert payload["description"] == "Created from the board todo column."
       assert payload["labels"] == "frontend,bug"
 
       Req.Test.json(conn, %{

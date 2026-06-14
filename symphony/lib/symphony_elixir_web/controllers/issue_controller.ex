@@ -4,23 +4,16 @@ defmodule SymphonyElixirWeb.IssueController do
   alias Plug.Conn
   alias Symphony.GitLab.{Client, IssueMapper, NoteMapper}
   alias Symphony.GitLab.Config, as: GitLabConfig
-  alias SymphonyElixir.Persistence.WorkflowState
   alias SymphonyElixir.Store
   alias SymphonyElixirWeb.AuthPlug
   alias SymphonyElixirWeb.DTO
   alias SymphonyElixirWeb.WorkflowTransition
 
-  @workflow_statuses WorkflowState.statuses()
   @create_workflow_paths %{
     "triage" => [],
-    "todo" => ["todo"],
-    "in_progress" => ["todo", "in_progress"],
-    "review" => ["todo", "in_progress", "review"],
-    "merging" => ["todo", "in_progress", "review", "merging"],
-    "rework" => ["todo", "in_progress", "review", "rework"],
-    "done" => ["todo", "in_progress", "review", "merging", "done"],
-    "canceled" => ["canceled"]
+    "todo" => ["todo"]
   }
+  @create_workflow_statuses Map.keys(@create_workflow_paths)
 
   @spec index(Conn.t(), map()) :: Conn.t()
   def index(conn, params) do
@@ -208,14 +201,14 @@ defmodule SymphonyElixirWeb.IssueController do
   defp create_workflow_status(status) when is_binary(status) do
     normalized = status |> String.trim() |> String.downcase() |> String.replace("-", "_")
 
-    if normalized in @workflow_statuses do
+    if normalized in @create_workflow_statuses do
       {:ok, normalized}
     else
-      {:error, {:validation, "invalid_workflow_status", "Workflow status is not supported"}}
+      {:error, {:validation, "invalid_workflow_status", "Workflow status cannot be selected when creating issues"}}
     end
   end
 
-  defp create_workflow_status(_status), do: {:error, {:validation, "invalid_workflow_status", "Workflow status is not supported"}}
+  defp create_workflow_status(_status), do: {:error, {:validation, "invalid_workflow_status", "Workflow status cannot be selected when creating issues"}}
 
   defp labels_value(nil), do: {:ok, nil}
 
@@ -335,7 +328,7 @@ defmodule SymphonyElixirWeb.IssueController do
     |> Map.fetch!(workflow_status)
     |> Enum.reduce_while(:ok, fn status, :ok ->
       case Store.transition_workflow(issue_id, status,
-             source: "issue_create",
+             source: "user_ui",
              actor: AuthPlug.actor(conn),
              reason: "created from dashboard"
            ) do

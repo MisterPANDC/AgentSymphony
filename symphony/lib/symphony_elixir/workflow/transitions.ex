@@ -28,7 +28,7 @@ defmodule SymphonyElixir.Workflow.Transitions do
       from == to ->
         true
 
-      from in ["done", "canceled"] ->
+      from == "done" ->
         false
 
       source == "user_ui" ->
@@ -60,6 +60,7 @@ defmodule SymphonyElixir.Workflow.Transitions do
   defp user_transition_allowed?("in_progress", status), do: status in ["triage", "canceled"]
   defp user_transition_allowed?("review", status), do: status in ["triage", "merging", "rework", "canceled"]
   defp user_transition_allowed?("rework", status), do: status in ["triage", "canceled"]
+  defp user_transition_allowed?("canceled", "triage"), do: true
   defp user_transition_allowed?(_from, "canceled"), do: true
   defp user_transition_allowed?(_from, _to), do: false
 
@@ -70,5 +71,6 @@ defmodule SymphonyElixir.Workflow.Transitions do
   defp system_transition_allowed?("review", status), do: status in ["todo", "merging", "rework", "triage"]
   defp system_transition_allowed?("merging", status), do: status in ["done", "review"]
   defp system_transition_allowed?("rework", status), do: status in ["in_progress", "review", "triage"]
+  defp system_transition_allowed?("canceled", "triage"), do: true
   defp system_transition_allowed?(_from, _to), do: false
 end

@@ -1,6 +1,6 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { Ban, Plus } from "lucide-react";
-import type { IssueDTO, WorkflowStatus } from "../../types/issue";
+import { canUserCreateIssueInStatus, type IssueDTO, type WorkflowStatus } from "../../types/issue";
 import { CreateIssueDialog } from "./CreateIssueDialog";
 import { formatStatusLabel, StatusIcon } from "./StatusIcon";
 
@@ -30,6 +30,7 @@ export function IssueColumn({
   const columnClasses = ["panel board-column min-h-[320px]", draggingIssue ? "is-drag-active" : "", isDragOver ? "is-drag-over" : "", `is-drop-${dropState}`]
     .filter(Boolean)
     .join(" ");
+  const canCreateIssue = canUserCreateIssueInStatus(status);
 
   return (
     <section
@@ -40,10 +41,8 @@ export function IssueColumn({
         <h2 className="flex items-center gap-2 text-xs font-semibold capitalize text-[#4f535c]">
           <StatusIcon status={status} size={14} />
           {formatStatusLabel(status)}
+          <span className="issue-group-count">{issues.length}</span>
         </h2>
-        <div className="board-header-meta">
-          <span className="board-count">{issues.length}</span>
-        </div>
       </div>
       <div className="board-column-body">
         {draggingIssue && dropState === "denied" && (
@@ -91,16 +90,18 @@ export function IssueColumn({
             <h3 className="line-clamp-2 text-sm font-medium leading-5 text-[#1d1d1f]">{issue.title}</h3>
           </article>
         ))}
-        <CreateIssueDialog
-          defaultStatus={status}
-          onCreated={onIssueCreated}
-          trigger={
-            <button className="board-add-issue-button" type="button">
-              <Plus size={14} />
-              <span>New issue</span>
-            </button>
-          }
-        />
+        {canCreateIssue && (
+          <CreateIssueDialog
+            defaultStatus={status}
+            onCreated={onIssueCreated}
+            trigger={
+              <button className="board-add-issue-button" type="button">
+                <Plus size={14} />
+                <span>New issue</span>
+              </button>
+            }
+          />
+        )}
       </div>
     </section>
   );

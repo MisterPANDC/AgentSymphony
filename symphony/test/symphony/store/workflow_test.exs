@@ -77,6 +77,18 @@ defmodule SymphonyElixir.Store.WorkflowTest do
     assert merging.status == "merging"
   end
 
+  test "allows canceled issues to return to triage only" do
+    issue = seed_issue(16)
+
+    assert {:ok, _todo} = Store.transition_workflow(issue.id, "todo", source: "user_ui", reason: "accepted")
+    assert {:ok, canceled} = Store.transition_workflow(issue.id, "canceled", source: "user_ui", reason: "no longer needed")
+    assert canceled.status == "canceled"
+
+    assert {:error, :invalid_transition} = Store.transition_workflow(issue.id, "todo", source: "user_ui")
+    assert {:ok, triage} = Store.transition_workflow(issue.id, "triage", source: "user_ui", reason: "restore for re-analysis")
+    assert triage.status == "triage"
+  end
+
   test "requires confirmation and cancels active runs when leaving dispatch candidates" do
     issue = seed_issue(15)
     {:ok, _todo} = Store.transition_workflow(issue.id, "todo", reason: "accepted")

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ban, Check, ChevronDown } from "lucide-react";
 import { updateIssueWorkflow } from "../../api/issues";
@@ -12,6 +12,7 @@ interface WorkflowStatusSelectProps {
   disabled?: boolean;
   disabledOptionTitle?: string;
   isOptionDisabled?: (status: WorkflowStatus) => boolean;
+  statuses?: readonly WorkflowStatus[];
   menuAlign?: "start" | "end";
   shellClassName?: string;
   triggerClassName?: string;
@@ -23,6 +24,7 @@ export function WorkflowStatusSelect({
   disabled = false,
   disabledOptionTitle = "This transition is controlled by Symphony workflow rules",
   isOptionDisabled,
+  statuses = workflowStatuses,
   menuAlign = "end",
   shellClassName = "",
   triggerClassName = ""
@@ -32,6 +34,7 @@ export function WorkflowStatusSelect({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
+  const optionStatuses = statuses;
 
   const updateMenuPosition = useCallback(() => {
     const trigger = triggerRef.current;
@@ -42,7 +45,7 @@ export function WorkflowStatusSelect({
     const viewportMargin = 8;
     const menuOffset = 6;
     const menuWidth = 192;
-    const fullMenuHeight = workflowStatuses.length * 36 + 2;
+    const fullMenuHeight = optionStatuses.length * 36 + 2;
     const rect = trigger.getBoundingClientRect();
     const containingBlock = findFixedContainingBlock(trigger);
     const availableBelow = window.innerHeight - rect.bottom - viewportMargin;
@@ -61,7 +64,7 @@ export function WorkflowStatusSelect({
       top: viewportTop - containingBlock.top,
       width: menuWidth
     });
-  }, [menuAlign]);
+  }, [menuAlign, optionStatuses]);
 
   useEffect(() => {
     if (!open) {
@@ -125,7 +128,7 @@ export function WorkflowStatusSelect({
       </button>
       {open && (
         <div className="status-select-menu" ref={menuPanelRef} role="menu" style={menuStyle}>
-          {workflowStatuses.map((status) => {
+          {optionStatuses.map((status) => {
             const selected = status === value;
             const optionDisabled = !selected && Boolean(isOptionDisabled?.(status));
 
@@ -176,6 +179,7 @@ export function StatusSelect({ issue }: { issue: IssueDTO }) {
   const queryClient = useQueryClient();
   const value = issue.workflowStatus;
   const [pendingStatus, setPendingStatus] = useState<WorkflowStatus | null>(null);
+  const transitionStatuses = useMemo(() => workflowStatuses.filter((status) => canUserTransition(value, status)), [value]);
   const mutation = useMutation({
     mutationFn: ({ status, confirmStopRun }: { status: WorkflowStatus; confirmStopRun?: boolean }) =>
       updateIssueWorkflow(issue.id, status, "changed from dashboard", { confirmStopRun }),
@@ -218,7 +222,7 @@ export function StatusSelect({ issue }: { issue: IssueDTO }) {
         value={value}
         onChange={selectStatus}
         disabled={mutation.isPending}
-        isOptionDisabled={(status) => !canUserTransition(value, status)}
+        statuses={transitionStatuses}
       />
       <ActiveRunStopDialog
         open={Boolean(pendingStatus)}

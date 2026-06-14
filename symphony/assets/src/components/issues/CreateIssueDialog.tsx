@@ -3,7 +3,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { FilePlus2, LoaderCircle, Tag, X } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createIssue } from "../../api/issues";
-import { type IssueDTO, type WorkflowStatus } from "../../types/issue";
+import { canUserCreateIssueInStatus, userCreatableWorkflowStatuses, type IssueDTO, type WorkflowStatus } from "../../types/issue";
 import { WorkflowStatusSelect } from "./StatusSelect";
 
 interface CreateIssueDialogProps {
@@ -18,7 +18,7 @@ export function CreateIssueDialog({ defaultStatus = "triage", trigger, onCreated
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [labels, setLabels] = useState("");
-  const [workflowStatus, setWorkflowStatus] = useState<WorkflowStatus>(defaultStatus);
+  const [workflowStatus, setWorkflowStatus] = useState<WorkflowStatus>(() => creatableStatus(defaultStatus));
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -39,7 +39,7 @@ export function CreateIssueDialog({ defaultStatus = "triage", trigger, onCreated
 
   useEffect(() => {
     if (!open) {
-      setWorkflowStatus(defaultStatus);
+      setWorkflowStatus(creatableStatus(defaultStatus));
     }
   }, [defaultStatus, open]);
 
@@ -47,7 +47,7 @@ export function CreateIssueDialog({ defaultStatus = "triage", trigger, onCreated
     setTitle("");
     setDescription("");
     setLabels("");
-    setWorkflowStatus(status);
+    setWorkflowStatus(creatableStatus(status));
     mutation.reset();
   }
 
@@ -55,7 +55,7 @@ export function CreateIssueDialog({ defaultStatus = "triage", trigger, onCreated
     setOpen(nextOpen);
     if (nextOpen) {
       mutation.reset();
-      setWorkflowStatus(defaultStatus);
+      setWorkflowStatus(creatableStatus(defaultStatus));
     } else {
       resetForm(defaultStatus);
     }
@@ -98,6 +98,7 @@ export function CreateIssueDialog({ defaultStatus = "triage", trigger, onCreated
                   menuAlign="start"
                   shellClassName="create-issue-status-select"
                   triggerClassName="create-issue-status-trigger"
+                  statuses={userCreatableWorkflowStatuses}
                 />
               </div>
               <label className="create-issue-meta-control create-issue-label-control" htmlFor="create-issue-labels">
@@ -137,4 +138,8 @@ export function CreateIssueDialog({ defaultStatus = "triage", trigger, onCreated
       </Dialog.Portal>
     </Dialog.Root>
   );
+}
+
+function creatableStatus(status: WorkflowStatus): WorkflowStatus {
+  return canUserCreateIssueInStatus(status) ? status : "triage";
 }
