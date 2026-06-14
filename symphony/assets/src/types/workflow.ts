@@ -3,6 +3,7 @@ import type { WorkflowStatus } from "./issue";
 export interface WorkflowSettingsDTO {
   statuses: WorkflowStatus[];
   dispatchCandidateStatuses: WorkflowStatus[];
+  userTransitionTargets?: Record<WorkflowStatus, WorkflowStatus[]>;
   requiredGitlabLabels: string[];
   maxConcurrentAgents: number;
   syncIntervalMs: number;

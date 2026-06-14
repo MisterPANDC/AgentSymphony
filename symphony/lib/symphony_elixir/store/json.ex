@@ -9,8 +9,9 @@ defmodule SymphonyElixir.Store.Json do
   use GenServer
 
   alias SymphonyElixir.Tracker.Issue
+  alias SymphonyElixir.Workflow.Transitions
 
-  @workflow_statuses ~w(triage todo in_progress review merging rework done canceled)
+  @workflow_statuses Transitions.statuses()
   @priorities ~w(none low medium high urgent)
   @run_statuses ~w(queued starting running blocked succeeded failed canceled stale)
   @block_types ~w(operator_input approval_required mcp_elicitation sandbox_rejection external_failure blocked_by_dependency)
@@ -1212,7 +1213,7 @@ defmodule SymphonyElixir.Store.Json do
         workflow = Map.fetch!(state.workflow_states, issue_id)
         previous_status = workflow.status
 
-        if allowed_transition?(previous_status, next_status) do
+        if Transitions.allowed?(previous_status, next_status, opts) do
           now = now()
 
           workflow =
@@ -1238,17 +1239,6 @@ defmodule SymphonyElixir.Store.Json do
         end
     end
   end
-
-  defp allowed_transition?(same, same), do: true
-  defp allowed_transition?(from, _to) when from in ["done", "canceled"], do: false
-  defp allowed_transition?(_from, "canceled"), do: true
-  defp allowed_transition?("triage", "todo"), do: true
-  defp allowed_transition?("todo", status), do: status in ["in_progress"]
-  defp allowed_transition?("in_progress", status), do: status in ["review", "todo"]
-  defp allowed_transition?("review", status), do: status in ["todo", "merging", "rework"]
-  defp allowed_transition?("merging", status), do: status in ["done", "review"]
-  defp allowed_transition?("rework", status), do: status in ["in_progress", "review"]
-  defp allowed_transition?(_from, _to), do: false
 
   defp blocker_dtos(state, issue_id) do
     state.dependencies

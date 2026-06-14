@@ -6,8 +6,9 @@ defmodule SymphonyElixir.Persistence.WorkflowState do
   import Ecto.Changeset
 
   alias SymphonyElixir.Persistence.Issue
+  alias SymphonyElixir.Workflow.Transitions
 
-  @statuses ~w(triage todo in_progress review merging rework done canceled)
+  @statuses Transitions.statuses()
   @priorities ~w(none low medium high urgent)
 
   @primary_key {:id, :binary_id, autogenerate: true}

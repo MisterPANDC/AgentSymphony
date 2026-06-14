@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown } from "lucide-react";
+import { Ban, Check, ChevronDown } from "lucide-react";
 import { updateIssueWorkflow } from "../../api/issues";
-import { workflowStatuses, type WorkflowStatus } from "../../types/issue";
+import { canUserTransition, isDispatchCandidateStatus, workflowStatuses, type IssueDTO, type WorkflowStatus } from "../../types/issue";
+import { ActiveRunStopDialog } from "./ActiveRunStopDialog";
 import { formatStatusLabel, StatusIcon } from "./StatusIcon";
 
 interface WorkflowStatusSelectProps {
   value: WorkflowStatus;
   onChange: (status: WorkflowStatus) => void;
   disabled?: boolean;
+  disabledOptionTitle?: string;
+  isOptionDisabled?: (status: WorkflowStatus) => boolean;
   menuAlign?: "start" | "end";
   shellClassName?: string;
   triggerClassName?: string;
@@ -18,6 +21,8 @@ export function WorkflowStatusSelect({
   value,
   onChange,
   disabled = false,
+  disabledOptionTitle = "This transition is controlled by Symphony workflow rules",
+  isOptionDisabled,
   menuAlign = "end",
   shellClassName = "",
   triggerClassName = ""
@@ -96,9 +101,11 @@ export function WorkflowStatusSelect({
 
   function selectStatus(status: WorkflowStatus) {
     setOpen(false);
-    if (status !== value) {
-      onChange(status);
+    if (status === value || isOptionDisabled?.(status)) {
+      return;
     }
+
+    onChange(status);
   }
 
   return (
@@ -120,14 +127,18 @@ export function WorkflowStatusSelect({
         <div className="status-select-menu" ref={menuPanelRef} role="menu" style={menuStyle}>
           {workflowStatuses.map((status) => {
             const selected = status === value;
+            const optionDisabled = !selected && Boolean(isOptionDisabled?.(status));
 
             return (
               <button
                 key={status}
-                className={`status-select-option${selected ? " is-selected" : ""}`}
+                className={`status-select-option${selected ? " is-selected" : ""}${optionDisabled ? " is-disabled" : ""}`}
                 type="button"
                 role="menuitemradio"
                 aria-checked={selected}
+                aria-disabled={optionDisabled}
+                disabled={optionDisabled}
+                title={optionDisabled ? disabledOptionTitle : undefined}
                 onPointerDown={(event) => {
                   event.preventDefault();
                   selectStatus(status);
@@ -137,6 +148,7 @@ export function WorkflowStatusSelect({
                 <StatusIcon status={status} size={14} />
                 <span>{formatStatusLabel(status)}</span>
                 {selected && <Check size={14} />}
+                {optionDisabled && <Ban className="status-select-option-ban" size={13} />}
               </button>
             );
           })}
@@ -160,15 +172,61 @@ function findFixedContainingBlock(element: HTMLElement) {
   return { left: 0, top: 0 };
 }
 
-export function StatusSelect({ issueId, value }: { issueId: string; value: WorkflowStatus }) {
+export function StatusSelect({ issue }: { issue: IssueDTO }) {
   const queryClient = useQueryClient();
+  const value = issue.workflowStatus;
+  const [pendingStatus, setPendingStatus] = useState<WorkflowStatus | null>(null);
   const mutation = useMutation({
-    mutationFn: (status: WorkflowStatus) => updateIssueWorkflow(issueId, status, "changed from dashboard"),
+    mutationFn: ({ status, confirmStopRun }: { status: WorkflowStatus; confirmStopRun?: boolean }) =>
+      updateIssueWorkflow(issue.id, status, "changed from dashboard", { confirmStopRun }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["issues"] });
       queryClient.invalidateQueries({ queryKey: ["monitor-state"] });
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
     }
   });
 
-  return <WorkflowStatusSelect value={value} onChange={(status) => mutation.mutate(status)} disabled={mutation.isPending} />;
+  function selectStatus(status: WorkflowStatus) {
+    if (status === value || !canUserTransition(value, status)) {
+      return;
+    }
+
+    if (willStopActiveRun(status)) {
+      setPendingStatus(status);
+      return;
+    }
+
+    mutation.mutate({ status });
+  }
+
+  function confirmPendingStatus() {
+    if (!pendingStatus) {
+      return;
+    }
+
+    mutation.mutate({ status: pendingStatus, confirmStopRun: true });
+    setPendingStatus(null);
+  }
+
+  function willStopActiveRun(status: WorkflowStatus) {
+    return Boolean(issue.activeRunId) && !isDispatchCandidateStatus(status);
+  }
+
+  return (
+    <>
+      <WorkflowStatusSelect
+        value={value}
+        onChange={selectStatus}
+        disabled={mutation.isPending}
+        isOptionDisabled={(status) => !canUserTransition(value, status)}
+      />
+      <ActiveRunStopDialog
+        open={Boolean(pendingStatus)}
+        status={pendingStatus}
+        pending={mutation.isPending}
+        onCancel={() => setPendingStatus(null)}
+        onConfirm={confirmPendingStatus}
+      />
+    </>
+  );
 }

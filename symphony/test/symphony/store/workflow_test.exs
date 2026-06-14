@@ -2,6 +2,7 @@ defmodule SymphonyElixir.Store.WorkflowTest do
   use ExUnit.Case, async: false
 
   alias SymphonyElixir.Store
+  alias SymphonyElixirWeb.WorkflowTransition
 
   setup do
     Store.upsert_project(project_attrs())
@@ -39,6 +40,60 @@ defmodule SymphonyElixir.Store.WorkflowTest do
     assert done.status == "done"
 
     assert {:error, :invalid_transition} = Store.transition_workflow(issue.id, "triage")
+  end
+
+  test "allows work to return to triage for re-analysis" do
+    todo_issue = seed_issue(11)
+    {:ok, _todo} = Store.transition_workflow(todo_issue.id, "todo", reason: "accepted")
+    assert {:ok, triage} = Store.transition_workflow(todo_issue.id, "triage", reason: "needs re-analysis")
+    assert triage.status == "triage"
+
+    in_progress_issue = seed_issue(12)
+    {:ok, _todo} = Store.transition_workflow(in_progress_issue.id, "todo", reason: "accepted")
+    {:ok, _in_progress} = Store.transition_workflow(in_progress_issue.id, "in_progress", reason: "started")
+    assert {:ok, triage} = Store.transition_workflow(in_progress_issue.id, "triage", reason: "scope changed")
+    assert triage.status == "triage"
+  end
+
+  test "restricts user initiated workflow transitions" do
+    issue = seed_issue(13)
+
+    assert {:ok, _todo} = Store.transition_workflow(issue.id, "todo", source: "user_ui", reason: "accepted")
+    assert {:error, :invalid_transition} = Store.transition_workflow(issue.id, "in_progress", source: "user_ui")
+    assert {:ok, _triage} = Store.transition_workflow(issue.id, "triage", source: "user_ui", reason: "needs triage")
+
+    {:ok, _todo} = Store.transition_workflow(issue.id, "todo", reason: "accepted")
+    {:ok, _in_progress} = Store.transition_workflow(issue.id, "in_progress", reason: "agent dispatch")
+    assert {:error, :invalid_transition} = Store.transition_workflow(issue.id, "review", source: "user_ui")
+    assert {:ok, _triage} = Store.transition_workflow(issue.id, "triage", source: "user_ui", reason: "scope changed")
+
+    review_issue = seed_issue(14)
+    {:ok, _todo} = Store.transition_workflow(review_issue.id, "todo", reason: "accepted")
+    {:ok, _in_progress} = Store.transition_workflow(review_issue.id, "in_progress", reason: "agent dispatch")
+    {:ok, _review} = Store.transition_workflow(review_issue.id, "review", reason: "ready")
+
+    assert {:error, :invalid_transition} = Store.transition_workflow(review_issue.id, "done", source: "user_ui")
+    assert {:ok, merging} = Store.transition_workflow(review_issue.id, "merging", source: "user_ui", reason: "approved")
+    assert merging.status == "merging"
+  end
+
+  test "requires confirmation and cancels active runs when leaving dispatch candidates" do
+    issue = seed_issue(15)
+    {:ok, _todo} = Store.transition_workflow(issue.id, "todo", reason: "accepted")
+    {:ok, _in_progress} = Store.transition_workflow(issue.id, "in_progress", reason: "agent dispatch")
+    {:ok, run} = Store.create_run(issue.id, %{status: "running", mode: "workflow"})
+
+    active_issue = Store.get_issue(issue.id)
+
+    assert {:error, :active_run_stop_confirmation_required} =
+             WorkflowTransition.require_active_run_stop_confirmation(active_issue, "triage", %{})
+
+    assert :ok = WorkflowTransition.require_active_run_stop_confirmation(active_issue, "triage", %{"confirmStopRun" => true})
+    assert :ok = WorkflowTransition.maybe_stop_active_run(active_issue, "triage", "tester")
+
+    canceled_run = Store.get_run(run.id)
+    assert canceled_run.status == "canceled"
+    assert canceled_run.exit_reason == "canceled by workflow status change to triage"
   end
 
   test "rejects self dependencies and dependency cycles" do

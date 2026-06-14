@@ -4,9 +4,9 @@ defmodule SymphonyElixirWeb.SettingsController do
   alias Plug.Conn
   alias Symphony.GitLab.{Client, Error}
   alias Symphony.GitLab.Config, as: GitLabConfig
-  alias SymphonyElixir.Persistence.WorkflowState
   alias SymphonyElixir.Store
   alias SymphonyElixir.Sync.Poller
+  alias SymphonyElixir.Workflow.Transitions
   alias SymphonyElixirWeb.AuthPlug
 
   @spec gitlab(Conn.t(), map()) :: Conn.t()
@@ -101,8 +101,8 @@ defmodule SymphonyElixirWeb.SettingsController do
 
     json(conn, %{
       workflow: %{
-        statuses: WorkflowState.statuses(),
-        dispatchCandidateStatuses: ~w(todo in_progress merging rework),
+        statuses: Transitions.statuses(),
+        dispatchCandidateStatuses: Transitions.dispatch_candidate_statuses(),
         requiredGitlabLabels: settings.tracker.required_labels,
         maxConcurrentAgents: settings.agent.max_concurrent_agents,
         syncIntervalMs: sync_interval(),

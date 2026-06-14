@@ -1092,7 +1092,7 @@ When GitLab fields change externally:
 
 | Status | Meaning | Dispatch candidate |
 |---|---|---|
-| `triage` | Synced from GitLab and not yet accepted into work queue. | No |
+| `triage` | Needs human analysis, scoping, decomposition, or acceptance before Agent dispatch. This includes newly synced issues and work returned for re-analysis. | No |
 | `todo` | Ready for Agent work. | Yes |
 | `in_progress` | Implementation actively underway. | Yes |
 | `review` | Implementation is validated and waiting for human review or merge approval. | No |
@@ -1109,18 +1109,48 @@ Required transitions:
 
 ```text
 triage -> todo
+todo -> triage
 todo -> in_progress
 in_progress -> review
 in_progress -> todo
+in_progress -> triage
 review -> todo
 review -> merging
 review -> rework
+review -> triage
 merging -> done
 merging -> review
 rework -> in_progress
 rework -> review
+rework -> triage
 any non-terminal -> canceled
 ```
+
+User-initiated dashboard transitions MUST be a restricted subset of the full workflow graph:
+
+```text
+triage -> todo
+todo -> triage
+todo -> canceled
+in_progress -> triage
+in_progress -> canceled
+review -> triage
+review -> merging
+review -> rework
+review -> canceled
+rework -> triage
+rework -> canceled
+any non-terminal -> canceled
+```
+
+Transitions such as `todo -> in_progress`, `in_progress -> review`, and
+`merging -> done` are controlled by Symphony, Agent tools, or workflow rules, not
+by ordinary dashboard status selection.
+
+If a dashboard transition moves an issue with an active run into a
+non-dispatch-candidate status such as `triage`, `review`, or `canceled`, the UI
+MUST ask for explicit confirmation and the server MUST stop or release the active
+run.
 
 Terminal statuses:
 

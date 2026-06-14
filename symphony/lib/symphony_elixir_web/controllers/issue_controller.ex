@@ -8,6 +8,7 @@ defmodule SymphonyElixirWeb.IssueController do
   alias SymphonyElixir.Store
   alias SymphonyElixirWeb.AuthPlug
   alias SymphonyElixirWeb.DTO
+  alias SymphonyElixirWeb.WorkflowTransition
 
   @workflow_statuses WorkflowState.statuses()
   @create_workflow_paths %{
@@ -103,19 +104,29 @@ defmodule SymphonyElixirWeb.IssueController do
 
   @spec update_workflow(Conn.t(), map()) :: Conn.t()
   def update_workflow(conn, %{"id" => id, "status" => status} = params) do
+    actor = AuthPlug.actor(conn)
+
     with %{} = issue <- find_issue(conn, id),
+         :ok <- WorkflowTransition.require_active_run_stop_confirmation(issue, status, params),
          {:ok, _workflow} <-
            Store.transition_workflow(issue.id, status,
              source: "user_ui",
-             actor: AuthPlug.actor(conn),
+             actor: actor,
              reason: params["reason"]
            ),
+         :ok <- WorkflowTransition.maybe_stop_active_run(issue, status, actor),
          :ok <- maybe_close_done_issue(conn, issue, status),
          %{} = updated <- Store.get_issue(issue.id) do
       json(conn, %{issue: DTO.issue(updated)})
     else
-      nil -> error(conn, 404, "issue_not_found", "Issue not found")
-      {:error, reason} -> error(conn, 422, "workflow_update_failed", inspect(reason))
+      nil ->
+        error(conn, 404, "issue_not_found", "Issue not found")
+
+      {:error, :active_run_stop_confirmation_required} ->
+        error(conn, 409, "active_run_stop_confirmation_required", "Changing to this status will stop the active run. Confirm the transition to continue.")
+
+      {:error, reason} ->
+        error(conn, 422, "workflow_update_failed", inspect(reason))
     end
   end
 
@@ -324,7 +335,7 @@ defmodule SymphonyElixirWeb.IssueController do
     |> Map.fetch!(workflow_status)
     |> Enum.reduce_while(:ok, fn status, :ok ->
       case Store.transition_workflow(issue_id, status,
-             source: "user_ui",
+             source: "issue_create",
              actor: AuthPlug.actor(conn),
              reason: "created from dashboard"
            ) do

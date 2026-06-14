@@ -8,14 +8,16 @@ import { CreateIssueDialog } from "./CreateIssueDialog";
 import { IssueDetailDrawer } from "./IssueDetailDrawer";
 import { IssueRow } from "./IssueRow";
 import { formatStatusLabel, StatusIcon } from "./StatusIcon";
+import { useIssueDetailSelection } from "./useIssueDetailSelection";
 
 export function IssueList() {
   const filterRef = useRef<HTMLDivElement>(null);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<IssueStatusFilter>("all");
   const [filterOpen, setFilterOpen] = useState(false);
-  const [selected, setSelected] = useState<IssueDTO | null>(null);
   const { data, isLoading, refetch } = useQuery({ queryKey: ["issues"], queryFn: () => listIssues() });
+  const allIssues = data?.issues ?? [];
+  const { selectedIssue, openIssue, closeIssue } = useIssueDetailSelection(allIssues);
   const createDefaultStatus: WorkflowStatus = status !== "all" && status !== "blocked" ? status : "triage";
 
   useEffect(() => {
@@ -44,12 +46,12 @@ export function IssueList() {
   }, [filterOpen]);
 
   const issues = useMemo(() => {
-    return (data?.issues ?? []).filter((issue) => {
+    return allIssues.filter((issue) => {
       const matchesStatus = status === "all" || (status === "blocked" ? issue.isBlocked : issue.workflowStatus === status);
       const haystack = `${issue.identifier} ${issue.title} ${issue.descriptionPreview ?? ""}`.toLowerCase();
       return matchesStatus && haystack.includes(search.toLowerCase());
     });
-  }, [data, search, status]);
+  }, [allIssues, search, status]);
 
   const groupedIssues = useMemo(() => {
     const groups = new Map<WorkflowStatus, IssueDTO[]>();
@@ -126,7 +128,7 @@ export function IssueList() {
             />
             <CreateIssueDialog
               defaultStatus={createDefaultStatus}
-              onCreated={setSelected}
+              onCreated={openIssue}
               trigger={
                 <button className="text-button" type="button">
                   <Plus size={14} />
@@ -162,7 +164,7 @@ export function IssueList() {
                 </div>
                 <div role="list">
                   {groupItems.map((issue) => (
-                    <IssueRow key={issue.id} issue={issue} onOpen={setSelected} />
+                    <IssueRow key={issue.id} issue={issue} onOpen={openIssue} />
                   ))}
                 </div>
               </div>
@@ -170,7 +172,7 @@ export function IssueList() {
           )}
         </div>
       </section>
-      <IssueDetailDrawer issue={selected} onClose={() => setSelected(null)} />
+      <IssueDetailDrawer issue={selectedIssue} onClose={closeIssue} />
     </>
   );
 }

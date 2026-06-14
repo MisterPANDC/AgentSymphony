@@ -3,6 +3,17 @@ export const workflowStatuses = ["triage", "todo", "in_progress", "review", "mer
 export type WorkflowStatus = (typeof workflowStatuses)[number];
 export type IssueStatusFilter = WorkflowStatus | "all" | "blocked";
 export const issueStatusFilters: IssueStatusFilter[] = ["all", "blocked", ...workflowStatuses];
+export const dispatchCandidateStatuses = ["todo", "in_progress", "merging", "rework"] as const satisfies readonly WorkflowStatus[];
+export const userTransitionTargets: Record<WorkflowStatus, WorkflowStatus[]> = {
+  triage: ["todo", "canceled"],
+  todo: ["triage", "canceled"],
+  in_progress: ["triage", "canceled"],
+  review: ["triage", "merging", "rework", "canceled"],
+  merging: ["canceled"],
+  rework: ["triage", "canceled"],
+  done: [],
+  canceled: []
+};
 
 export type Priority = "none" | "low" | "medium" | "high" | "urgent";
 
@@ -47,6 +58,14 @@ export interface IssueDTO {
   updatedAt: string;
   gitlabUpdatedAt: string;
   lastSyncAt: string | null;
+}
+
+export function canUserTransition(from: WorkflowStatus, to: WorkflowStatus) {
+  return from === to || userTransitionTargets[from].includes(to);
+}
+
+export function isDispatchCandidateStatus(status: WorkflowStatus) {
+  return dispatchCandidateStatuses.includes(status as (typeof dispatchCandidateStatuses)[number]);
 }
 
 export interface NoteDTO {

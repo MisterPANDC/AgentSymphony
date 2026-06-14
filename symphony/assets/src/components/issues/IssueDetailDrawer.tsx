@@ -28,7 +28,7 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
                   <Dialog.Title className="text-lg font-semibold leading-7 text-[#1d1d1f]">{issue.title}</Dialog.Title>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <GitLabMeta issue={issue} />
-                    <StatusSelect issueId={issue.id} value={issue.workflowStatus} />
+                    <StatusSelect issue={issue} />
                     {issue.isBlocked && (
                       <span className="status-pill blocked">
                         <StatusIcon status="blocked" size={12} />

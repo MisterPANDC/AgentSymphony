@@ -24,8 +24,9 @@ defmodule SymphonyElixir.Store.Postgres do
   alias SymphonyElixir.Persistence.WorkflowState
   alias SymphonyElixir.Repo
   alias SymphonyElixir.Tracker
+  alias SymphonyElixir.Workflow.Transitions
 
-  @workflow_statuses WorkflowState.statuses()
+  @workflow_statuses Transitions.statuses()
   @priorities WorkflowState.priorities()
   @block_types RuntimeBlock.block_types()
   @relation_types IssueRelation.relation_types()
@@ -366,7 +367,7 @@ defmodule SymphonyElixir.Store.Postgres do
       with true <- next_status in @workflow_statuses || {:error, :invalid_status},
            %Issue{} = issue <- Repo.get(Issue, issue_id) || {:error, :issue_not_found},
            %WorkflowState{} = workflow <- ensure_workflow_state(issue.id),
-           true <- allowed_transition?(workflow.status, next_status) || {:error, :invalid_transition} do
+           true <- Transitions.allowed?(workflow.status, next_status, opts) || {:error, :invalid_transition} do
         previous_status = workflow.status
 
         attrs = %{
@@ -1249,17 +1250,6 @@ defmodule SymphonyElixir.Store.Postgres do
       notes -> notes |> Enum.take(-3) |> Enum.map(& &1.body) |> Enum.join("\n\n")
     end
   end
-
-  defp allowed_transition?(same, same), do: true
-  defp allowed_transition?(from, _to) when from in ["done", "canceled"], do: false
-  defp allowed_transition?(_from, "canceled"), do: true
-  defp allowed_transition?("triage", "todo"), do: true
-  defp allowed_transition?("todo", status), do: status in ["in_progress"]
-  defp allowed_transition?("in_progress", status), do: status in ["review", "todo"]
-  defp allowed_transition?("review", status), do: status in ["todo", "merging", "rework"]
-  defp allowed_transition?("merging", status), do: status in ["done", "review"]
-  defp allowed_transition?("rework", status), do: status in ["in_progress", "review"]
-  defp allowed_transition?(_from, _to), do: false
 
   defp priority_rank("urgent"), do: 1
   defp priority_rank("high"), do: 2

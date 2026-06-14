@@ -1,7 +1,13 @@
 import { api } from "./client";
 import type { IssueDTO, WorkflowStatus } from "../types/issue";
 
-export const getWorkflowStatuses = () => api<{ statuses: WorkflowStatus[]; priorities: string[] }>(`/api/workflow/statuses`);
+export const getWorkflowStatuses = () =>
+  api<{
+    statuses: WorkflowStatus[];
+    priorities: string[];
+    dispatchCandidateStatuses: WorkflowStatus[];
+    userTransitionTargets: Record<WorkflowStatus, WorkflowStatus[]>;
+  }>(`/api/workflow/statuses`);
 export const addBlocker = (id: string, blockingIssueId: string, reason?: string) =>
   api<{ blockers: IssueDTO["blockers"] }>(`/api/issues/${id}/blockers`, {
     method: "POST",

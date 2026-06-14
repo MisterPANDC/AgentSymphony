@@ -19,10 +19,10 @@ export function createIssue(input: CreateIssueInput) {
   });
 }
 
-export function updateIssueWorkflow(id: string, status: WorkflowStatus, reason?: string) {
+export function updateIssueWorkflow(id: string, status: WorkflowStatus, reason?: string, options: { confirmStopRun?: boolean } = {}) {
   return api<{ issue: IssueDTO }>(`/api/issues/${id}/workflow`, {
     method: "PATCH",
-    body: JSON.stringify({ status, reason })
+    body: JSON.stringify({ status, reason, confirmStopRun: options.confirmStopRun })
   });
 }
 

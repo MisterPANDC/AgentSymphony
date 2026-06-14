@@ -4,35 +4,51 @@ defmodule SymphonyElixirWeb.WorkflowController do
   alias Plug.Conn
   alias Symphony.GitLab.{Client, IssueMapper}
   alias Symphony.GitLab.Config, as: GitLabConfig
-  alias SymphonyElixir.Persistence.WorkflowState
   alias SymphonyElixir.Store
+  alias SymphonyElixir.Workflow.Transitions
   alias SymphonyElixirWeb.AuthPlug
   alias SymphonyElixirWeb.DTO
+  alias SymphonyElixirWeb.WorkflowTransition
 
-  @statuses WorkflowState.statuses()
+  @statuses Transitions.statuses()
   @priorities ~w(none low medium high urgent)
-  @dispatch_candidate_statuses ~w(todo in_progress merging rework)
+  @dispatch_candidate_statuses Transitions.dispatch_candidate_statuses()
 
   @spec statuses(Conn.t(), map()) :: Conn.t()
   def statuses(conn, _params) do
-    json(conn, %{statuses: @statuses, priorities: @priorities, dispatchCandidateStatuses: @dispatch_candidate_statuses})
+    json(conn, %{
+      statuses: @statuses,
+      priorities: @priorities,
+      dispatchCandidateStatuses: @dispatch_candidate_statuses,
+      userTransitionTargets: Map.new(@statuses, &{&1, Transitions.user_targets(&1)})
+    })
   end
 
   @spec transition(Conn.t(), map()) :: Conn.t()
   def transition(conn, %{"issue_id" => issue_id, "status" => status} = params) do
+    actor = AuthPlug.actor(conn)
+
     with %{} = issue <- find_issue(conn, issue_id),
+         :ok <- WorkflowTransition.require_active_run_stop_confirmation(issue, status, params),
          {:ok, _workflow} <-
            Store.transition_workflow(issue.id, status,
              source: "user_ui",
-             actor: AuthPlug.actor(conn),
+             actor: actor,
              reason: params["reason"]
            ),
+         :ok <- WorkflowTransition.maybe_stop_active_run(issue, status, actor),
          :ok <- maybe_close_done_issue(conn, issue, status),
          %{} = updated <- Store.get_issue(issue.id) do
       json(conn, %{issue: DTO.issue(updated)})
     else
-      nil -> error(conn, 404, "issue_not_found", "Issue not found")
-      {:error, reason} -> error(conn, 422, "transition_failed", inspect(reason))
+      nil ->
+        error(conn, 404, "issue_not_found", "Issue not found")
+
+      {:error, :active_run_stop_confirmation_required} ->
+        error(conn, 409, "active_run_stop_confirmation_required", "Changing to this status will stop the active run. Confirm the transition to continue.")
+
+      {:error, reason} ->
+        error(conn, 422, "transition_failed", inspect(reason))
     end
   end
 
