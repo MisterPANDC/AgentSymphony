@@ -9,7 +9,7 @@ Native Symphony implementation without Linear, specialized for long-horizon agen
 本项目基于 OpenAI 开源的 Symphony 框架：
 
 - [openai/symphony](https://github.com/openai/symphony)
-- [Open-source Codex orchestration with Symphony](https://oapenai.com/zh-Hans-CN/index/open-source-codex-orchestration-symphony/)
+- [Open-source Codex orchestration with Symphony](https://openai.com/zh-Hans-CN/index/open-source-codex-orchestration-symphony/)
 
 在原 Symphony 实现的基础上，本项目针对现有流程中的平台依赖、Agent 编排方式和工程闭环能力进行了优化与改进。
 
