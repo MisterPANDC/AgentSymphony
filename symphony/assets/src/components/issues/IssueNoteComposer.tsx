@@ -75,26 +75,24 @@ export function IssueNoteComposer({ issueId }: { issueId: string }) {
 
   return (
     <form
-      className={`rounded-lg border bg-[#ffffff] shadow-sm focus-within:border-[#9ca3af] focus-within:ring-4 focus-within:ring-[#9ca3af]/15 ${
-        isDragging ? "border-[#6b7280] ring-4 ring-[#9ca3af]/15" : "border-[#dedfe4]"
-      }`}
+      className={`issue-note-composer${isDragging ? " is-dragging" : ""}`}
       onSubmit={submit}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       <textarea
-        className="min-h-[84px] w-full resize-y rounded-t-lg border-0 bg-transparent px-3 py-2 text-sm leading-6 text-[#2f333b] outline-none placeholder:text-[#8a8d96]"
-        placeholder="Add a note..."
+        className="issue-note-composer-textarea"
+        placeholder="Write a comment..."
         value={body}
         disabled={mutation.isPending}
         onChange={(event) => setBody(event.target.value)}
       />
       {files.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 border-t border-[#eaebef] px-2 py-2">
+        <div className="issue-note-attachments">
           {files.map((file, index) => (
-            <span key={fileKey(file)} className="inline-flex max-w-full items-center gap-1 rounded-md border border-[#dedfe4] bg-[#f7f8fa] px-2 py-1 text-xs text-[#3c4048]">
-              <span className="truncate">{file.name}</span>
+            <span key={fileKey(file)} className="issue-note-attachment-chip">
+              <span>{file.name}</span>
               <button className="dialog-close-button h-5 w-5" type="button" title="Remove attachment" disabled={mutation.isPending} onClick={() => removeFile(index)}>
                 <X size={12} />
               </button>
@@ -102,11 +100,9 @@ export function IssueNoteComposer({ issueId }: { issueId: string }) {
           ))}
         </div>
       )}
-      <div className="flex min-h-[40px] items-center justify-between gap-3 border-t border-[#eaebef] px-2 py-1.5">
-        <div className="min-w-0 text-xs text-[#686b73]">
-          {mutation.isError ? <span className="text-[#b42318]">{mutation.error.message}</span> : null}
-        </div>
-        <div className="flex items-center gap-1.5">
+      <div className="issue-note-composer-footer">
+        <div className="issue-note-composer-status">{mutation.isError ? <span>{mutation.error.message}</span> : null}</div>
+        <div className="issue-note-composer-actions">
           <input ref={fileInputRef} className="hidden" type="file" multiple onChange={handleFileChange} />
           <button className="icon-button" type="button" title="Attach files" disabled={mutation.isPending} onClick={() => fileInputRef.current?.click()}>
             <Paperclip size={14} />

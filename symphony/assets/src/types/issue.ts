@@ -77,7 +77,15 @@ export interface NoteDTO {
   id: string;
   note_id: number;
   body: string;
-  author: { name: string; username: string } | null;
+  author: {
+    id?: number | string | null;
+    name?: string | null;
+    username?: string | null;
+    avatarUrl?: string | null;
+    avatar_url?: string | null;
+    webUrl?: string | null;
+    web_url?: string | null;
+  } | null;
   system: boolean;
   internal: boolean;
   gitlab_created_at: string | null;

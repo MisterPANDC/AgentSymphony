@@ -3,8 +3,8 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Check, ExternalLink, LoaderCircle, Maximize2, Minimize2, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getIssueNotes, updateIssueTitle } from "../../api/issues";
-import type { IssueDTO } from "../../types/issue";
-import { BlockerEditor } from "./BlockerEditor";
+import type { IssueDTO, NoteDTO } from "../../types/issue";
+import { IssueRelationsSummary } from "./BlockerEditor";
 import { GitLabMeta } from "./GitLabMeta";
 import { IssueLabelEditor } from "./IssueLabelEditor";
 import { IssueNoteComposer } from "./IssueNoteComposer";
@@ -18,6 +18,8 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
     queryFn: () => getIssueNotes(issue!.id),
     enabled: Boolean(issue)
   });
+  const notes = data?.notes ?? [];
+  const userCommentCount = notes.filter((note) => !note.system).length;
 
   useEffect(() => {
     setExpanded(false);
@@ -37,57 +39,63 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
         <Dialog.Overlay className="issue-detail-overlay" />
         <Dialog.Content className={`issue-detail-dialog${expanded ? " is-expanded" : ""}`} onEscapeKeyDown={keepDrawerOpenForLabelEditing}>
           {issue && (
-            <div className="issue-detail-dialog-body">
-              <div className="issue-detail-dialog-header">
-                <div className="min-w-0 flex-1">
-                  <IssueTitleEditor issue={issue} />
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <GitLabMeta issue={issue} showLink={false} />
-                    <StatusSelect issue={issue} />
-                    {issue.isBlocked && (
-                      <span className="status-pill blocked">
-                        <StatusIcon status="blocked" size={12} />
-                        blocked
-                      </span>
+            <>
+              <div className="issue-detail-dialog-actions">
+                <button
+                  className="dialog-close-button"
+                  type="button"
+                  aria-label={expanded ? "Restore issue dialog" : "Expand issue dialog"}
+                  title={expanded ? "Restore" : "Expand"}
+                  onClick={() => setExpanded((value) => !value)}
+                >
+                  {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                </button>
+                <Dialog.Close className="dialog-close-button" title="Close">
+                  <X size={15} />
+                </Dialog.Close>
+              </div>
+              <div className="issue-detail-dialog-body">
+                <div className="issue-detail-dialog-header">
+                  <div className="min-w-0 flex-1">
+                    <IssueTitleEditor issue={issue} />
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <GitLabMeta issue={issue} showLink={false} />
+                      <StatusSelect issue={issue} />
+                      <IssueRelationsSummary issue={issue} />
+                      {issue.isBlocked && (
+                        <span className="status-pill blocked">
+                          <StatusIcon status="blocked" size={12} />
+                          blocked
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <IssueLabelEditor issue={issue} />
+                <section>
+                  <h3 className="mb-2 text-xs font-semibold uppercase text-[#686b73]">Description</h3>
+                  <p className="whitespace-pre-wrap text-sm leading-6 text-[#2f333b]">{issue.description || "No description provided."}</p>
+                </section>
+                <section className="issue-activity-section">
+                  <div className="issue-activity-header">
+                    <h3 className="issue-activity-title">Activity</h3>
+                    <span className="issue-activity-count">
+                      {userCommentCount} {userCommentCount === 1 ? "comment" : "comments"}
+                    </span>
+                  </div>
+                  <div className="issue-activity-list" aria-label="Issue activity">
+                    {notes.length > 0 ? (
+                      notes.map((note) => <ActivityNote key={note.id} note={note} issue={issue} />)
+                    ) : (
+                      <div className="issue-activity-empty">No activity yet.</div>
                     )}
                   </div>
-                </div>
-                <div className="issue-detail-dialog-actions">
-                  <button
-                    className="dialog-close-button"
-                    type="button"
-                    aria-label={expanded ? "Restore issue dialog" : "Expand issue dialog"}
-                    title={expanded ? "Restore" : "Expand"}
-                    onClick={() => setExpanded((value) => !value)}
-                  >
-                    {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-                  </button>
-                  <Dialog.Close className="dialog-close-button" title="Close">
-                    <X size={15} />
-                  </Dialog.Close>
-                </div>
-              </div>
-              <IssueLabelEditor issue={issue} />
-              <section>
-                <h3 className="mb-2 text-xs font-semibold uppercase text-[#686b73]">Description</h3>
-                <p className="whitespace-pre-wrap text-sm leading-6 text-[#2f333b]">{issue.description || "No description provided."}</p>
-              </section>
-              <BlockerEditor issue={issue} />
-              <section>
-                <h3 className="mb-2 text-xs font-semibold uppercase text-[#686b73]">Notes</h3>
-                <div className="space-y-3">
-                  <IssueNoteComposer issueId={issue.id} />
-                  <div className="space-y-2">
-                    {(data?.notes ?? []).map((note) => (
-                      <div key={note.id} className="issue-card text-sm">
-                        <div className="mb-1 text-[11px] text-[#686b73]">{note.author?.name ?? "GitLab"}</div>
-                        <NoteBody body={note.body} issueId={issue.id} />
-                      </div>
-                    ))}
+                  <div className="issue-activity-composer">
+                    <IssueNoteComposer issueId={issue.id} />
                   </div>
-                </div>
-              </section>
-            </div>
+                </section>
+              </div>
+            </>
           )}
         </Dialog.Content>
       </Dialog.Portal>
@@ -95,11 +103,87 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
   );
 }
 
-function NoteBody({ body, issueId }: { body: string; issueId: string }) {
-  return <div className="break-words text-sm leading-6 text-[#2f333b]">{renderMarkdown(body, issueId)}</div>;
+function ActivityNote({ note, issue }: { note: NoteDTO; issue: IssueDTO }) {
+  const authorName = note.author?.name || note.author?.username || "GitLab";
+  const authorUsername = note.author?.username ? `@${note.author.username}` : null;
+  const avatarUrl = authorAvatarUrl(note.author);
+  const authorProfileUrl = authorWebUrl(note.author);
+  const createdAt = note.gitlab_created_at;
+
+  if (note.system) {
+    return (
+      <article className="issue-activity-item is-system">
+        <div className="issue-activity-system-dot" aria-hidden="true" />
+        <div className="issue-system-event">
+          {authorProfileUrl ? (
+            <a
+              className="issue-activity-author issue-activity-author-link"
+              href={authorProfileUrl}
+              target="_blank"
+              rel="noreferrer"
+              title={`Open ${authorName} profile in GitLab`}
+            >
+              {authorName}
+            </a>
+          ) : (
+            <span className="issue-activity-author">{authorName}</span>
+          )}
+          <span className="issue-system-event-body">{renderMarkdown(note.body, issue)}</span>
+          {note.internal && <span className="issue-activity-pill">internal</span>}
+          {createdAt && (
+            <time className="issue-activity-time" dateTime={createdAt} title={formatExactDate(createdAt)}>
+              {formatRelativeDate(createdAt)}
+            </time>
+          )}
+        </div>
+      </article>
+    );
+  }
+
+  return (
+    <article className="issue-activity-item is-comment">
+      <div className="issue-activity-avatar" aria-hidden="true">
+        {avatarUrl ? <img src={avatarUrl} alt="" /> : <span>{authorInitials(authorName)}</span>}
+      </div>
+      <div className="issue-activity-note-card">
+        <div className="issue-activity-note-header">
+          <div className="issue-activity-note-meta">
+            {authorProfileUrl ? (
+              <a
+                className="issue-activity-author issue-activity-author-link"
+                href={authorProfileUrl}
+                target="_blank"
+                rel="noreferrer"
+                title={`Open ${authorName} profile in GitLab`}
+              >
+                {authorName}
+              </a>
+            ) : (
+              <span className="issue-activity-author">{authorName}</span>
+            )}
+            {authorUsername && <span className="issue-activity-username">{authorUsername}</span>}
+            <span className="issue-activity-action">commented</span>
+            {createdAt && (
+              <time className="issue-activity-time" dateTime={createdAt} title={formatExactDate(createdAt)}>
+                {formatRelativeDate(createdAt)}
+              </time>
+            )}
+          </div>
+          <div className="issue-activity-note-tags">
+            {note.internal && <span className="issue-activity-pill">internal</span>}
+          </div>
+        </div>
+        <NoteBody body={note.body} issue={issue} />
+      </div>
+    </article>
+  );
 }
 
-function renderMarkdown(body: string, issueId: string) {
+function NoteBody({ body, issue }: { body: string; issue: IssueDTO }) {
+  return <div className="issue-activity-note-body">{renderMarkdown(body, issue)}</div>;
+}
+
+function renderMarkdown(body: string, issue: IssueDTO) {
   const nodes: JSX.Element[] = [];
   const pattern = /(!?)\[([^\]]*)\]\(([^)\s]+)\)/g;
   let lastIndex = 0;
@@ -115,7 +199,7 @@ function renderMarkdown(body: string, issueId: string) {
     }
 
     const [raw, imageMarker, label, url] = match;
-    const resolvedUrl = resolveMarkdownUrl(url, issueId);
+    const resolvedUrl = resolveMarkdownUrl(url, issue);
     if (safeMarkdownUrl(resolvedUrl)) {
       nodes.push(imageMarker ? renderImage(label, resolvedUrl, match.index) : renderLink(label, resolvedUrl, match.index));
     } else {
@@ -143,17 +227,18 @@ function renderMarkdown(body: string, issueId: string) {
 function renderImage(label: string, url: string, key: number) {
   const external = isExternalUrl(url);
   return (
-    <a key={`image-${key}`} className="mt-2 block w-fit max-w-full" href={url} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined}>
-      <img className="max-h-72 max-w-full rounded-md border border-[#dedfe4] object-contain" src={url} alt={label || "attachment"} />
+    <a key={`image-${key}`} className="issue-note-image-link" href={url} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined}>
+      <img className="issue-note-image" src={url} alt={label || "attachment"} />
     </a>
   );
 }
 
 function renderLink(label: string, url: string, key: number) {
   const external = isExternalUrl(url);
+  const referenceLabel = markdownReferenceLabel(label);
   return (
-    <a key={`link-${key}`} className="text-[#2563eb] underline-offset-2 hover:underline" href={url} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined}>
-      {label || url}
+    <a key={`link-${key}`} className={`issue-note-link${referenceLabel ? " issue-note-link--reference" : ""}`} href={url} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined}>
+      {referenceLabel || label || url}
     </a>
   );
 }
@@ -162,16 +247,89 @@ function safeMarkdownUrl(url: string) {
   return url.startsWith("/api/issues/") || isExternalUrl(url);
 }
 
-function resolveMarkdownUrl(url: string, issueId: string) {
+function resolveMarkdownUrl(url: string, issue: IssueDTO) {
   const uploadMatch = url.match(/^\/uploads\/([0-9a-fA-F]{32})\/(.+)$/);
-  if (!uploadMatch) return url;
+  if (!uploadMatch) {
+    if (url.startsWith("/")) {
+      try {
+        return new URL(url, issue.webUrl).toString();
+      } catch {
+        return url;
+      }
+    }
+    return url;
+  }
 
   const [, secret, filename] = uploadMatch;
-  return `/api/issues/${issueId}/uploads/${encodeURIComponent(secret)}/${encodeURIComponent(decodeURIComponent(filename))}`;
+  return `/api/issues/${issue.id}/uploads/${encodeURIComponent(secret)}/${encodeURIComponent(decodeURIComponent(filename))}`;
 }
 
 function isExternalUrl(url: string) {
   return url.startsWith("https://") || url.startsWith("http://");
+}
+
+function markdownReferenceLabel(label: string) {
+  const trimmed = label.trim();
+  return trimmed.startsWith("`") && trimmed.endsWith("`") && trimmed.length > 2 ? trimmed.slice(1, -1) : null;
+}
+
+function authorAvatarUrl(author: NoteDTO["author"]) {
+  return author?.avatarUrl || author?.avatar_url || null;
+}
+
+function authorWebUrl(author: NoteDTO["author"]) {
+  return author?.webUrl || author?.web_url || null;
+}
+
+function authorInitials(name: string) {
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (parts.length === 0) return "G";
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+}
+
+function formatRelativeDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown date";
+
+  const seconds = Math.round((date.getTime() - Date.now()) / 1000);
+  const absoluteSeconds = Math.abs(seconds);
+  if (absoluteSeconds < 45) return "just now";
+
+  const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
+    ["year", 60 * 60 * 24 * 365],
+    ["month", 60 * 60 * 24 * 30],
+    ["week", 60 * 60 * 24 * 7],
+    ["day", 60 * 60 * 24],
+    ["hour", 60 * 60],
+    ["minute", 60]
+  ];
+  const formatter = new Intl.RelativeTimeFormat("en-US", { numeric: "auto" });
+
+  for (const [unit, unitSeconds] of units) {
+    if (absoluteSeconds >= unitSeconds) {
+      return formatter.format(Math.round(seconds / unitSeconds), unit);
+    }
+  }
+
+  return formatter.format(seconds, "second");
+}
+
+function formatExactDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(date);
 }
 
 function IssueTitleEditor({ issue }: { issue: IssueDTO }) {

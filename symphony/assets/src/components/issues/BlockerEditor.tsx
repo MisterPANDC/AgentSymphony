@@ -1,41 +1,45 @@
 import type { IssueDTO, IssueRelationRef } from "../../types/issue";
-import { formatStatusLabel, StatusIcon } from "./StatusIcon";
 
-export function BlockerEditor({ issue }: { issue: IssueDTO }) {
+type RelationKind = "related" | "blocks" | "blocked-by";
+
+interface RelationChip {
+  kind: RelationKind;
+  label: string;
+  item: IssueRelationRef;
+}
+
+export function IssueRelationsSummary({ issue }: { issue: IssueDTO }) {
+  const relationChips = issueRelationChips(issue);
+
+  if (relationChips.length === 0) {
+    return null;
+  }
+
   return (
-    <section>
-      <h3 className="mb-2 text-xs font-semibold uppercase text-[#686b73]">Relations</h3>
-      <div className="grid gap-3 sm:grid-cols-3">
-        <RelationGroup title="Related" empty="No related issues" items={issue.relations?.related ?? []} />
-        <RelationGroup title="Blocks" empty="No blocked issues" items={issue.relations?.blocks ?? []} />
-        <RelationGroup title="Blocked by" empty="No blockers" items={issue.relations?.blockedBy ?? issue.blockers ?? []} />
-      </div>
-    </section>
+    <div className="issue-relations-summary" aria-label="Issue relations">
+      {relationChips.map(({ kind, label, item }) => (
+        <span
+          key={`${kind}-${item.issueId}-${item.identifier}`}
+          className={`issue-relation-chip issue-relation-chip--${kind}`}
+          title={`${label}: ${item.identifier} ${item.title}`}
+        >
+          <span className="issue-relation-kind">{label}</span>
+          <span className="issue-relation-id mono">{item.identifier}</span>
+          <span className="issue-relation-title">{item.title}</span>
+        </span>
+      ))}
+    </div>
   );
 }
 
-function RelationGroup({ title, empty, items }: { title: string; empty: string; items: IssueRelationRef[] }) {
-  return (
-    <div className="min-w-0">
-      <div className="mb-1 text-[11px] font-medium uppercase text-[#686b73]">{title}</div>
-      <div className="space-y-1">
-        {items.length === 0 ? (
-          <div className="text-sm text-[#686b73]">{empty}</div>
-        ) : (
-          items.map((item) => (
-            <div key={`${title}-${item.issueId}`} className="issue-card min-w-0 px-2 py-1 text-sm">
-              <div className="flex min-w-0 items-center justify-between gap-2">
-                <span className="mono min-w-0 truncate text-[12px] text-[#4f535c]">{item.identifier}</span>
-                <span className={`status-pill ${item.status}`}>
-                  <StatusIcon status={item.status} size={12} />
-                  {formatStatusLabel(item.status)}
-                </span>
-              </div>
-              <div className="mt-1 truncate text-xs text-[#686b73]">{item.title}</div>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
+function issueRelationChips(issue: IssueDTO): RelationChip[] {
+  const related = issue.relations?.related ?? [];
+  const blocks = issue.relations?.blocks ?? [];
+  const blockedBy = (issue.relations?.blockedBy?.length ? issue.relations.blockedBy : issue.blockers) ?? [];
+
+  return [
+    ...related.map((item) => ({ kind: "related" as const, label: "related", item })),
+    ...blocks.map((item) => ({ kind: "blocks" as const, label: "blocks", item })),
+    ...blockedBy.map((item) => ({ kind: "blocked-by" as const, label: "blocked by", item }))
+  ];
 }
