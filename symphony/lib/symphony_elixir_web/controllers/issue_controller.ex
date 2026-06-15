@@ -90,6 +90,41 @@ defmodule SymphonyElixirWeb.IssueController do
 
   def create_note(conn, _params), do: error(conn, 400, "missing_body", "Note body is required")
 
+  @spec update_note(Conn.t(), map()) :: Conn.t()
+  def update_note(conn, %{"id" => id, "note_id" => note_id} = params) do
+    body = Map.get(params, "body", "")
+
+    with %{} = issue <- find_issue(conn, id),
+         {:ok, parsed_note_id} <- parse_note_id(note_id),
+         :ok <- validate_note_body(body),
+         {:ok, files} <- upload_files(params),
+         :ok <- validate_note_payload(body, files),
+         :ok <- update_user_note(conn, issue, parsed_note_id, body, files) do
+      json(conn, %{notes: Store.list_notes(issue.id)})
+    else
+      nil -> error(conn, 404, "issue_not_found", "Issue not found")
+      {:error, {:validation, code, message}} -> error(conn, 400, code, message)
+      {:error, reason} -> error(conn, 422, "note_update_failed", inspect(reason))
+    end
+  end
+
+  def update_note(conn, _params), do: error(conn, 400, "missing_note", "Note ID is required")
+
+  @spec delete_note(Conn.t(), map()) :: Conn.t()
+  def delete_note(conn, %{"id" => id, "note_id" => note_id}) do
+    with %{} = issue <- find_issue(conn, id),
+         {:ok, parsed_note_id} <- parse_note_id(note_id),
+         :ok <- delete_user_note(conn, issue, parsed_note_id) do
+      json(conn, %{notes: Store.list_notes(issue.id)})
+    else
+      nil -> error(conn, 404, "issue_not_found", "Issue not found")
+      {:error, {:validation, code, message}} -> error(conn, 400, code, message)
+      {:error, reason} -> error(conn, 422, "note_delete_failed", inspect(reason))
+    end
+  end
+
+  def delete_note(conn, _params), do: error(conn, 400, "missing_note", "Note ID is required")
+
   @spec upload(Conn.t(), map()) :: Conn.t()
   def upload(conn, %{"id" => id, "secret" => secret, "filename" => filename}) do
     with %{} = issue <- find_issue(conn, id),
@@ -384,6 +419,23 @@ defmodule SymphonyElixirWeb.IssueController do
     end
   end
 
+  defp update_user_note(conn, issue, note_id, body, files) do
+    with {:ok, config, auth_opts} <- user_gitlab_context(conn, issue),
+         {:ok, final_body, uploaded} <- upload_note_files(config, auth_opts, issue.id, body, files),
+         {:ok, raw_note} <- update_note_with_cleanup(config, auth_opts, issue.iid, note_id, final_body, uploaded) do
+      Store.upsert_note(issue.id, NoteMapper.from_gitlab(raw_note))
+      :ok
+    end
+  end
+
+  defp delete_user_note(conn, issue, note_id) do
+    with {:ok, config, auth_opts} <- user_gitlab_context(conn, issue),
+         :ok <- Client.delete_issue_note(config, issue.iid, note_id, auth_opts),
+         :ok <- Store.delete_note(issue.id, note_id) do
+      :ok
+    end
+  end
+
   defp upload_files(params) when is_map(params) do
     files =
       [Map.get(params, "files", []), Map.get(params, "files[]", [])]
@@ -405,6 +457,13 @@ defmodule SymphonyElixirWeb.IssueController do
       {:error, {:validation, "missing_body", "Note body or attachment is required"}}
     else
       :ok
+    end
+  end
+
+  defp parse_note_id(note_id) do
+    case parse_int(note_id) do
+      nil -> {:error, {:validation, "invalid_note_id", "Note ID must be an integer"}}
+      parsed -> {:ok, parsed}
     end
   end
 
@@ -485,6 +544,20 @@ defmodule SymphonyElixirWeb.IssueController do
 
   defp create_note_with_cleanup(config, auth_opts, issue_iid, body, uploaded) do
     case Client.create_issue_note(config, issue_iid, body, auth_opts) do
+      {:ok, raw_note} ->
+        {:ok, raw_note}
+
+      {:error, %GitLabError{type: type} = reason} when type in [:validation_error, :unauthorized, :forbidden, :not_found] ->
+        cleanup_uploaded_files(config, auth_opts, uploaded)
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp update_note_with_cleanup(config, auth_opts, issue_iid, note_id, body, uploaded) do
+    case Client.update_issue_note(config, issue_iid, note_id, body, auth_opts) do
       {:ok, raw_note} ->
         {:ok, raw_note}
 

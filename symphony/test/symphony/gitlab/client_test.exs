@@ -43,6 +43,15 @@ defmodule Symphony.GitLab.ClientTest do
     assert issue["title"] == "Follow-up"
   end
 
+  test "updates and deletes issue notes" do
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: note_update_plug())
+
+    assert {:ok, note} = Client.update_issue_note(config(), 3, 44, "Updated body")
+    assert note["id"] == 44
+    assert note["body"] == "Updated body"
+    assert :ok = Client.delete_issue_note(config(), 3, 44)
+  end
+
   test "uploads and downloads project markdown uploads" do
     Application.put_env(:symphony_elixir, :gitlab_req_options, plug: upload_plug())
     path = Path.join(System.tmp_dir!(), "symphony-upload-client-test.txt")
@@ -116,6 +125,30 @@ defmodule Symphony.GitLab.ClientTest do
         "labels" => ["follow-up", "backend"],
         "assignees" => []
       })
+    end
+  end
+
+  defp note_update_plug do
+    fn conn ->
+      assert Plug.Conn.get_req_header(conn, "private-token") == ["test-token"]
+
+      case {conn.method, conn.request_path} do
+        {"PUT", "/api/v4/projects/123/issues/3/notes/44"} ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          payload = Jason.decode!(body)
+          assert payload["body"] == "Updated body"
+
+          Req.Test.json(conn, %{
+            "id" => 44,
+            "body" => payload["body"],
+            "system" => false,
+            "internal" => false,
+            "author" => %{"name" => "Developer", "username" => "dev"}
+          })
+
+        {"DELETE", "/api/v4/projects/123/issues/3/notes/44"} ->
+          Plug.Conn.send_resp(conn, 204, "")
+      end
     end
   end
 

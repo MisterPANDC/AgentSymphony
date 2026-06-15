@@ -40,6 +40,13 @@ export function updateIssueTitle(id: string, title: string) {
   });
 }
 
+export function updateIssueDescription(id: string, description: string) {
+  return api<{ issue: IssueDTO }>(`/api/issues/${id}/gitlab`, {
+    method: "PATCH",
+    body: JSON.stringify({ description })
+  });
+}
+
 export function createIssueNote(id: string, body: string, files: File[] = []) {
   if (files.length > 0) {
     const form = new FormData();
@@ -55,5 +62,29 @@ export function createIssueNote(id: string, body: string, files: File[] = []) {
   return api<{ notes: NoteDTO[] }>(`/api/issues/${id}/notes`, {
     method: "POST",
     body: JSON.stringify({ body })
+  });
+}
+
+export function updateIssueNote(id: string, noteId: number | string, body: string, files: File[] = []) {
+  if (files.length > 0) {
+    const form = new FormData();
+    form.set("body", body);
+    files.forEach((file) => form.append("files", file));
+
+    return api<{ notes: NoteDTO[] }>(`/api/issues/${id}/notes/${noteId}`, {
+      method: "PUT",
+      body: form
+    });
+  }
+
+  return api<{ notes: NoteDTO[] }>(`/api/issues/${id}/notes/${noteId}`, {
+    method: "PUT",
+    body: JSON.stringify({ body })
+  });
+}
+
+export function deleteIssueNote(id: string, noteId: number | string) {
+  return api<{ notes: NoteDTO[] }>(`/api/issues/${id}/notes/${noteId}`, {
+    method: "DELETE"
   });
 }

@@ -1,28 +1,73 @@
 import type { ChangeEvent, DragEvent, FormEvent } from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Paperclip, SendHorizontal, X } from "lucide-react";
-import { createIssueNote } from "../../api/issues";
+import { Check, LoaderCircle, Paperclip, SendHorizontal, X } from "lucide-react";
+import { createIssueNote, updateIssueNote } from "../../api/issues";
 import type { NoteDTO } from "../../types/issue";
 
-export function IssueNoteComposer({ issueId }: { issueId: string }) {
-  const [body, setBody] = useState("");
+interface IssueNoteComposerProps {
+  issueId: string;
+  mode?: "comment" | "reply" | "edit";
+  noteId?: number | string;
+  initialBody?: string;
+  autoFocus?: boolean;
+  onCancel?: () => void;
+  onSuccess?: () => void;
+}
+
+export function IssueNoteComposer({ issueId, mode = "comment", noteId, initialBody = "", autoFocus = false, onCancel, onSuccess }: IssueNoteComposerProps) {
+  const [body, setBody] = useState(initialBody);
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const queryClient = useQueryClient();
-  const trimmedBody = body.trim();
+  const submittedBody = mode === "edit" ? body : body.trim();
+  const hasPayload = body.trim().length > 0 || files.length > 0;
+  const hasChanges = mode !== "edit" || body !== initialBody || files.length > 0;
+  const submitLabel = mode === "edit" ? "Save" : mode === "reply" ? "Reply" : "Comment";
+  const pendingLabel = mode === "edit" ? "Saving" : mode === "reply" ? "Replying" : "Posting";
+  const placeholder = mode === "reply" ? "Write a reply..." : "Write a comment...";
 
   const mutation = useMutation({
-    mutationFn: () => createIssueNote(issueId, trimmedBody, files),
+    mutationFn: () => {
+      if (mode === "edit") {
+        if (noteId === undefined) throw new Error("Note ID is required");
+        return updateIssueNote(issueId, noteId, submittedBody, files);
+      }
+
+      return createIssueNote(issueId, submittedBody, files);
+    },
     onSuccess: (data) => {
       queryClient.setQueryData<{ notes: NoteDTO[] }>(["issue-notes", issueId], data);
       queryClient.invalidateQueries({ queryKey: ["monitor-state"] });
-      setBody("");
+      setBody(mode === "edit" ? data.notes.find((note) => String(note.note_id) === String(noteId))?.body ?? submittedBody : "");
       setFiles([]);
+      onSuccess?.();
     }
   });
-  const canSubmit = Boolean(trimmedBody || files.length > 0) && !mutation.isPending;
+  const canSubmit = hasPayload && hasChanges && !mutation.isPending;
+
+  useEffect(() => {
+    setBody(initialBody);
+    setFiles([]);
+    mutation.reset();
+  }, [initialBody, issueId, noteId, mode]);
+
+  useEffect(() => {
+    if (!autoFocus) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+
+      const selectionPosition = textarea.value.length;
+      textarea.focus({ preventScroll: true });
+      textarea.setSelectionRange(selectionPosition, selectionPosition);
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [autoFocus, initialBody, issueId, mode, noteId]);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -75,15 +120,16 @@ export function IssueNoteComposer({ issueId }: { issueId: string }) {
 
   return (
     <form
-      className={`issue-note-composer${isDragging ? " is-dragging" : ""}`}
+      className={`issue-note-composer is-${mode}${isDragging ? " is-dragging" : ""}`}
       onSubmit={submit}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       <textarea
+        ref={textareaRef}
         className="issue-note-composer-textarea"
-        placeholder="Write a comment..."
+        placeholder={placeholder}
         value={body}
         disabled={mutation.isPending}
         onChange={(event) => setBody(event.target.value)}
@@ -101,15 +147,27 @@ export function IssueNoteComposer({ issueId }: { issueId: string }) {
         </div>
       )}
       <div className="issue-note-composer-footer">
-        <div className="issue-note-composer-status">{mutation.isError ? <span>{mutation.error.message}</span> : null}</div>
-        <div className="issue-note-composer-actions">
+        <div className="issue-note-composer-footer-left">
           <input ref={fileInputRef} className="hidden" type="file" multiple onChange={handleFileChange} />
-          <button className="icon-button" type="button" title="Attach files" disabled={mutation.isPending} onClick={() => fileInputRef.current?.click()}>
+          <button className="icon-button issue-note-attach-button" type="button" title="Attach files" disabled={mutation.isPending} onClick={() => fileInputRef.current?.click()}>
             <Paperclip size={14} />
           </button>
+          <div className="issue-note-composer-status" aria-live="polite">{mutation.isError ? <span>{mutation.error.message}</span> : null}</div>
+        </div>
+        <div className="issue-note-composer-actions">
+          {onCancel && (
+            <button
+              className="text-button issue-note-secondary-action"
+              type="button"
+              disabled={mutation.isPending}
+              onClick={onCancel}
+            >
+              Cancel
+            </button>
+          )}
           <button className="text-button" type="submit" disabled={!canSubmit}>
-            <SendHorizontal size={14} />
-            {mutation.isPending ? "Posting" : "Comment"}
+            {mutation.isPending ? <LoaderCircle className="animate-spin" size={14} /> : mode === "edit" ? <Check size={14} /> : <SendHorizontal size={14} />}
+            {mutation.isPending ? pendingLabel : submitLabel}
           </button>
         </div>
       </div>

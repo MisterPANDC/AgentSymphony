@@ -180,6 +180,45 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
     assert note.body == "![proof](/api/issues/#{issue.id}/uploads/0123456789abcdef0123456789abcdef/proof.txt)"
   end
 
+  test "updates an issue note through user OAuth", %{identity: identity, iid: iid, project: project} do
+    issue = seed_issue(iid, project)
+    Store.upsert_note(issue.id, note_attrs(45, "Old body"))
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: note_update_plug(project.project_ref, iid, identity))
+
+    conn =
+      :put
+      |> conn("/api/issues/#{issue.id}/notes/45")
+      |> assign_user(identity, project)
+
+    conn = IssueController.update_note(conn, %{"id" => issue.id, "note_id" => "45", "body" => "Updated body"})
+    assert conn.status == 200
+
+    [note] = Store.list_notes(issue.id)
+    assert note.note_id == 45
+    assert note.body == "Updated body"
+
+    payload = Jason.decode!(conn.resp_body)
+    assert [%{"body" => "Updated body"}] = payload["notes"]
+  end
+
+  test "deletes an issue note through user OAuth", %{identity: identity, iid: iid, project: project} do
+    issue = seed_issue(iid, project)
+    Store.upsert_note(issue.id, note_attrs(45, "Delete me"))
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: note_delete_plug(project.project_ref, iid, identity))
+
+    conn =
+      :delete
+      |> conn("/api/issues/#{issue.id}/notes/45")
+      |> assign_user(identity, project)
+
+    conn = IssueController.delete_note(conn, %{"id" => issue.id, "note_id" => "45"})
+    assert conn.status == 200
+    assert Store.list_notes(issue.id) == []
+
+    payload = Jason.decode!(conn.resp_body)
+    assert payload["notes"] == []
+  end
+
   test "deletes already uploaded attachments when a later attachment upload fails", %{identity: identity, iid: iid, project: project} do
     issue = seed_issue(iid, project)
     {:ok, calls} = Agent.start_link(fn -> [] end)
@@ -334,6 +373,30 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
 
           Req.Test.json(conn, raw_gitlab_note(99, payload["body"]))
       end
+    end
+  end
+
+  defp note_update_plug(project_ref, iid, identity) do
+    fn conn ->
+      assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer oauth-token-#{identity.gitlab_user_id}"]
+      assert conn.method == "PUT"
+      assert conn.request_path == "/api/v4/projects/#{project_ref}/issues/#{iid}/notes/45"
+
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      payload = Jason.decode!(body)
+      assert payload["body"] == "Updated body"
+
+      Req.Test.json(conn, raw_gitlab_note(45, payload["body"]))
+    end
+  end
+
+  defp note_delete_plug(project_ref, iid, identity) do
+    fn conn ->
+      assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer oauth-token-#{identity.gitlab_user_id}"]
+      assert conn.method == "DELETE"
+      assert conn.request_path == "/api/v4/projects/#{project_ref}/issues/#{iid}/notes/45"
+
+      Plug.Conn.send_resp(conn, 204, "")
     end
   end
 

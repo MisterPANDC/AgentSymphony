@@ -583,6 +583,25 @@ defmodule SymphonyElixir.Store.Postgres do
     |> Enum.map(&plain/1)
   end
 
+  @spec delete_note(String.t(), integer() | String.t()) :: :ok | {:error, term()}
+  def delete_note(issue_id, note_id) do
+    parsed_note_id = parse_int(note_id)
+
+    case parsed_note_id do
+      nil ->
+        {:error, :invalid_note_id}
+
+      note_id ->
+        from(n in IssueNote,
+          where: n.gitlab_issue_id == ^issue_id and n.note_id == ^note_id
+        )
+        |> Repo.delete_all()
+
+        append_event("gitlab_note_deleted", "gitlab_sync", %{note_id: note_id}, issue_id: issue_id)
+        :ok
+    end
+  end
+
   @spec list_events(keyword()) :: [map()]
   def list_events(filters \\ []) do
     IssueEvent

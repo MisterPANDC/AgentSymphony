@@ -89,4 +89,5 @@ export interface NoteDTO {
   system: boolean;
   internal: boolean;
   gitlab_created_at: string | null;
+  gitlab_updated_at?: string | null;
 }

@@ -65,6 +65,20 @@ defmodule Symphony.GitLab.Client do
     request(config, :post, project_path(config) <> "/issues/#{issue_iid}/notes", Keyword.merge(opts, json: %{body: body}))
   end
 
+  @spec update_issue_note(Config.t(), integer() | String.t(), integer() | String.t(), String.t(), keyword()) ::
+          {:ok, map()} | {:error, Error.t()}
+  def update_issue_note(%Config{} = config, issue_iid, note_id, body, opts \\ []) when is_binary(body) do
+    request(config, :put, project_path(config) <> "/issues/#{issue_iid}/notes/#{note_id}", Keyword.merge(opts, json: %{body: body}))
+  end
+
+  @spec delete_issue_note(Config.t(), integer() | String.t(), integer() | String.t(), keyword()) :: :ok | {:error, Error.t()}
+  def delete_issue_note(%Config{} = config, issue_iid, note_id, opts \\ []) do
+    case request(config, :delete, project_path(config) <> "/issues/#{issue_iid}/notes/#{note_id}", opts) do
+      {:ok, _body} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   @spec upload_project_file(Config.t(), map(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def upload_project_file(%Config{} = config, %{path: path, filename: filename} = upload, opts \\ [])
       when is_binary(path) and is_binary(filename) do

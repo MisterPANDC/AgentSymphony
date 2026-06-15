@@ -145,6 +145,9 @@ defmodule SymphonyElixir.Store do
   @spec list_notes(String.t()) :: [map()]
   def list_notes(issue_id), do: backend().list_notes(issue_id)
 
+  @spec delete_note(String.t(), integer() | String.t()) :: :ok | {:error, term()}
+  def delete_note(issue_id, note_id), do: backend().delete_note(issue_id, note_id)
+
   @spec list_events(keyword()) :: [map()]
   def list_events(filters \\ []), do: backend().list_events(filters)
 

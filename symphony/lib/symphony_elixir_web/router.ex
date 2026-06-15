@@ -95,6 +95,8 @@ defmodule SymphonyElixirWeb.Router do
 
     post("/api/issues", IssueController, :create)
     post("/api/issues/:id/notes", IssueController, :create_note)
+    put("/api/issues/:id/notes/:note_id", IssueController, :update_note)
+    delete("/api/issues/:id/notes/:note_id", IssueController, :delete_note)
     patch("/api/issues/:id/gitlab", IssueController, :update_gitlab)
     patch("/api/issues/:id/workflow", IssueController, :update_workflow)
 

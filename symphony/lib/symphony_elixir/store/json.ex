@@ -160,6 +160,9 @@ defmodule SymphonyElixir.Store.Json do
   @spec list_notes(String.t()) :: [map()]
   def list_notes(issue_id), do: call({:list_notes, issue_id})
 
+  @spec delete_note(String.t(), integer() | String.t()) :: :ok | {:error, term()}
+  def delete_note(issue_id, note_id), do: call({:delete_note, issue_id, note_id})
+
   @spec list_events(keyword()) :: [map()]
   def list_events(filters \\ []), do: call({:list_events, filters})
 
@@ -613,6 +616,24 @@ defmodule SymphonyElixir.Store.Json do
   end
 
   def handle_call({:list_notes, issue_id}, _from, state), do: {:reply, Map.get(state.notes, issue_id, []), state}
+
+  def handle_call({:delete_note, issue_id, note_id}, _from, state) do
+    parsed_note_id = parse_int(note_id)
+
+    if is_nil(parsed_note_id) do
+      {:reply, {:error, :invalid_note_id}, state}
+    else
+      notes = state.notes |> Map.get(issue_id, []) |> Enum.reject(&(&1.note_id == parsed_note_id))
+
+      state =
+        state
+        |> put_in([Access.key(:notes), issue_id], notes)
+        |> append_event("gitlab_note_deleted", "gitlab_sync", %{note_id: parsed_note_id}, issue_id: issue_id)
+        |> persist()
+
+      {:reply, :ok, state}
+    end
+  end
 
   def handle_call({:list_events, filters}, _from, state) do
     {:reply, apply_event_filters(state.events, filters), state}
@@ -1539,6 +1560,17 @@ defmodule SymphonyElixir.Store.Json do
 
   defp normalize_priority(priority) when is_binary(priority), do: priority |> String.trim() |> String.downcase()
   defp normalize_priority(priority), do: to_string(priority)
+
+  defp parse_int(value) when is_integer(value), do: value
+
+  defp parse_int(value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {int, ""} -> int
+      _ -> nil
+    end
+  end
+
+  defp parse_int(_value), do: nil
 
   defp cursor_key(source, cursor_name), do: "#{source}:#{cursor_name}"
 
