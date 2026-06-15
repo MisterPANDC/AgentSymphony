@@ -94,7 +94,7 @@ defmodule SymphonyElixir.Store.WorkflowTest do
     assert todo.status == "todo"
   end
 
-  test "requires confirmation and cancels active runs when leaving dispatch candidates" do
+  test "requires confirmation and cancels running agents when leaving dispatch candidates" do
     issue = seed_issue(15)
     {:ok, _todo} = Store.transition_workflow(issue.id, "todo", reason: "accepted")
     {:ok, _in_progress} = Store.transition_workflow(issue.id, "in_progress", reason: "agent dispatch")

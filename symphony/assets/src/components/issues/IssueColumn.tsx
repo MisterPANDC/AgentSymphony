@@ -123,12 +123,6 @@ export function IssueColumn({
                   blocked
                 </span>
               )}
-              {issue.activeRunId && (
-                <span className="status-pill in_progress">
-                  <StatusIcon status="in_progress" size={12} />
-                  active run
-                </span>
-              )}
             </div>
             <h3 className="line-clamp-2 text-sm font-medium leading-5 text-[#1d1d1f]">{issue.title}</h3>
           </article>

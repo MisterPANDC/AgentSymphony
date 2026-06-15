@@ -102,7 +102,6 @@ defmodule SymphonyElixirWeb.Router do
     delete("/api/issues/:id/blockers/:blocking_issue_id", WorkflowController, :remove_blocker)
 
     post("/api/agents/dispatch", AgentController, :dispatch)
-    post("/api/issues/:id/run", AgentController, :run_issue)
     post("/api/runs/:id/cancel", RunController, :cancel)
     post("/api/runs/:id/retry", RunController, :retry)
     post("/api/monitor/blocks/:id/resolve", MonitorController, :resolve_block)

@@ -46,7 +46,7 @@ defmodule SymphonyElixirWeb.WorkflowController do
         error(conn, 404, "issue_not_found", "Issue not found")
 
       {:error, :active_run_stop_confirmation_required} ->
-        error(conn, 409, "active_run_stop_confirmation_required", "Changing to this status will stop the active run. Confirm the transition to continue.")
+        error(conn, 409, "active_run_stop_confirmation_required", "Changing to this status will stop the running agent. Confirm the transition to continue.")
 
       {:error, reason} ->
         error(conn, 422, "transition_failed", inspect(reason))

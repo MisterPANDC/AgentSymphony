@@ -6,7 +6,7 @@ export function ActiveRunsTable({ runs }: { runs: AgentRunDTO[] }) {
   return (
     <section className="panel">
       <div className="panel-header">
-        <h2 className="text-sm font-semibold">Active Runs</h2>
+        <h2 className="text-sm font-semibold">Running Agents</h2>
         <span className="status-pill">{runs.length}</span>
       </div>
       <div className="overflow-auto">
@@ -22,7 +22,7 @@ export function ActiveRunsTable({ runs }: { runs: AgentRunDTO[] }) {
           </thead>
           <tbody>
             {runs.length === 0 ? (
-              <tr><td colSpan={5}>No active runs</td></tr>
+              <tr><td colSpan={5}>No running agents</td></tr>
             ) : runs.map((run) => (
               <tr key={run.id}>
                 <td><a href={run.issueWebUrl} target="_blank" rel="noreferrer">{run.issueIdentifier}</a></td>

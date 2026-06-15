@@ -25,9 +25,9 @@ export function ActiveRunStopDialog({
             <TriangleAlert size={16} />
           </div>
           <div className="confirm-dialog-body">
-            <Dialog.Title className="confirm-dialog-title">Stop active run?</Dialog.Title>
+            <Dialog.Title className="confirm-dialog-title">Stop running agent?</Dialog.Title>
             <Dialog.Description className="confirm-dialog-description">
-              Changing to {status ? formatStatusLabel(status) : "this status"} removes the issue from dispatch candidates and cancels the current active run.
+              Changing to {status ? formatStatusLabel(status) : "this status"} removes the issue from dispatch candidates and cancels the current agent run.
             </Dialog.Description>
             <div className="confirm-dialog-actions">
               <Dialog.Close className="text-button" disabled={pending}>

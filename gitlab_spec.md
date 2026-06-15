@@ -1165,10 +1165,10 @@ Transitions such as `todo -> in_progress`, `in_progress -> review`, and
 `merging -> done` are controlled by Symphony, Agent tools, or workflow rules, not
 by ordinary dashboard status selection.
 
-If a dashboard transition moves an issue with an active run into a
+If a dashboard transition moves an issue with a running agent into a
 non-dispatch-candidate status such as `triage`, `review`, or `canceled`, the UI
-MUST ask for explicit confirmation and the server MUST stop or release the active
-run.
+MUST ask for explicit confirmation and the server MUST stop or release the
+running agent run.
 
 Terminal statuses:
 
@@ -1246,11 +1246,21 @@ The dispatcher MUST NOT query Linear.
 
 When an issue is claimed:
 
-1. `issue_workflow_states.status` MUST transition to `in_progress`.
-2. `claimed_by` MUST be set to the runner identity.
-3. A new `agent_runs` row MUST be created.
-4. An `agent_run_events` row with `queued` or `starting` MUST be created.
-5. Run Monitor MUST update through PubSub.
+1. If the issue is in `todo`, `issue_workflow_states.status` MUST transition to
+   `in_progress`.
+2. If the issue is already in a dispatchable execution state such as
+   `in_progress`, `merging`, or `rework`, the claim MUST preserve the current
+   workflow status unless an explicit workflow rule or Agent tool transition
+   changes it.
+3. `claimed_by` MUST be set to the runner identity.
+4. A new `agent_runs` row MUST be created.
+5. An `agent_run_events` row with `queued` or `starting` MUST be created.
+6. Run Monitor MUST update through PubSub.
+
+The implementation MUST NOT expose a per-issue manual run path that creates a
+queued run outside the scheduler's dispatch selection. Ready work enters
+execution by becoming a dispatch candidate and then being claimed by the
+periodic scheduler or an immediate scheduler refresh.
 
 ### 10.3 Workflow prompt context
 
@@ -1439,13 +1449,16 @@ Required endpoints:
 
 ```text
 POST   /api/agents/dispatch
-POST   /api/issues/:id/run
 POST   /api/runs/:id/cancel
 POST   /api/runs/:id/retry
 GET    /api/runs
 GET    /api/runs/:id
 GET    /api/runs/:id/events
 ```
+
+`POST /api/agents/dispatch` MUST request an immediate scheduler refresh using
+the same dispatch path as the periodic poller. It MUST NOT create a per-issue
+manual run by itself.
 
 ### 11.6 Sync APIs
 
@@ -1748,9 +1761,9 @@ A conforming implementation MUST pass these checks:
 
 1. Starting Symphony with `--port` serves the React UI.
 2. The sidebar contains `Run Monitor`.
-3. `/monitor` shows runtime status, workflow file status, GitLab sync status, active runs, blocked items, and recent events.
+3. `/monitor` shows runtime status, workflow file status, GitLab sync status, running agents, blocked items, and recent events.
 4. `/monitor` provides a manual refresh action.
-5. `/api/v1/state` returns JSON with active runs and blocked items.
+5. `/api/v1/state` returns JSON with running agents and blocked items.
 6. `/api/v1/refresh` triggers refresh.
 7. A blocked Codex run appears in Run Monitor and persists after orchestrator restart.
 8. A run row links to the GitLab issue `web_url`.
@@ -1803,7 +1816,6 @@ The app shell MUST include:
 - Sidebar.
 - Global search / command palette.
 - Sync status badge.
-- Active run indicator.
 - Run Monitor alert indicator when blocks or failures exist.
 - Main content region.
 - Detail drawer region for issues and runs.
@@ -1937,8 +1949,8 @@ The frontend MUST support:
 - Keyboard navigation.
 - `Cmd/Ctrl+K` command palette.
 - Open in GitLab action.
-- Start Agent on issue.
-- Cancel active run.
+- Trigger immediate scheduler dispatch from the Agent/runtime controls.
+- Cancel running agent runs.
 - Retry failed run.
 - Create a GitLab issue from the Issues view with a selectable user-creatable workflow status.
 - Create a GitLab issue from a user-creatable Board column initialized to that column's workflow status.
@@ -2240,7 +2252,7 @@ Acceptance:
 - Users must sign in before using protected dashboard APIs.
 - Users can browse and switch GitLab projects they can access.
 - Users can change internal workflow status when their GitLab access permits it.
-- Users can start/cancel/retry runs when their GitLab access permits it.
+- Users can trigger scheduler dispatch and cancel/retry runs when their GitLab access permits it.
 - Users can open GitLab issue links.
 
 ### Phase 9 — Run Monitor
@@ -2333,7 +2345,7 @@ Required coverage:
 - Repo picker and project switcher render GitLab projects and activation state.
 - Issue list renders workflow status from Symphony DTO.
 - Status change calls Symphony workflow API, not GitLab API.
-- Run Monitor renders active runs.
+- Run Monitor renders running agents.
 - Run Monitor renders blocked queue.
 - Run Monitor renders sync errors.
 - Run Monitor links to GitLab issue URLs.
@@ -2432,7 +2444,7 @@ A migration is conforming only when every item below is true:
 22. Auth gate, repo picker, user menu, and project switcher exist.
 23. Issue list, board, detail drawer, Agent panel, run history, and settings exist.
 24. Run Monitor exists as a top-level frontend area.
-25. Run Monitor includes runtime overview, sync health, active runs, blocked queue, workspace/log info, manual refresh, and operational JSON debug info.
+25. Run Monitor includes runtime overview, sync health, running agents, blocked queue, workspace/log info, manual refresh, and operational JSON debug info.
 26. `/api/v1/state`, `/api/v1/:issue_identifier`, and `/api/v1/refresh` exist for operational debugging.
 27. Run Monitor issue identifiers link to GitLab `web_url` when the URL is `http` or `https`.
 28. Token redaction tests pass.
