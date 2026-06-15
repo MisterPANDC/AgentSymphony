@@ -57,7 +57,7 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
                     {(data?.notes ?? []).map((note) => (
                       <div key={note.id} className="issue-card text-sm">
                         <div className="mb-1 text-[11px] text-[#686b73]">{note.author?.name ?? "GitLab"}</div>
-                        <p className="whitespace-pre-wrap">{note.body}</p>
+                        <NoteBody body={note.body} issueId={issue.id} />
                       </div>
                     ))}
                   </div>
@@ -69,6 +69,85 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
       </Dialog.Portal>
     </Dialog.Root>
   );
+}
+
+function NoteBody({ body, issueId }: { body: string; issueId: string }) {
+  return <div className="break-words text-sm leading-6 text-[#2f333b]">{renderMarkdown(body, issueId)}</div>;
+}
+
+function renderMarkdown(body: string, issueId: string) {
+  const nodes: JSX.Element[] = [];
+  const pattern = /(!?)\[([^\]]*)\]\(([^)\s]+)\)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(body))) {
+    if (match.index > lastIndex) {
+      nodes.push(
+        <span key={`text-${lastIndex}`} className="whitespace-pre-wrap">
+          {body.slice(lastIndex, match.index)}
+        </span>
+      );
+    }
+
+    const [raw, imageMarker, label, url] = match;
+    const resolvedUrl = resolveMarkdownUrl(url, issueId);
+    if (safeMarkdownUrl(resolvedUrl)) {
+      nodes.push(imageMarker ? renderImage(label, resolvedUrl, match.index) : renderLink(label, resolvedUrl, match.index));
+    } else {
+      nodes.push(
+        <span key={`unsafe-${match.index}`} className="whitespace-pre-wrap">
+          {raw}
+        </span>
+      );
+    }
+
+    lastIndex = match.index + raw.length;
+  }
+
+  if (lastIndex < body.length) {
+    nodes.push(
+      <span key={`text-${lastIndex}`} className="whitespace-pre-wrap">
+        {body.slice(lastIndex)}
+      </span>
+    );
+  }
+
+  return nodes.length > 0 ? nodes : <span className="whitespace-pre-wrap">{body}</span>;
+}
+
+function renderImage(label: string, url: string, key: number) {
+  const external = isExternalUrl(url);
+  return (
+    <a key={`image-${key}`} className="mt-2 block w-fit max-w-full" href={url} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined}>
+      <img className="max-h-72 max-w-full rounded-md border border-[#dedfe4] object-contain" src={url} alt={label || "attachment"} />
+    </a>
+  );
+}
+
+function renderLink(label: string, url: string, key: number) {
+  const external = isExternalUrl(url);
+  return (
+    <a key={`link-${key}`} className="text-[#2563eb] underline-offset-2 hover:underline" href={url} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined}>
+      {label || url}
+    </a>
+  );
+}
+
+function safeMarkdownUrl(url: string) {
+  return url.startsWith("/api/issues/") || isExternalUrl(url);
+}
+
+function resolveMarkdownUrl(url: string, issueId: string) {
+  const uploadMatch = url.match(/^\/uploads\/([0-9a-fA-F]{32})\/(.+)$/);
+  if (!uploadMatch) return url;
+
+  const [, secret, filename] = uploadMatch;
+  return `/api/issues/${issueId}/uploads/${encodeURIComponent(secret)}/${encodeURIComponent(decodeURIComponent(filename))}`;
+}
+
+function isExternalUrl(url: string) {
+  return url.startsWith("https://") || url.startsWith("http://");
 }
 
 function IssueTitleEditor({ issue }: { issue: IssueDTO }) {

@@ -40,6 +40,7 @@ export function IssueBoard() {
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pendingTransition, setPendingTransition] = useState<PendingTransition | null>(null);
+  const [collapsedStatuses, setCollapsedStatuses] = useState<WorkflowStatus[]>([]);
   const transitionMutation = useMutation({
     mutationFn: ({ issue, status, confirmStopRun }: PendingTransition & { confirmStopRun?: boolean }) =>
       updateIssueWorkflow(issue.id, status, "changed from board drag", { confirmStopRun }),
@@ -204,24 +205,37 @@ export function IssueBoard() {
     return Boolean(issue.activeRunId) && !isDispatchCandidateStatus(status);
   }
 
+  function toggleColumn(status: WorkflowStatus) {
+    setCollapsedStatuses((current) => (current.includes(status) ? current.filter((item) => item !== status) : [...current, status]));
+  }
+
   return (
     <>
       {notice && <div className="board-drag-notice">{notice}</div>}
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-        {workflowStatuses.map((status) => (
-          <IssueColumn
-            key={status}
-            status={status}
-            issues={issues.filter((issue) => issue.workflowStatus === status)}
-            draggingIssue={draggingIssue}
-            dropState={dropState(status)}
-            isDragOver={dragOverStatus === status}
-            dragDisabled={transitionMutation.isPending}
-            onIssueCreated={openIssue}
-            onIssueOpen={openIssue}
-            onIssuePointerDown={onIssuePointerDown}
-          />
-        ))}
+      <div className="board-scroll-shell">
+        <div className="board-lane-grid">
+          {workflowStatuses.map((status) => {
+            const statusIssues = issues.filter((issue) => issue.workflowStatus === status);
+            const isCollapsed = collapsedStatuses.includes(status);
+
+            return (
+              <IssueColumn
+                key={status}
+                status={status}
+                issues={statusIssues}
+                draggingIssue={draggingIssue}
+                dropState={dropState(status)}
+                isDragOver={dragOverStatus === status}
+                dragDisabled={transitionMutation.isPending}
+                collapsed={isCollapsed}
+                onCollapsedChange={() => toggleColumn(status)}
+                onIssueCreated={openIssue}
+                onIssueOpen={openIssue}
+                onIssuePointerDown={onIssuePointerDown}
+              />
+            );
+          })}
+        </div>
       </div>
       {draggingIssue && dragPreview && (
         <div

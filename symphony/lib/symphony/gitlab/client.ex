@@ -65,6 +65,45 @@ defmodule Symphony.GitLab.Client do
     request(config, :post, project_path(config) <> "/issues/#{issue_iid}/notes", Keyword.merge(opts, json: %{body: body}))
   end
 
+  @spec upload_project_file(Config.t(), map(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def upload_project_file(%Config{} = config, %{path: path, filename: filename} = upload, opts \\ [])
+      when is_binary(path) and is_binary(filename) do
+    content_type = Map.get(upload, :content_type) || "application/octet-stream"
+
+    request(
+      config,
+      :post,
+      project_path(config) <> "/uploads",
+      Keyword.merge(opts, form_multipart: [file: {File.stream!(path), filename: filename, content_type: content_type}])
+    )
+  end
+
+  @spec delete_project_upload(Config.t(), String.t(), String.t(), keyword()) :: :ok | {:error, Error.t()}
+  def delete_project_upload(%Config{} = config, secret, filename, opts \\ []) when is_binary(secret) and is_binary(filename) do
+    path = project_path(config) <> "/uploads/#{URI.encode(secret, &URI.char_unreserved?/1)}/#{URI.encode(filename, &URI.char_unreserved?/1)}"
+
+    case request(config, :delete, path, opts) do
+      {:ok, _body} -> :ok
+      {:error, %Error{type: :not_found}} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec download_project_upload(Config.t(), String.t(), String.t(), keyword()) ::
+          {:ok, %{body: binary(), content_type: String.t() | nil, filename: String.t()}} | {:error, Error.t()}
+  def download_project_upload(%Config{} = config, secret, filename, opts \\ []) when is_binary(secret) and is_binary(filename) do
+    path = project_path(config) <> "/uploads/#{URI.encode(secret, &URI.char_unreserved?/1)}/#{URI.encode(filename, &URI.char_unreserved?/1)}"
+
+    with {:ok, %Req.Response{} = response} <- request(config, :get, path, Keyword.merge(opts, raw_response: true)) do
+      {:ok,
+       %{
+         body: response.body,
+         content_type: first_header(response, "content-type"),
+         filename: filename
+       }}
+    end
+  end
+
   @spec validate(Config.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def validate(%Config{} = config, opts \\ []) do
     with :ok <- validate_api_root(config),
@@ -130,7 +169,7 @@ defmodule Symphony.GitLab.Client do
 
       req_opts =
         opts
-        |> Keyword.take([:params, :json])
+        |> Keyword.take([:params, :json, :form_multipart])
         |> Keyword.merge(req_opts)
         |> Keyword.merge(req_extra_options())
 

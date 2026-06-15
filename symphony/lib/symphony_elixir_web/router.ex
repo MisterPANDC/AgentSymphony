@@ -64,6 +64,7 @@ defmodule SymphonyElixirWeb.Router do
     get("/api/issues", IssueController, :index)
     get("/api/issues/:id", IssueController, :show)
     get("/api/issues/:id/notes", IssueController, :notes)
+    get("/api/issues/:id/uploads/:secret/:filename", IssueController, :upload)
     get("/api/issues/:id/events", IssueController, :events)
 
     get("/api/workflow/statuses", WorkflowController, :statuses)
