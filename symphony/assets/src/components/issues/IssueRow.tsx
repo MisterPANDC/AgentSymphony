@@ -4,7 +4,7 @@ import { runIssue } from "../../api/agents";
 import type { IssueDTO } from "../../types/issue";
 import { GitLabMeta } from "./GitLabMeta";
 import { IssueLabelList } from "./IssueLabelEditor";
-import { StatusIcon } from "./StatusIcon";
+import { formatStatusLabel, StatusIcon } from "./StatusIcon";
 
 export function IssueRow({ issue, onOpen }: { issue: IssueDTO; onOpen: (issue: IssueDTO) => void }) {
   const queryClient = useQueryClient();
@@ -16,6 +16,7 @@ export function IssueRow({ issue, onOpen }: { issue: IssueDTO; onOpen: (issue: I
     }
   });
   const runDisabled = issue.isBlocked || runMutation.isPending;
+  const previewDescription = issue.descriptionPreview || issue.description || "No description provided.";
 
   return (
     <article className="issue-row" role="listitem">
@@ -50,6 +51,27 @@ export function IssueRow({ issue, onOpen }: { issue: IssueDTO; onOpen: (issue: I
         <button className="icon-button" title={issue.isBlocked ? "Issue is blocked" : "Start agent"} disabled={runDisabled} onClick={() => runMutation.mutate()}>
           <Play size={14} />
         </button>
+      </div>
+      <div className="issue-row-preview" aria-hidden="true">
+        <div className="issue-row-preview-header">
+          <span className="issue-row-preview-id">#{issue.iid}</span>
+          <span className="issue-row-preview-status">
+            <StatusIcon status={issue.workflowStatus} size={13} />
+            {formatStatusLabel(issue.workflowStatus)}
+          </span>
+        </div>
+        <div className="issue-row-preview-title">{issue.title}</div>
+        <p>{previewDescription}</p>
+        <div className="issue-row-preview-footer">
+          <IssueLabelList labels={issue.labels} limit={3} emptyLabel="No labels" />
+          {(issue.isBlocked || issue.activeRunId) && (
+            <span className="issue-row-preview-flags">
+              {issue.isBlocked ? "Blocked" : null}
+              {issue.isBlocked && issue.activeRunId ? " / " : null}
+              {issue.activeRunId ? "Active run" : null}
+            </span>
+          )}
+        </div>
       </div>
     </article>
   );

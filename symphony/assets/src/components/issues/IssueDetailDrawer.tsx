@@ -1,6 +1,6 @@
 import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Check, ExternalLink, LoaderCircle, X } from "lucide-react";
+import { Check, ExternalLink, LoaderCircle, Maximize2, Minimize2, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getIssueNotes, updateIssueTitle } from "../../api/issues";
 import type { IssueDTO } from "../../types/issue";
@@ -12,20 +12,33 @@ import { StatusSelect } from "./StatusSelect";
 import { StatusIcon } from "./StatusIcon";
 
 export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; onClose: () => void }) {
+  const [expanded, setExpanded] = useState(false);
   const { data } = useQuery({
     queryKey: ["issue-notes", issue?.id],
     queryFn: () => getIssueNotes(issue!.id),
     enabled: Boolean(issue)
   });
 
+  useEffect(() => {
+    setExpanded(false);
+  }, [issue?.id]);
+
   return (
-    <Dialog.Root open={Boolean(issue)} onOpenChange={(open) => !open && onClose()}>
+    <Dialog.Root
+      open={Boolean(issue)}
+      onOpenChange={(open) => {
+        if (!open) {
+          setExpanded(false);
+          onClose();
+        }
+      }}
+    >
       <Dialog.Portal>
-        <Dialog.Overlay className="drawer-overlay" />
-        <Dialog.Content className="drawer-content" onEscapeKeyDown={keepDrawerOpenForLabelEditing}>
+        <Dialog.Overlay className="issue-detail-overlay" />
+        <Dialog.Content className={`issue-detail-dialog${expanded ? " is-expanded" : ""}`} onEscapeKeyDown={keepDrawerOpenForLabelEditing}>
           {issue && (
-            <div className="space-y-5">
-              <div className="flex items-start justify-between gap-3">
+            <div className="issue-detail-dialog-body">
+              <div className="issue-detail-dialog-header">
                 <div className="min-w-0 flex-1">
                   <IssueTitleEditor issue={issue} />
                   <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -39,9 +52,20 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
                     )}
                   </div>
                 </div>
-                <Dialog.Close className="dialog-close-button" title="Close">
-                  <X size={15} />
-                </Dialog.Close>
+                <div className="issue-detail-dialog-actions">
+                  <button
+                    className="dialog-close-button"
+                    type="button"
+                    aria-label={expanded ? "Restore issue dialog" : "Expand issue dialog"}
+                    title={expanded ? "Restore" : "Expand"}
+                    onClick={() => setExpanded((value) => !value)}
+                  >
+                    {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                  </button>
+                  <Dialog.Close className="dialog-close-button" title="Close">
+                    <X size={15} />
+                  </Dialog.Close>
+                </div>
               </div>
               <IssueLabelEditor issue={issue} />
               <section>
