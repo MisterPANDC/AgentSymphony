@@ -1,6 +1,6 @@
 import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Check, ExternalLink, LoaderCircle, X } from "lucide-react";
+import { Check, ExternalLink, LoaderCircle, Maximize2, Minimize2, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getIssueNotes, updateIssueTitle } from "../../api/issues";
 import type { IssueDTO } from "../../types/issue";
@@ -12,20 +12,33 @@ import { StatusSelect } from "./StatusSelect";
 import { StatusIcon } from "./StatusIcon";
 
 export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; onClose: () => void }) {
+  const [expanded, setExpanded] = useState(false);
   const { data } = useQuery({
     queryKey: ["issue-notes", issue?.id],
     queryFn: () => getIssueNotes(issue!.id),
     enabled: Boolean(issue)
   });
 
+  useEffect(() => {
+    setExpanded(false);
+  }, [issue?.id]);
+
   return (
-    <Dialog.Root open={Boolean(issue)} onOpenChange={(open) => !open && onClose()}>
+    <Dialog.Root
+      open={Boolean(issue)}
+      onOpenChange={(open) => {
+        if (!open) {
+          setExpanded(false);
+          onClose();
+        }
+      }}
+    >
       <Dialog.Portal>
-        <Dialog.Overlay className="drawer-overlay" />
-        <Dialog.Content className="drawer-content" onEscapeKeyDown={keepDrawerOpenForLabelEditing}>
+        <Dialog.Overlay className="issue-detail-overlay" />
+        <Dialog.Content className={`issue-detail-dialog${expanded ? " is-expanded" : ""}`} onEscapeKeyDown={keepDrawerOpenForLabelEditing}>
           {issue && (
-            <div className="space-y-5">
-              <div className="flex items-start justify-between gap-3">
+            <div className="issue-detail-dialog-body">
+              <div className="issue-detail-dialog-header">
                 <div className="min-w-0 flex-1">
                   <IssueTitleEditor issue={issue} />
                   <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -39,9 +52,20 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
                     )}
                   </div>
                 </div>
-                <Dialog.Close className="dialog-close-button" title="Close">
-                  <X size={15} />
-                </Dialog.Close>
+                <div className="issue-detail-dialog-actions">
+                  <button
+                    className="dialog-close-button"
+                    type="button"
+                    aria-label={expanded ? "Restore issue dialog" : "Expand issue dialog"}
+                    title={expanded ? "Restore" : "Expand"}
+                    onClick={() => setExpanded((value) => !value)}
+                  >
+                    {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                  </button>
+                  <Dialog.Close className="dialog-close-button" title="Close">
+                    <X size={15} />
+                  </Dialog.Close>
+                </div>
               </div>
               <IssueLabelEditor issue={issue} />
               <section>
@@ -57,7 +81,7 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
                     {(data?.notes ?? []).map((note) => (
                       <div key={note.id} className="issue-card text-sm">
                         <div className="mb-1 text-[11px] text-[#686b73]">{note.author?.name ?? "GitLab"}</div>
-                        <p className="whitespace-pre-wrap">{note.body}</p>
+                        <NoteBody body={note.body} issueId={issue.id} />
                       </div>
                     ))}
                   </div>
@@ -69,6 +93,85 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
       </Dialog.Portal>
     </Dialog.Root>
   );
+}
+
+function NoteBody({ body, issueId }: { body: string; issueId: string }) {
+  return <div className="break-words text-sm leading-6 text-[#2f333b]">{renderMarkdown(body, issueId)}</div>;
+}
+
+function renderMarkdown(body: string, issueId: string) {
+  const nodes: JSX.Element[] = [];
+  const pattern = /(!?)\[([^\]]*)\]\(([^)\s]+)\)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(body))) {
+    if (match.index > lastIndex) {
+      nodes.push(
+        <span key={`text-${lastIndex}`} className="whitespace-pre-wrap">
+          {body.slice(lastIndex, match.index)}
+        </span>
+      );
+    }
+
+    const [raw, imageMarker, label, url] = match;
+    const resolvedUrl = resolveMarkdownUrl(url, issueId);
+    if (safeMarkdownUrl(resolvedUrl)) {
+      nodes.push(imageMarker ? renderImage(label, resolvedUrl, match.index) : renderLink(label, resolvedUrl, match.index));
+    } else {
+      nodes.push(
+        <span key={`unsafe-${match.index}`} className="whitespace-pre-wrap">
+          {raw}
+        </span>
+      );
+    }
+
+    lastIndex = match.index + raw.length;
+  }
+
+  if (lastIndex < body.length) {
+    nodes.push(
+      <span key={`text-${lastIndex}`} className="whitespace-pre-wrap">
+        {body.slice(lastIndex)}
+      </span>
+    );
+  }
+
+  return nodes.length > 0 ? nodes : <span className="whitespace-pre-wrap">{body}</span>;
+}
+
+function renderImage(label: string, url: string, key: number) {
+  const external = isExternalUrl(url);
+  return (
+    <a key={`image-${key}`} className="mt-2 block w-fit max-w-full" href={url} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined}>
+      <img className="max-h-72 max-w-full rounded-md border border-[#dedfe4] object-contain" src={url} alt={label || "attachment"} />
+    </a>
+  );
+}
+
+function renderLink(label: string, url: string, key: number) {
+  const external = isExternalUrl(url);
+  return (
+    <a key={`link-${key}`} className="text-[#2563eb] underline-offset-2 hover:underline" href={url} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined}>
+      {label || url}
+    </a>
+  );
+}
+
+function safeMarkdownUrl(url: string) {
+  return url.startsWith("/api/issues/") || isExternalUrl(url);
+}
+
+function resolveMarkdownUrl(url: string, issueId: string) {
+  const uploadMatch = url.match(/^\/uploads\/([0-9a-fA-F]{32})\/(.+)$/);
+  if (!uploadMatch) return url;
+
+  const [, secret, filename] = uploadMatch;
+  return `/api/issues/${issueId}/uploads/${encodeURIComponent(secret)}/${encodeURIComponent(decodeURIComponent(filename))}`;
+}
+
+function isExternalUrl(url: string) {
+  return url.startsWith("https://") || url.startsWith("http://");
 }
 
 function IssueTitleEditor({ issue }: { issue: IssueDTO }) {

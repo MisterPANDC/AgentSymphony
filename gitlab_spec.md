@@ -158,8 +158,8 @@ Required behavior:
 - The token MUST be encrypted at rest.
 - The token MUST be returned to the frontend only as `configured` or `missing`.
 - Background issue/note sync MUST use the Project Access Token.
-- Agent-created GitLab notes, issue close/reopen, and follow-up issue creation MUST use the Project Access Token.
-- User-initiated issue edits and comments from the UI MUST use the signed-in user's OAuth token.
+- Agent-created GitLab notes, issue note attachments, issue close/reopen, and follow-up issue creation MUST use the Project Access Token.
+- User-initiated issue edits, comments, and comment attachments from the UI MUST use the signed-in user's OAuth token.
 - If a selected project has no Project Access Token, project browsing MAY work from already synced data, but sync and Agent GitLab writes MUST fail clearly with `project_access_token_missing`.
 
 This boundary is intentional: Project Access Tokens give background sync and Agents a stable project-scoped credential without borrowing one user's OAuth token. Project Access Tokens SHOULD be scoped to the minimum GitLab permissions the project needs.
@@ -960,9 +960,22 @@ The implementation MUST use:
 ```text
 GET /projects/:id/issues/:issue_iid/notes
 POST /projects/:id/issues/:issue_iid/notes
+POST /projects/:id/uploads
+GET /projects/:id/uploads/:secret/:filename
+DELETE /projects/:id/uploads/:secret/:filename
 ```
 
 User-created comments MUST use the signed-in user's OAuth token. Agent-created comments MUST be posted through `create_issue_note/3` with the selected project's Project Access Token and then inserted into local `gitlab_issue_notes` after GitLab returns the created note.
+
+Comment attachments MUST follow GitLab's Markdown upload model:
+
+1. Symphony MUST upload files to GitLab project Markdown uploads only as part of a comment submission, not when the user merely selects or drags files into the composer.
+2. Symphony MUST append the Markdown returned by GitLab to the note body before creating the GitLab note.
+3. Symphony MUST rewrite GitLab upload Markdown to a Symphony-authenticated proxy URL before storing or returning user-created note bodies.
+4. If upload succeeds but GitLab deterministically rejects note creation with a 4xx response, Symphony MUST best-effort delete the just-created upload to avoid orphan files.
+5. If note creation fails with an ambiguous network, rate-limit, or server error, Symphony MUST NOT delete the upload automatically because the note may have been created even though Symphony did not receive the response.
+
+Attachment download MUST use a Symphony-authenticated proxy. The proxy MUST require normal issue read access, use the signed-in user's OAuth token to fetch the GitLab upload, and only serve uploads referenced by the issue description or notes already visible through Symphony. Symphony SHOULD NOT maintain a separate long-lived attachment object store unless a later archival requirement explicitly needs it.
 
 ### 8.4 User-created issues from UI
 
@@ -1421,6 +1434,7 @@ Required endpoints:
 GET    /api/issues
 GET    /api/issues/:id
 GET    /api/issues/:id/notes
+GET    /api/issues/:id/uploads/:secret/:filename
 POST   /api/issues/:id/notes
 PATCH  /api/issues/:id/gitlab
 PATCH  /api/issues/:id/workflow

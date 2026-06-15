@@ -43,6 +43,19 @@ defmodule Symphony.GitLab.ClientTest do
     assert issue["title"] == "Follow-up"
   end
 
+  test "uploads and downloads project markdown uploads" do
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: upload_plug())
+    path = Path.join(System.tmp_dir!(), "symphony-upload-client-test.txt")
+    File.write!(path, "attachment body")
+
+    assert {:ok, upload} = Client.upload_project_file(config(), %{path: path, filename: "proof.txt", content_type: "text/plain"})
+    assert upload["markdown"] == "[proof](/uploads/0123456789abcdef0123456789abcdef/proof.txt)"
+
+    assert {:ok, downloaded} = Client.download_project_upload(config(), "0123456789abcdef0123456789abcdef", "proof.txt")
+    assert downloaded.body == "downloaded attachment"
+    assert downloaded.content_type =~ "text/plain"
+  end
+
   defp config do
     %Config{
       gitlab_base_url: "https://gitlab.example.com",
@@ -103,6 +116,29 @@ defmodule Symphony.GitLab.ClientTest do
         "labels" => ["follow-up", "backend"],
         "assignees" => []
       })
+    end
+  end
+
+  defp upload_plug do
+    fn conn ->
+      case {conn.method, conn.request_path} do
+        {"POST", "/api/v4/projects/123/uploads"} ->
+          assert Plug.Conn.get_req_header(conn, "private-token") == ["test-token"]
+          assert %Plug.Upload{filename: "proof.txt", content_type: "text/plain"} = conn.body_params["file"]
+
+          Req.Test.json(conn, %{
+            "id" => 5,
+            "alt" => "proof",
+            "url" => "/uploads/0123456789abcdef0123456789abcdef/proof.txt",
+            "full_path" => "/-/project/123/uploads/0123456789abcdef0123456789abcdef/proof.txt",
+            "markdown" => "[proof](/uploads/0123456789abcdef0123456789abcdef/proof.txt)"
+          })
+
+        {"GET", "/api/v4/projects/123/uploads/0123456789abcdef0123456789abcdef/proof.txt"} ->
+          conn
+          |> Plug.Conn.put_resp_content_type("text/plain")
+          |> Plug.Conn.send_resp(200, "downloaded attachment")
+      end
     end
   end
 end

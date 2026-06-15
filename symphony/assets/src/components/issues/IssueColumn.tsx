@@ -60,10 +60,7 @@ export function IssueColumn({
   }
 
   return (
-    <section
-      className={columnClasses}
-      data-workflow-status={status}
-    >
+    <section className={columnClasses} data-workflow-status={status}>
       <div className="board-column-header">
         <h2 className="board-column-title">
           <StatusIcon status={status} size={14} />
@@ -127,18 +124,6 @@ export function IssueColumn({
             <h3 className="line-clamp-2 text-sm font-medium leading-5 text-[#1d1d1f]">{issue.title}</h3>
           </article>
         ))}
-        {canCreateIssue && (
-          <CreateIssueDialog
-            defaultStatus={status}
-            onCreated={onIssueCreated}
-            trigger={
-              <button className="board-add-issue-button" type="button">
-                <Plus size={14} />
-                <span>New issue</span>
-              </button>
-            }
-          />
-        )}
       </div>
     </section>
   );

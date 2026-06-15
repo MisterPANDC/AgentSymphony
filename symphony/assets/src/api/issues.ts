@@ -40,7 +40,18 @@ export function updateIssueTitle(id: string, title: string) {
   });
 }
 
-export function createIssueNote(id: string, body: string) {
+export function createIssueNote(id: string, body: string, files: File[] = []) {
+  if (files.length > 0) {
+    const form = new FormData();
+    form.set("body", body);
+    files.forEach((file) => form.append("files", file));
+
+    return api<{ notes: NoteDTO[] }>(`/api/issues/${id}/notes`, {
+      method: "POST",
+      body: form
+    });
+  }
+
   return api<{ notes: NoteDTO[] }>(`/api/issues/${id}/notes`, {
     method: "POST",
     body: JSON.stringify({ body })

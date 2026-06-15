@@ -25,6 +25,7 @@ assets/dist/
 symphony/priv/static/assets/
 symphony/priv/static/index.html
 symphony/assets/node_modules/
+symphony/assets/.vite-cache/
 symphony/assets/dist/
 symphony/legacy_test/
 

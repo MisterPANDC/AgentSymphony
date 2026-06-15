@@ -145,6 +145,123 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
     assert IssueLifecycle.reopened_label() in payload["issue"]["labels"]
   end
 
+  test "creates an issue note with attachments through user OAuth", %{identity: identity, iid: iid, project: project} do
+    issue = seed_issue(iid, project)
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: note_attachment_plug(project.project_ref, iid, identity))
+    upload = plug_upload("proof.txt", "attachment body", "text/plain")
+
+    conn =
+      :post
+      |> conn("/api/issues/#{issue.id}/notes")
+      |> assign_user(identity, project)
+
+    conn = IssueController.create_note(conn, %{"id" => issue.id, "body" => "See attachment", "files" => upload})
+    assert conn.status == 200
+
+    [note] = Store.list_notes(issue.id)
+    assert note.body =~ "See attachment"
+    assert note.body =~ "/api/issues/#{issue.id}/uploads/0123456789abcdef0123456789abcdef/proof.txt"
+  end
+
+  test "creates an issue note with only attachments", %{identity: identity, iid: iid, project: project} do
+    issue = seed_issue(iid, project)
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: note_attachment_plug(project.project_ref, iid, identity))
+    upload = plug_upload("proof.txt", "attachment body", "text/plain")
+
+    conn =
+      :post
+      |> conn("/api/issues/#{issue.id}/notes")
+      |> assign_user(identity, project)
+
+    conn = IssueController.create_note(conn, %{"id" => issue.id, "files[]" => [upload]})
+    assert conn.status == 200
+
+    [note] = Store.list_notes(issue.id)
+    assert note.body == "![proof](/api/issues/#{issue.id}/uploads/0123456789abcdef0123456789abcdef/proof.txt)"
+  end
+
+  test "deletes already uploaded attachments when a later attachment upload fails", %{identity: identity, iid: iid, project: project} do
+    issue = seed_issue(iid, project)
+    {:ok, calls} = Agent.start_link(fn -> [] end)
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: second_upload_failure_plug(project.project_ref, identity, calls))
+
+    conn =
+      :post
+      |> conn("/api/issues/#{issue.id}/notes")
+      |> assign_user(identity, project)
+
+    conn =
+      IssueController.create_note(conn, %{
+        "id" => issue.id,
+        "body" => "Two files",
+        "files" => [
+          plug_upload("first.txt", "first body", "text/plain"),
+          plug_upload("second.txt", "second body", "text/plain")
+        ]
+      })
+
+    assert conn.status == 422
+    assert Agent.get(calls, & &1) == [:delete_first, :upload_second, :upload_first]
+    assert Store.list_notes(issue.id) == []
+  end
+
+  test "deletes uploaded attachments when note creation is rejected by GitLab", %{identity: identity, iid: iid, project: project} do
+    issue = seed_issue(iid, project)
+    {:ok, calls} = Agent.start_link(fn -> [] end)
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: note_create_failure_plug(project.project_ref, iid, identity, calls))
+    upload = plug_upload("cleanup.txt", "temporary body", "text/plain")
+
+    conn =
+      :post
+      |> conn("/api/issues/#{issue.id}/notes")
+      |> assign_user(identity, project)
+
+    conn = IssueController.create_note(conn, %{"id" => issue.id, "body" => "Will fail", "files" => upload})
+    assert conn.status == 422
+    assert Agent.get(calls, & &1) == [:delete_upload, :create_note, :upload]
+  end
+
+  test "keeps uploaded attachments when note creation result is ambiguous", %{identity: identity, iid: iid, project: project} do
+    issue = seed_issue(iid, project)
+    {:ok, calls} = Agent.start_link(fn -> [] end)
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: ambiguous_note_failure_plug(project.project_ref, iid, identity, calls))
+    upload = plug_upload("maybe-linked.txt", "temporary body", "text/plain")
+
+    conn =
+      :post
+      |> conn("/api/issues/#{issue.id}/notes")
+      |> assign_user(identity, project)
+
+    conn = IssueController.create_note(conn, %{"id" => issue.id, "body" => "May have posted", "files" => upload})
+    assert conn.status == 422
+    assert Agent.get(calls, & &1) == [:create_note, :upload]
+  end
+
+  test "proxies only attachments referenced by the issue", %{identity: identity, iid: iid, project: project} do
+    issue = seed_issue(iid, project)
+    secret = "0123456789abcdef0123456789abcdef"
+    Store.upsert_note(issue.id, note_attrs(45, "![proof](/uploads/#{secret}/proof.txt)"))
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: upload_proxy_plug(project.project_ref, iid, identity, secret))
+
+    conn =
+      :get
+      |> conn("/api/issues/#{issue.id}/uploads/#{secret}/proof.txt")
+      |> assign_user(identity, project)
+
+    conn = IssueController.upload(conn, %{"id" => issue.id, "secret" => secret, "filename" => "proof.txt"})
+    assert conn.status == 200
+    assert conn.resp_body == "proxied attachment"
+    assert Plug.Conn.get_resp_header(conn, "content-type") == ["text/plain; charset=utf-8"]
+
+    conn =
+      :get
+      |> conn("/api/issues/#{issue.id}/uploads/#{secret}/other.txt")
+      |> assign_user(identity, project)
+
+    conn = IssueController.upload(conn, %{"id" => issue.id, "secret" => secret, "filename" => "other.txt"})
+    assert conn.status == 404
+  end
+
   defp create_issue_plug(project_ref, project_id, iid, token) do
     fn conn ->
       assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer #{token}"]
@@ -192,6 +309,150 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
     end
   end
 
+  defp note_attachment_plug(project_ref, iid, identity) do
+    fn conn ->
+      assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer oauth-token-#{identity.gitlab_user_id}"]
+      upload_path = "/api/v4/projects/#{project_ref}/uploads"
+      notes_path = "/api/v4/projects/#{project_ref}/issues/#{iid}/notes"
+
+      case {conn.method, conn.request_path} do
+        {"POST", ^upload_path} ->
+          assert %Plug.Upload{filename: "proof.txt", content_type: "text/plain"} = conn.body_params["file"]
+
+          Req.Test.json(conn, %{
+            "id" => 11,
+            "alt" => "proof",
+            "url" => "/uploads/0123456789abcdef0123456789abcdef/proof.txt",
+            "markdown" => "![proof](/uploads/0123456789abcdef0123456789abcdef/proof.txt)"
+          })
+
+        {"POST", ^notes_path} ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          payload = Jason.decode!(body)
+          assert payload["body"] =~ "/api/issues/"
+          assert payload["body"] =~ "/uploads/0123456789abcdef0123456789abcdef/proof.txt"
+
+          Req.Test.json(conn, raw_gitlab_note(99, payload["body"]))
+      end
+    end
+  end
+
+  defp second_upload_failure_plug(project_ref, identity, calls) do
+    fn conn ->
+      assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer oauth-token-#{identity.gitlab_user_id}"]
+      upload_path = "/api/v4/projects/#{project_ref}/uploads"
+      delete_path = "/api/v4/projects/#{project_ref}/uploads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/first.txt"
+
+      case {conn.method, conn.request_path} do
+        {"POST", ^upload_path} ->
+          case conn.body_params["file"] do
+            %Plug.Upload{filename: "first.txt"} ->
+              Agent.update(calls, &[:upload_first | &1])
+
+              Req.Test.json(conn, %{
+                "id" => 21,
+                "alt" => "first",
+                "url" => "/uploads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/first.txt",
+                "markdown" => "[first](/uploads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/first.txt)"
+              })
+
+            %Plug.Upload{filename: "second.txt"} ->
+              Agent.update(calls, &[:upload_second | &1])
+
+              conn
+              |> Plug.Conn.put_status(500)
+              |> Req.Test.json(%{message: "upload failed"})
+          end
+
+        {"DELETE", ^delete_path} ->
+          Agent.update(calls, &[:delete_first | &1])
+          Plug.Conn.send_resp(conn, 204, "")
+      end
+    end
+  end
+
+  defp note_create_failure_plug(project_ref, iid, identity, calls) do
+    fn conn ->
+      assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer oauth-token-#{identity.gitlab_user_id}"]
+      upload_path = "/api/v4/projects/#{project_ref}/uploads"
+      notes_path = "/api/v4/projects/#{project_ref}/issues/#{iid}/notes"
+      delete_path = "/api/v4/projects/#{project_ref}/uploads/fedcba9876543210fedcba9876543210/cleanup.txt"
+
+      case {conn.method, conn.request_path} do
+        {"POST", ^upload_path} ->
+          Agent.update(calls, &[:upload | &1])
+
+          Req.Test.json(conn, %{
+            "id" => 12,
+            "alt" => "cleanup",
+            "url" => "/uploads/fedcba9876543210fedcba9876543210/cleanup.txt",
+            "markdown" => "[cleanup](/uploads/fedcba9876543210fedcba9876543210/cleanup.txt)"
+          })
+
+        {"POST", ^notes_path} ->
+          Agent.update(calls, &[:create_note | &1])
+
+          conn
+          |> Plug.Conn.put_status(400)
+          |> Req.Test.json(%{message: "body is invalid"})
+
+        {"DELETE", ^delete_path} ->
+          Agent.update(calls, &[:delete_upload | &1])
+          Plug.Conn.send_resp(conn, 204, "")
+      end
+    end
+  end
+
+  defp ambiguous_note_failure_plug(project_ref, iid, identity, calls) do
+    fn conn ->
+      assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer oauth-token-#{identity.gitlab_user_id}"]
+      upload_path = "/api/v4/projects/#{project_ref}/uploads"
+      notes_path = "/api/v4/projects/#{project_ref}/issues/#{iid}/notes"
+      delete_path = "/api/v4/projects/#{project_ref}/uploads/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee/maybe-linked.txt"
+
+      case {conn.method, conn.request_path} do
+        {"POST", ^upload_path} ->
+          Agent.update(calls, &[:upload | &1])
+
+          Req.Test.json(conn, %{
+            "id" => 13,
+            "alt" => "maybe-linked",
+            "url" => "/uploads/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee/maybe-linked.txt",
+            "markdown" => "[maybe-linked](/uploads/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee/maybe-linked.txt)"
+          })
+
+        {"POST", ^notes_path} ->
+          Agent.update(calls, &[:create_note | &1])
+
+          conn
+          |> Plug.Conn.put_status(500)
+          |> Req.Test.json(%{message: "unknown if note was created"})
+
+        {"DELETE", ^delete_path} ->
+          Agent.update(calls, &[:delete_upload | &1])
+          Plug.Conn.send_resp(conn, 204, "")
+      end
+    end
+  end
+
+  defp upload_proxy_plug(project_ref, iid, identity, secret) do
+    fn conn ->
+      assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer oauth-token-#{identity.gitlab_user_id}"]
+      notes_path = "/api/v4/projects/#{project_ref}/issues/#{iid}/notes"
+      upload_path = "/api/v4/projects/#{project_ref}/uploads/#{secret}/proof.txt"
+
+      case {conn.method, conn.request_path} do
+        {"GET", ^notes_path} ->
+          Req.Test.json(conn, [])
+
+        {"GET", ^upload_path} ->
+          conn
+          |> Plug.Conn.put_resp_content_type("text/plain")
+          |> Plug.Conn.send_resp(200, "proxied attachment")
+      end
+    end
+  end
+
   defp seed_issue(iid, project) do
     Store.upsert_issue(%{
       gitlab_issue_id: 920_000 + iid,
@@ -207,6 +468,36 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
       assignees: [],
       raw_gitlab: %{}
     })
+  end
+
+  defp note_attrs(note_id, body) do
+    %{
+      note_id: note_id,
+      body: body,
+      system: false,
+      internal: false,
+      resolvable: false,
+      gitlab_created_at: nil,
+      gitlab_updated_at: nil,
+      author: %{name: "Developer", username: "dev"}
+    }
+  end
+
+  defp raw_gitlab_note(note_id, body) do
+    %{
+      "id" => note_id,
+      "body" => body,
+      "system" => false,
+      "internal" => false,
+      "resolvable" => false,
+      "author" => %{"name" => "Developer", "username" => "dev"}
+    }
+  end
+
+  defp plug_upload(filename, body, content_type) do
+    path = Path.join(System.tmp_dir!(), "symphony-#{System.unique_integer([:positive])}-#{filename}")
+    File.write!(path, body)
+    %Plug.Upload{path: path, filename: filename, content_type: content_type}
   end
 
   defp gitlab_issue(project_id, iid, state, labels) do
