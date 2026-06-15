@@ -29,6 +29,8 @@ interface DragPreview {
   width: number;
 }
 
+const collapsedStatusesStorageKey = "symphony.board.collapsed-statuses";
+
 export function IssueBoard() {
   const queryClient = useQueryClient();
   const { data } = useQuery({ queryKey: ["issues"], queryFn: () => listIssues() });
@@ -40,6 +42,7 @@ export function IssueBoard() {
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pendingTransition, setPendingTransition] = useState<PendingTransition | null>(null);
+  const [collapsedStatuses, setCollapsedStatuses] = useState<WorkflowStatus[]>(readCollapsedStatuses);
   const transitionMutation = useMutation({
     mutationFn: ({ issue, status, confirmStopRun }: PendingTransition & { confirmStopRun?: boolean }) =>
       updateIssueWorkflow(issue.id, status, "changed from board drag", { confirmStopRun }),
@@ -61,6 +64,14 @@ export function IssueBoard() {
     const timeout = window.setTimeout(() => setNotice(null), 4200);
     return () => window.clearTimeout(timeout);
   }, [notice]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(collapsedStatusesStorageKey, JSON.stringify(collapsedStatuses));
+    } catch {
+      // localStorage can be unavailable in restricted browser modes; keep the in-memory state working.
+    }
+  }, [collapsedStatuses]);
 
   useEffect(() => {
     function onPointerMove(event: PointerEvent) {
@@ -204,24 +215,62 @@ export function IssueBoard() {
     return Boolean(issue.activeRunId) && !isDispatchCandidateStatus(status);
   }
 
+  function toggleColumn(status: WorkflowStatus) {
+    setCollapsedStatuses((current) => (current.includes(status) ? current.filter((item) => item !== status) : [...current, status]));
+  }
+
+  const visibleStatuses = workflowStatuses.filter((status) => !collapsedStatuses.includes(status));
+  const hiddenStatuses = workflowStatuses.filter((status) => collapsedStatuses.includes(status));
+
   return (
     <>
       {notice && <div className="board-drag-notice">{notice}</div>}
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-        {workflowStatuses.map((status) => (
-          <IssueColumn
-            key={status}
-            status={status}
-            issues={issues.filter((issue) => issue.workflowStatus === status)}
-            draggingIssue={draggingIssue}
-            dropState={dropState(status)}
-            isDragOver={dragOverStatus === status}
-            dragDisabled={transitionMutation.isPending}
-            onIssueCreated={openIssue}
-            onIssueOpen={openIssue}
-            onIssuePointerDown={onIssuePointerDown}
-          />
-        ))}
+      <div className="board-scroll-shell">
+        <div className="board-lane-grid">
+          {visibleStatuses.map((status) => (
+            <IssueColumn
+              key={status}
+              status={status}
+              issues={issues.filter((issue) => issue.workflowStatus === status)}
+              draggingIssue={draggingIssue}
+              dropState={dropState(status)}
+              isDragOver={dragOverStatus === status}
+              dragDisabled={transitionMutation.isPending}
+              collapsed={false}
+              onCollapsedChange={() => toggleColumn(status)}
+              onIssueCreated={openIssue}
+              onIssueOpen={openIssue}
+              onIssuePointerDown={onIssuePointerDown}
+            />
+          ))}
+          {hiddenStatuses.length > 0 && (
+            <aside className="board-hidden-columns" aria-label="Hidden columns">
+              <div className="board-column-header board-hidden-columns-header">
+                <h2 className="board-column-title">
+                  <span>Hidden columns</span>
+                </h2>
+              </div>
+              <div className="board-column-body board-hidden-column-list">
+                {hiddenStatuses.map((status) => (
+                  <IssueColumn
+                    key={status}
+                    status={status}
+                    issues={issues.filter((issue) => issue.workflowStatus === status)}
+                    draggingIssue={draggingIssue}
+                    dropState={dropState(status)}
+                    isDragOver={dragOverStatus === status}
+                    dragDisabled={transitionMutation.isPending}
+                    collapsed
+                    onCollapsedChange={() => toggleColumn(status)}
+                    onIssueCreated={openIssue}
+                    onIssueOpen={openIssue}
+                    onIssuePointerDown={onIssuePointerDown}
+                  />
+                ))}
+              </div>
+            </aside>
+          )}
+        </div>
       </div>
       {draggingIssue && dragPreview && (
         <div
@@ -253,4 +302,18 @@ function statusFromPoint(x: number, y: number) {
   const status = element?.closest<HTMLElement>("[data-workflow-status]")?.dataset.workflowStatus;
 
   return workflowStatuses.includes(status as WorkflowStatus) ? (status as WorkflowStatus) : null;
+}
+
+function readCollapsedStatuses(): WorkflowStatus[] {
+  try {
+    const storedStatuses = JSON.parse(window.localStorage.getItem(collapsedStatusesStorageKey) ?? "[]");
+
+    if (!Array.isArray(storedStatuses)) {
+      return [];
+    }
+
+    return storedStatuses.filter((status): status is WorkflowStatus => workflowStatuses.includes(status as WorkflowStatus));
+  } catch {
+    return [];
+  }
 }

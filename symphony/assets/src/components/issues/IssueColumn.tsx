@@ -1,5 +1,5 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { Ban, Plus } from "lucide-react";
+import { Ban, ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { canUserCreateIssueInStatus, type IssueDTO, type WorkflowStatus } from "../../types/issue";
 import { CreateIssueDialog } from "./CreateIssueDialog";
 import { formatStatusLabel, StatusIcon } from "./StatusIcon";
@@ -13,6 +13,8 @@ export function IssueColumn({
   dropState,
   isDragOver,
   dragDisabled,
+  collapsed,
+  onCollapsedChange,
   onIssueCreated,
   onIssueOpen,
   onIssuePointerDown
@@ -23,26 +25,67 @@ export function IssueColumn({
   dropState: BoardDropState;
   isDragOver: boolean;
   dragDisabled: boolean;
+  collapsed: boolean;
+  onCollapsedChange: () => void;
   onIssueCreated?: (issue: IssueDTO) => void;
   onIssueOpen: (issue: IssueDTO) => void;
   onIssuePointerDown: (event: ReactPointerEvent<HTMLElement>, issue: IssueDTO) => void;
 }) {
-  const columnClasses = ["panel board-column min-h-[320px]", draggingIssue ? "is-drag-active" : "", isDragOver ? "is-drag-over" : "", `is-drop-${dropState}`]
+  const columnClasses = [
+    "board-column",
+    collapsed ? "is-collapsed" : "",
+    issues.length === 0 ? "is-empty" : "",
+    draggingIssue ? "is-drag-active" : "",
+    isDragOver ? "is-drag-over" : "",
+    `is-drop-${dropState}`
+  ]
     .filter(Boolean)
     .join(" ");
   const canCreateIssue = canUserCreateIssueInStatus(status);
+  const statusLabel = formatStatusLabel(status);
+
+  if (collapsed) {
+    return (
+      <section className={columnClasses} data-workflow-status={status}>
+        <button className="board-collapsed-column-button" type="button" onClick={onCollapsedChange} aria-label={`Show ${statusLabel} column`} title="Show column">
+          <span className="board-collapsed-column-title">
+            <StatusIcon status={status} size={14} />
+            <span>{statusLabel}</span>
+          </span>
+          <span className="issue-group-count">{issues.length}</span>
+          <ChevronRight size={14} strokeWidth={1.8} />
+        </button>
+      </section>
+    );
+  }
 
   return (
     <section
       className={columnClasses}
       data-workflow-status={status}
     >
-      <div className="panel-header">
-        <h2 className="flex items-center gap-2 text-xs font-semibold capitalize text-[#4f535c]">
+      <div className="board-column-header">
+        <h2 className="board-column-title">
           <StatusIcon status={status} size={14} />
-          {formatStatusLabel(status)}
+          <span>{statusLabel}</span>
           <span className="issue-group-count">{issues.length}</span>
         </h2>
+        <div className="board-column-actions">
+          {canCreateIssue && (
+            <CreateIssueDialog
+              defaultStatus={status}
+              onCreated={onIssueCreated}
+              trigger={
+                <button className="board-column-icon-button" type="button" aria-label={`Create ${statusLabel} issue`} title="New issue">
+                  <Plus size={14} strokeWidth={1.8} />
+                </button>
+              }
+            />
+          )}
+          <button className="board-column-icon-button" type="button" onClick={onCollapsedChange} aria-label={`Hide ${statusLabel} column`} title="Hide column">
+            <ChevronLeft size={14} strokeWidth={1.8} />
+          </button>
+        </div>
       </div>
       <div className="board-column-body">
         {draggingIssue && dropState === "denied" && (
