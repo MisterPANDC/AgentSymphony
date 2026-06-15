@@ -2,6 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
+@property --sidebar-current-width {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 228px;
+}
+
 :root {
   color: #1d1d1f;
   background: #f7f8fa;
@@ -50,12 +56,13 @@ textarea {
 }
 
 .app-grid {
+  --sidebar-current-width: var(--sidebar-width);
   display: grid;
   min-height: 100vh;
   grid-template-columns: var(--sidebar-current-width) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   background: var(--chrome-bg);
-  transition: grid-template-columns 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: --sidebar-current-width 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .app-grid.is-sidebar-collapsed {
@@ -2281,12 +2288,18 @@ textarea {
 }
 
 .board-lane-grid {
+  --board-lane-gap: 6px;
+  --board-column-min-width: 236px;
+  --board-column-max-width: 320px;
+  --board-expanded-shell-width: calc(100vw - var(--sidebar-width) - 36px);
   display: grid;
   height: var(--board-column-max-height);
   grid-auto-columns: 248px;
+  grid-auto-columns: clamp(var(--board-column-min-width), calc((var(--board-expanded-shell-width) - var(--board-lane-gutters, 0px)) / var(--board-lane-count, 5)), var(--board-column-max-width));
   grid-auto-flow: column;
   align-items: stretch;
-  gap: 6px;
+  gap: var(--board-lane-gap);
+  max-width: 100%;
 }
 
 .board-column {
@@ -2407,7 +2420,7 @@ textarea {
 
 @media (max-width: 900px) {
   .board-lane-grid {
-    grid-auto-columns: minmax(236px, calc(100vw - var(--sidebar-current-width) - 28px));
+    grid-auto-columns: minmax(236px, 100%);
   }
 }
 

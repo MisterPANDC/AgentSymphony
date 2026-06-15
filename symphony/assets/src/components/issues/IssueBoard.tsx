@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listIssues, updateIssueWorkflow } from "../../api/issues";
 import { canUserTransition, isDispatchCandidateStatus, workflowStatuses, type IssueDTO, type WorkflowStatus } from "../../types/issue";
@@ -221,12 +221,17 @@ export function IssueBoard() {
 
   const visibleStatuses = workflowStatuses.filter((status) => !collapsedStatuses.includes(status));
   const hiddenStatuses = workflowStatuses.filter((status) => collapsedStatuses.includes(status));
+  const boardLaneCount = visibleStatuses.length + (hiddenStatuses.length > 0 ? 1 : 0);
+  const boardLaneStyle = {
+    "--board-lane-count": boardLaneCount,
+    "--board-lane-gutters": `${Math.max(boardLaneCount - 1, 0) * 6}px`
+  } as CSSProperties;
 
   return (
     <>
       {notice && <div className="board-drag-notice">{notice}</div>}
       <div className="board-scroll-shell">
-        <div className="board-lane-grid">
+        <div className="board-lane-grid" style={boardLaneStyle}>
           {visibleStatuses.map((status) => (
             <IssueColumn
               key={status}
