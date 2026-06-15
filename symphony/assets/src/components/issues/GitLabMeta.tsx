@@ -12,7 +12,7 @@ export function GitLabMeta({ issue, showLink = true }: { issue: IssueDTO; showLi
         {stateLabel}
       </span>
       {showLink && (
-        <a className="icon-button" href={issue.webUrl} target="_blank" rel="noreferrer" title="Open in GitLab">
+        <a className="gitlab-meta-link" href={issue.webUrl} target="_blank" rel="noreferrer" aria-label="Open issue in GitLab" title="Open in GitLab">
           <ExternalLink size={13} />
         </a>
       )}

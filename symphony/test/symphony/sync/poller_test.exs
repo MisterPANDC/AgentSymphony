@@ -98,6 +98,8 @@ defmodule SymphonyElixir.Sync.PollerTest do
 
     assert issue.gitlab_project_setting_id == project.id
     assert Enum.any?(Store.list_issues(project_setting_id: project.id), &(&1.id == issue.id))
+    assert Store.merge_request_counts([issue.id]) == %{issue.id => 1}
+    assert [%{iid: 7, title: "Implement poller MR"}] = Store.list_merge_requests(issue.id)
     assert Store.cursors()["gitlab:gitlab_issues_updated_after:#{project.id}"].last_success_at
   end
 
@@ -194,6 +196,46 @@ defmodule SymphonyElixir.Sync.PollerTest do
               "updated_at" => "2026-06-12T19:01:41.042Z"
             }
           ])
+
+        {"GET", "/api/v4/projects/321/merge_requests"} ->
+          conn = Plug.Conn.fetch_query_params(conn)
+          assert conn.query_params["state"] == "all"
+          assert conn.query_params["scope"] == "all"
+
+          Req.Test.json(conn, [
+            %{
+              "id" => 91_007,
+              "project_id" => 321,
+              "iid" => 7,
+              "web_url" => "https://gitlab.example.com/group/project/-/merge_requests/7",
+              "title" => "Implement poller MR",
+              "description" => "Sync merge request facts.\n\nCloses #77",
+              "state" => "opened",
+              "draft" => false,
+              "work_in_progress" => false,
+              "source_branch" => "feature/mr-sync",
+              "target_branch" => "main",
+              "merge_status" => "can_be_merged",
+              "detailed_merge_status" => "mergeable",
+              "labels" => ["backend"],
+              "assignees" => [],
+              "reviewers" => [],
+              "created_at" => "2026-06-12T19:05:10.517Z",
+              "updated_at" => "2026-06-12T19:06:41.042Z"
+            },
+            %{
+              "id" => 91_008,
+              "project_id" => 321,
+              "iid" => 8,
+              "web_url" => "https://gitlab.example.com/group/project/-/merge_requests/8",
+              "title" => "Non closing MR",
+              "description" => "Fixes #77",
+              "state" => "opened",
+              "labels" => [],
+              "assignees" => [],
+              "reviewers" => []
+            }
+          ])
       end
     end
   end
@@ -228,6 +270,9 @@ defmodule SymphonyElixir.Sync.PollerTest do
               "updated_at" => "2026-06-12T19:01:41.042Z"
             }
           ])
+
+        conn.method == "GET" and conn.request_path == "/api/v4/projects/#{project_id}/merge_requests" ->
+          Req.Test.json(conn, [])
 
         conn.method == "PUT" and conn.request_path == "/api/v4/projects/#{project_id}/issues/#{iid}" ->
           {:ok, body, conn} = Plug.Conn.read_body(conn)

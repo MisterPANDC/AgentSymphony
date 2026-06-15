@@ -34,6 +34,7 @@ defmodule SymphonyElixir.Store.Json do
     dependencies: %{},
     relations: %{},
     notes: %{},
+    merge_requests: %{},
     events: [],
     cursors: %{},
     runs: %{},
@@ -162,6 +163,18 @@ defmodule SymphonyElixir.Store.Json do
 
   @spec delete_note(String.t(), integer() | String.t()) :: :ok | {:error, term()}
   def delete_note(issue_id, note_id), do: call({:delete_note, issue_id, note_id})
+
+  @spec replace_project_merge_requests(String.t(), [map()]) :: [map()]
+  def replace_project_merge_requests(project_setting_id, entries), do: call({:replace_project_merge_requests, project_setting_id, entries})
+
+  @spec upsert_merge_request(String.t(), String.t(), map()) :: map()
+  def upsert_merge_request(project_setting_id, issue_id, attrs), do: call({:upsert_merge_request, project_setting_id, issue_id, attrs})
+
+  @spec list_merge_requests(String.t()) :: [map()]
+  def list_merge_requests(issue_id), do: call({:list_merge_requests, issue_id})
+
+  @spec merge_request_counts([String.t()]) :: map()
+  def merge_request_counts(issue_ids), do: call({:merge_request_counts, issue_ids})
 
   @spec list_events(keyword()) :: [map()]
   def list_events(filters \\ []), do: call({:list_events, filters})
@@ -635,6 +648,73 @@ defmodule SymphonyElixir.Store.Json do
     end
   end
 
+  def handle_call({:replace_project_merge_requests, project_setting_id, entries}, _from, state) do
+    project_issue_ids =
+      state.issues
+      |> Map.values()
+      |> Enum.filter(&(&1.gitlab_project_setting_id == project_setting_id))
+      |> MapSet.new(& &1.id)
+
+    merge_requests =
+      state.merge_requests
+      |> Map.drop(MapSet.to_list(project_issue_ids))
+
+    synced =
+      entries
+      |> Enum.map(&normalize_merge_request(project_setting_id, &1, now()))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.group_by(& &1.gitlab_issue_id)
+
+    state =
+      state
+      |> Map.put(:merge_requests, Map.merge(merge_requests, synced))
+      |> persist()
+
+    {:reply, synced |> Map.values() |> List.flatten(), state}
+  end
+
+  def handle_call({:upsert_merge_request, project_setting_id, issue_id, attrs}, _from, state) do
+    merge_request = normalize_merge_request(project_setting_id, %{issue_id: issue_id, attrs: attrs}, now())
+
+    if is_nil(merge_request) do
+      {:reply, nil, state}
+    else
+      merge_request_id = merge_request[:merge_request_id] || merge_request["merge_request_id"]
+
+      merge_requests =
+        state.merge_requests
+        |> Map.get(issue_id, [])
+        |> Enum.reject(&((&1[:merge_request_id] || &1["merge_request_id"]) == merge_request_id))
+
+      state =
+        state
+        |> Map.put(:merge_requests, Map.put(state.merge_requests, issue_id, sort_merge_requests([merge_request | merge_requests])))
+        |> persist()
+
+      {:reply, merge_request, state}
+    end
+  end
+
+  def handle_call({:list_merge_requests, issue_id}, _from, state) do
+    merge_requests =
+      state.merge_requests
+      |> Map.get(issue_id, [])
+      |> sort_merge_requests()
+
+    {:reply, merge_requests, state}
+  end
+
+  def handle_call({:merge_request_counts, issue_ids}, _from, state) do
+    wanted = MapSet.new(issue_ids || [])
+
+    counts =
+      state.merge_requests
+      |> Enum.filter(fn {issue_id, _merge_requests} -> MapSet.member?(wanted, issue_id) end)
+      |> Map.new(fn {issue_id, merge_requests} -> {issue_id, length(merge_requests)} end)
+
+    {:reply, counts, state}
+  end
+
   def handle_call({:list_events, filters}, _from, state) do
     {:reply, apply_event_filters(state.events, filters), state}
   end
@@ -1106,6 +1186,34 @@ defmodule SymphonyElixir.Store.Json do
     |> Map.put(:gitlab_issue_id, issue_id)
     |> Map.put_new(:inserted_at, now)
     |> Map.put(:updated_at, now)
+  end
+
+  defp normalize_merge_request(project_setting_id, entry, now) do
+    entry = Map.new(entry)
+    issue_id = entry[:issue_id] || entry["issue_id"]
+    attrs = entry[:attrs] || entry["attrs"] || %{}
+    attrs = Map.new(attrs)
+
+    if is_binary(issue_id) do
+      attrs
+      |> Map.put(:id, "merge-request-#{issue_id}-#{attrs[:merge_request_id] || attrs["merge_request_id"]}")
+      |> Map.put(:gitlab_project_setting_id, project_setting_id)
+      |> Map.put(:gitlab_issue_id, issue_id)
+      |> Map.update(:labels, [], &(&1 || []))
+      |> Map.update(:assignees, [], &(&1 || []))
+      |> Map.update(:reviewers, [], &(&1 || []))
+      |> Map.put_new(:draft, false)
+      |> Map.put_new(:work_in_progress, false)
+      |> Map.put_new(:inserted_at, now)
+      |> Map.put(:updated_at, now)
+    end
+  end
+
+  defp sort_merge_requests(merge_requests) do
+    Enum.sort_by(merge_requests, fn merge_request ->
+      {merge_request[:gitlab_updated_at] || merge_request["gitlab_updated_at"] || merge_request[:updated_at] || merge_request["updated_at"], merge_request[:iid] || merge_request["iid"] || 0}
+    end)
+    |> Enum.reverse()
   end
 
   defp normalize_run(issue_id, run_number, attrs, now) do

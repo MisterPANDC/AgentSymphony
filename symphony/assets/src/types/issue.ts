@@ -54,11 +54,63 @@ export interface IssueDTO {
   unresolvedBlockerCount: number;
   openRuntimeBlockCount: number;
   blockedByCount: number;
+  mergeRequestCount: number | null;
   activeRunId: string | null;
   lastRunStatus: string | null;
   updatedAt: string;
   gitlabUpdatedAt: string;
   lastSyncAt: string | null;
+}
+
+export interface GitLabUserDTO {
+  id?: number | string | null;
+  username?: string | null;
+  name?: string | null;
+  avatarUrl?: string | null;
+  webUrl?: string | null;
+}
+
+export interface MergeRequestDTO {
+  id: number;
+  iid: number;
+  title: string;
+  description: string | null;
+  state: "opened" | "closed" | "locked" | "merged" | string;
+  draft: boolean;
+  workInProgress: boolean;
+  webUrl: string;
+  sourceBranch: string;
+  targetBranch: string;
+  mergeStatus: string | null;
+  detailedMergeStatus: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  mergedAt: string | null;
+  closedAt: string | null;
+  labels: string[];
+  author: GitLabUserDTO | null;
+  assignees: GitLabUserDTO[];
+  reviewers: GitLabUserDTO[];
+  milestone: {
+    id?: number | string | null;
+    iid?: number | string | null;
+    title?: string | null;
+    state?: string | null;
+    dueDate?: string | null;
+  } | null;
+  userNotesCount: number | null;
+  upvotes: number | null;
+  downvotes: number | null;
+  changesCount: string | number | null;
+  references: Record<string, string | number | null>;
+  headPipeline: {
+    id?: number | string | null;
+    status?: string | null;
+    ref?: string | null;
+    webUrl?: string | null;
+    updatedAt?: string | null;
+  } | null;
+  raw: Record<string, unknown>;
 }
 
 export function canUserTransition(from: WorkflowStatus, to: WorkflowStatus) {

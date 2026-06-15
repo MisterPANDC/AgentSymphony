@@ -3,7 +3,7 @@ defmodule SymphonyElixirWeb.IssueController do
 
   alias Plug.Conn
   alias Plug.Upload
-  alias Symphony.GitLab.{Client, IssueMapper, NoteMapper}
+  alias Symphony.GitLab.{Client, IssueMapper, MergeRequestMapper, NoteMapper}
   alias Symphony.GitLab.Error, as: GitLabError
   alias Symphony.GitLab.Config, as: GitLabConfig
   alias SymphonyElixir.GitLab.IssueLifecycle
@@ -33,7 +33,10 @@ defmodule SymphonyElixirWeb.IssueController do
           |> maybe_filter(:search, params["q"])
           |> maybe_filter(:project_setting_id, project_setting_id)
 
-        json(conn, %{issues: Store.list_issues(filters) |> Enum.map(&DTO.issue/1)})
+        issues = Store.list_issues(filters)
+        merge_request_counts = Store.merge_request_counts(Enum.map(issues, & &1.id))
+
+        json(conn, %{issues: Enum.map(issues, &DTO.issue(&1, merge_request_count: Map.get(merge_request_counts, &1.id)))})
     end
   end
 
@@ -56,7 +59,7 @@ defmodule SymphonyElixirWeb.IssueController do
   def show(conn, %{"id" => id}) do
     case find_issue(conn, id) do
       nil -> error(conn, 404, "issue_not_found", "Issue not found")
-      issue -> json(conn, %{issue: DTO.issue(issue)})
+      issue -> json(conn, %{issue: DTO.issue(issue, merge_request_count: Map.get(Store.merge_request_counts([issue.id]), issue.id))})
     end
   end
 
@@ -68,6 +71,29 @@ defmodule SymphonyElixirWeb.IssueController do
     else
       nil -> error(conn, 404, "issue_not_found", "Issue not found")
       {:error, reason} -> error(conn, 422, "note_sync_failed", inspect(reason))
+    end
+  end
+
+  @spec merge_requests(Conn.t(), map()) :: Conn.t()
+  def merge_requests(conn, %{"id" => id}) do
+    case find_issue(conn, id) do
+      nil ->
+        error(conn, 404, "issue_not_found", "Issue not found")
+
+      issue ->
+        json(conn, %{mergeRequests: Store.list_merge_requests(issue.id) |> Enum.map(&DTO.merge_request/1)})
+    end
+  end
+
+  @spec merge_request_notes(Conn.t(), map()) :: Conn.t()
+  def merge_request_notes(conn, %{"id" => id, "merge_request_iid" => merge_request_iid}) do
+    with %{} = issue <- find_issue(conn, id),
+         %{} = merge_request <- find_issue_merge_request(issue, merge_request_iid),
+         {:ok, notes} <- list_merge_request_notes(conn, issue, merge_request) do
+      json(conn, %{notes: notes})
+    else
+      nil -> error(conn, 404, "merge_request_not_found", "Merge request not found")
+      {:error, reason} -> error(conn, 422, "merge_request_note_sync_failed", inspect(reason))
     end
   end
 
@@ -90,6 +116,27 @@ defmodule SymphonyElixirWeb.IssueController do
 
   def create_note(conn, _params), do: error(conn, 400, "missing_body", "Note body is required")
 
+  @spec create_merge_request_note(Conn.t(), map()) :: Conn.t()
+  def create_merge_request_note(conn, %{"id" => id, "merge_request_iid" => merge_request_iid} = params) do
+    body = Map.get(params, "body", "")
+
+    with %{} = issue <- find_issue(conn, id),
+         %{} = merge_request <- find_issue_merge_request(issue, merge_request_iid),
+         :ok <- validate_note_body(body),
+         {:ok, files} <- upload_files(params),
+         :ok <- validate_note_payload(body, files),
+         :ok <- create_merge_request_user_note(conn, issue, merge_request, body, files),
+         {:ok, notes} <- list_merge_request_notes(conn, issue, merge_request) do
+      json(conn, %{notes: notes})
+    else
+      nil -> error(conn, 404, "merge_request_not_found", "Merge request not found")
+      {:error, {:validation, code, message}} -> error(conn, 400, code, message)
+      {:error, reason} -> error(conn, gitlab_error_status(reason), "merge_request_note_create_failed", gitlab_error_message(reason))
+    end
+  end
+
+  def create_merge_request_note(conn, _params), do: error(conn, 400, "missing_body", "Note body is required")
+
   @spec update_note(Conn.t(), map()) :: Conn.t()
   def update_note(conn, %{"id" => id, "note_id" => note_id} = params) do
     body = Map.get(params, "body", "")
@@ -110,6 +157,28 @@ defmodule SymphonyElixirWeb.IssueController do
 
   def update_note(conn, _params), do: error(conn, 400, "missing_note", "Note ID is required")
 
+  @spec update_merge_request_note(Conn.t(), map()) :: Conn.t()
+  def update_merge_request_note(conn, %{"id" => id, "merge_request_iid" => merge_request_iid, "note_id" => note_id} = params) do
+    body = Map.get(params, "body", "")
+
+    with %{} = issue <- find_issue(conn, id),
+         %{} = merge_request <- find_issue_merge_request(issue, merge_request_iid),
+         {:ok, parsed_note_id} <- parse_note_id(note_id),
+         :ok <- validate_note_body(body),
+         {:ok, files} <- upload_files(params),
+         :ok <- validate_note_payload(body, files),
+         :ok <- update_merge_request_user_note(conn, issue, merge_request, parsed_note_id, body, files),
+         {:ok, notes} <- list_merge_request_notes(conn, issue, merge_request) do
+      json(conn, %{notes: notes})
+    else
+      nil -> error(conn, 404, "merge_request_not_found", "Merge request not found")
+      {:error, {:validation, code, message}} -> error(conn, 400, code, message)
+      {:error, reason} -> error(conn, gitlab_error_status(reason), "merge_request_note_update_failed", gitlab_error_message(reason))
+    end
+  end
+
+  def update_merge_request_note(conn, _params), do: error(conn, 400, "missing_note", "Note ID is required")
+
   @spec delete_note(Conn.t(), map()) :: Conn.t()
   def delete_note(conn, %{"id" => id, "note_id" => note_id}) do
     with %{} = issue <- find_issue(conn, id),
@@ -125,12 +194,30 @@ defmodule SymphonyElixirWeb.IssueController do
 
   def delete_note(conn, _params), do: error(conn, 400, "missing_note", "Note ID is required")
 
+  @spec delete_merge_request_note(Conn.t(), map()) :: Conn.t()
+  def delete_merge_request_note(conn, %{"id" => id, "merge_request_iid" => merge_request_iid, "note_id" => note_id}) do
+    with %{} = issue <- find_issue(conn, id),
+         %{} = merge_request <- find_issue_merge_request(issue, merge_request_iid),
+         {:ok, parsed_note_id} <- parse_note_id(note_id),
+         :ok <- delete_merge_request_user_note(conn, issue, merge_request, parsed_note_id),
+         {:ok, notes} <- list_merge_request_notes(conn, issue, merge_request) do
+      json(conn, %{notes: notes})
+    else
+      nil -> error(conn, 404, "merge_request_not_found", "Merge request not found")
+      {:error, {:validation, code, message}} -> error(conn, 400, code, message)
+      {:error, reason} -> error(conn, gitlab_error_status(reason), "merge_request_note_delete_failed", gitlab_error_message(reason))
+    end
+  end
+
+  def delete_merge_request_note(conn, _params), do: error(conn, 400, "missing_note", "Note ID is required")
+
   @spec upload(Conn.t(), map()) :: Conn.t()
   def upload(conn, %{"id" => id, "secret" => secret, "filename" => filename}) do
     with %{} = issue <- find_issue(conn, id),
          {:ok, config, auth_opts} <- user_gitlab_context(conn, issue),
          {:ok, _notes} <- sync_issue_notes(conn, issue),
-         :ok <- require_upload_reference(issue, secret, filename),
+         {:ok, merge_request_note_bodies} <- linked_merge_request_note_bodies(conn, issue),
+         :ok <- require_upload_reference(issue, secret, filename, merge_request_note_bodies),
          {:ok, upload} <- Client.download_project_upload(config, secret, filename, auth_opts) do
       conn
       |> put_resp_content_type(base_content_type(upload.content_type))
@@ -156,6 +243,28 @@ defmodule SymphonyElixirWeb.IssueController do
     else
       nil -> error(conn, 404, "issue_not_found", "Issue not found")
       {:error, reason} -> error(conn, 422, "gitlab_update_failed", inspect(reason))
+    end
+  end
+
+  @spec update_merge_request_gitlab(Conn.t(), map()) :: Conn.t()
+  def update_merge_request_gitlab(conn, %{"id" => id, "merge_request_iid" => merge_request_iid} = params) do
+    attrs = Map.take(params, ["title", "description", "labels"])
+
+    with %{} = issue <- find_issue(conn, id),
+         %{} = merge_request <- find_issue_merge_request(issue, merge_request_iid),
+         :ok <- validate_merge_request_update_attrs(attrs),
+         {:ok, config, auth_opts} <- user_gitlab_context(conn, issue),
+         {:ok, raw} <- Client.update_project_merge_request(config, value(merge_request, :iid), attrs, auth_opts) do
+      updated =
+        raw
+        |> MergeRequestMapper.from_gitlab()
+        |> then(&Store.upsert_merge_request(issue.gitlab_project_setting_id, issue.id, &1))
+
+      json(conn, %{mergeRequest: DTO.merge_request(updated)})
+    else
+      nil -> error(conn, 404, "merge_request_not_found", "Merge request not found")
+      {:error, {:validation, code, message}} -> error(conn, 400, code, message)
+      {:error, reason} -> error(conn, gitlab_error_status(reason), "merge_request_update_failed", gitlab_error_message(reason))
     end
   end
 
@@ -213,6 +322,11 @@ defmodule SymphonyElixirWeb.IssueController do
 
   defp issue_matches?(issue, id) do
     issue.id == id or to_string(issue.iid) == to_string(id) or issue.identifier == id
+  end
+
+  defp find_issue_merge_request(issue, merge_request_iid) do
+    Store.list_merge_requests(issue.id)
+    |> Enum.find(&(to_string(value(&1, :iid)) == to_string(merge_request_iid)))
   end
 
   defp maybe_filter(filters, _key, nil), do: filters
@@ -345,6 +459,25 @@ defmodule SymphonyElixirWeb.IssueController do
   defp boolean_value(value) when is_boolean(value), do: {:ok, value}
   defp boolean_value(_value), do: {:error, {:validation, "invalid_confidential", "Confidential must be true or false"}}
 
+  defp validate_merge_request_update_attrs(attrs) do
+    cond do
+      attrs == %{} ->
+        {:error, {:validation, "missing_merge_request_update", "Merge request update fields are required"}}
+
+      Map.has_key?(attrs, "title") and not is_binary(attrs["title"]) ->
+        {:error, {:validation, "invalid_title", "Title must be text"}}
+
+      Map.has_key?(attrs, "description") and not is_binary(attrs["description"]) ->
+        {:error, {:validation, "invalid_description", "Description must be text"}}
+
+      Map.has_key?(attrs, "labels") and not is_binary(attrs["labels"]) ->
+        {:error, {:validation, "invalid_labels", "Labels must be a comma-separated string"}}
+
+      true ->
+        :ok
+    end
+  end
+
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
@@ -410,11 +543,26 @@ defmodule SymphonyElixirWeb.IssueController do
     end
   end
 
+  defp list_merge_request_notes(conn, issue, merge_request) do
+    with {:ok, config, auth_opts} <- user_gitlab_context(conn, issue),
+         {:ok, raw_notes} <- Client.list_merge_request_notes(config, value(merge_request, :iid), %{per_page: config.sync_page_size}, auth_opts) do
+      {:ok, Enum.map(raw_notes, &NoteMapper.from_gitlab/1)}
+    end
+  end
+
   defp create_user_note(conn, issue, body, files) do
     with {:ok, config, auth_opts} <- user_gitlab_context(conn, issue),
          {:ok, final_body, uploaded} <- upload_note_files(config, auth_opts, issue.id, body, files),
          {:ok, raw_note} <- create_note_with_cleanup(config, auth_opts, issue.iid, final_body, uploaded) do
       Store.upsert_note(issue.id, NoteMapper.from_gitlab(raw_note))
+      :ok
+    end
+  end
+
+  defp create_merge_request_user_note(conn, issue, merge_request, body, files) do
+    with {:ok, config, auth_opts} <- user_gitlab_context(conn, issue),
+         {:ok, final_body, uploaded} <- upload_note_files(config, auth_opts, issue.id, body, files),
+         {:ok, _raw_note} <- create_merge_request_note_with_cleanup(config, auth_opts, value(merge_request, :iid), final_body, uploaded) do
       :ok
     end
   end
@@ -428,11 +576,25 @@ defmodule SymphonyElixirWeb.IssueController do
     end
   end
 
+  defp update_merge_request_user_note(conn, issue, merge_request, note_id, body, files) do
+    with {:ok, config, auth_opts} <- user_gitlab_context(conn, issue),
+         {:ok, final_body, uploaded} <- upload_note_files(config, auth_opts, issue.id, body, files),
+         {:ok, _raw_note} <- update_merge_request_note_with_cleanup(config, auth_opts, value(merge_request, :iid), note_id, final_body, uploaded) do
+      :ok
+    end
+  end
+
   defp delete_user_note(conn, issue, note_id) do
     with {:ok, config, auth_opts} <- user_gitlab_context(conn, issue),
          :ok <- Client.delete_issue_note(config, issue.iid, note_id, auth_opts),
          :ok <- Store.delete_note(issue.id, note_id) do
       :ok
+    end
+  end
+
+  defp delete_merge_request_user_note(conn, issue, merge_request, note_id) do
+    with {:ok, config, auth_opts} <- user_gitlab_context(conn, issue) do
+      Client.delete_merge_request_note(config, value(merge_request, :iid), note_id, auth_opts)
     end
   end
 
@@ -570,6 +732,34 @@ defmodule SymphonyElixirWeb.IssueController do
     end
   end
 
+  defp create_merge_request_note_with_cleanup(config, auth_opts, merge_request_iid, body, uploaded) do
+    case Client.create_merge_request_note(config, merge_request_iid, body, auth_opts) do
+      {:ok, raw_note} ->
+        {:ok, raw_note}
+
+      {:error, %GitLabError{type: type} = reason} when type in [:validation_error, :unauthorized, :forbidden, :not_found] ->
+        cleanup_uploaded_files(config, auth_opts, uploaded)
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp update_merge_request_note_with_cleanup(config, auth_opts, merge_request_iid, note_id, body, uploaded) do
+    case Client.update_merge_request_note(config, merge_request_iid, note_id, body, auth_opts) do
+      {:ok, raw_note} ->
+        {:ok, raw_note}
+
+      {:error, %GitLabError{type: type} = reason} when type in [:validation_error, :unauthorized, :forbidden, :not_found] ->
+        cleanup_uploaded_files(config, auth_opts, uploaded)
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   defp cleanup_uploaded_files(config, auth_opts, uploaded) do
     Enum.each(uploaded, fn
       %{secret: secret, filename: filename} when is_binary(secret) and is_binary(filename) ->
@@ -580,18 +770,29 @@ defmodule SymphonyElixirWeb.IssueController do
     end)
   end
 
-  defp require_upload_reference(issue, secret, filename) do
-    if upload_referenced?(issue, secret, filename) do
+  defp linked_merge_request_note_bodies(conn, issue) do
+    Store.list_merge_requests(issue.id)
+    |> Enum.reduce_while({:ok, []}, fn merge_request, {:ok, acc} ->
+      case list_merge_request_notes(conn, issue, merge_request) do
+        {:ok, notes} -> {:cont, {:ok, acc ++ Enum.map(notes, & &1.body)}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  defp require_upload_reference(issue, secret, filename, extra_bodies) do
+    if upload_referenced?(issue, secret, filename, extra_bodies) do
       :ok
     else
       {:error, :upload_not_referenced}
     end
   end
 
-  defp upload_referenced?(issue, secret, filename) do
+  defp upload_referenced?(issue, secret, filename, extra_bodies) do
     bodies =
       [issue.description]
       |> Enum.concat(Store.list_notes(issue.id) |> Enum.map(& &1.body))
+      |> Enum.concat(extra_bodies)
       |> Enum.reject(&is_nil/1)
 
     Enum.any?(bodies, &body_references_upload?(&1, issue.id, secret, filename))
@@ -607,6 +808,8 @@ defmodule SymphonyElixirWeb.IssueController do
   end
 
   defp body_references_upload?(_body, _issue_id, _secret, _filename), do: false
+
+  defp value(map, key) when is_atom(key), do: Map.get(map, key) || Map.get(map, Atom.to_string(key))
 
   defp sync_gitlab_lifecycle(conn, issue, status) do
     cond do
@@ -684,6 +887,12 @@ defmodule SymphonyElixirWeb.IssueController do
   end
 
   defp base_content_type(_content_type), do: "application/octet-stream"
+
+  defp gitlab_error_status(%GitLabError{status: status}) when is_integer(status), do: status
+  defp gitlab_error_status(_reason), do: 422
+
+  defp gitlab_error_message(%GitLabError{message: message}) when is_binary(message), do: message
+  defp gitlab_error_message(reason), do: inspect(reason)
 
   defp error(conn, status, code, message) do
     conn |> put_status(status) |> json(%{error: %{code: code, message: message}})

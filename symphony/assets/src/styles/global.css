@@ -833,6 +833,54 @@ textarea {
   color: #40625d;
 }
 
+.merge-request-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: currentColor;
+}
+
+.merge-request-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.merge-request-icon.is-draft {
+  color: #895021;
+}
+
+.merge-request-icon.is-ready {
+  color: #2f6849;
+}
+
+.merge-request-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 1px solid #cfdbd7;
+  border-radius: 999px;
+  background: #f4faf7;
+  color: #247356;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 18px;
+}
+
+.merge-request-badge.is-compact {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+}
+
+.merge-request-badge-count {
+  font-variant-numeric: tabular-nums;
+}
+
 .status-pill {
   display: inline-flex;
   min-height: 20px;
@@ -1627,10 +1675,10 @@ textarea {
 .status-select-trigger {
   display: inline-flex;
   min-height: 24px;
-  min-width: 112px;
+  min-width: 88px;
   max-width: 100%;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   justify-content: flex-start;
   border: 0;
   border-radius: 5px;
@@ -1679,35 +1727,48 @@ textarea {
 
 .status-select-menu {
   position: fixed;
-  z-index: 60;
-  width: 192px;
+  z-index: 160;
+  width: 128px;
   max-height: calc(100vh - 16px);
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   background: #ffffff;
-  box-shadow: 0 18px 42px rgba(17, 24, 39, 0.13);
+  box-shadow: 0 10px 24px rgba(17, 24, 39, 0.11);
 }
 
 .status-select-menu::-webkit-scrollbar {
   display: none;
 }
 
+.status-select-menu-header {
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 4px 8px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+}
+
 .status-select-option {
   position: relative;
   display: grid;
   width: 100%;
-  min-height: 36px;
+  min-height: 32px;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   border: 0;
   border-bottom: 1px solid var(--border-subtle);
   background: #ffffff;
-  padding: 8px 10px;
+  padding: 6px 8px;
   color: var(--text);
   font-size: 13px;
   line-height: 18px;
@@ -2079,7 +2140,10 @@ textarea {
 }
 
 .issue-row-preview-flags {
+  display: inline-flex;
   flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
   color: #6f7480;
   font-size: 11px;
   font-weight: 620;
@@ -2100,6 +2164,36 @@ textarea {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.gitlab-meta-link {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: #606570;
+  transition: color 120ms ease;
+}
+
+.gitlab-meta-link:hover,
+.gitlab-meta-link:focus-visible {
+  color: #2f6849;
+}
+
+.issue-row-merge-request-icon {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: #457b63;
+}
+
+.issue-row-merge-request-icon .merge-request-icon {
+  width: 18px;
+  height: 18px;
 }
 
 .issue-card {
@@ -2540,11 +2634,11 @@ textarea {
   display: flex;
   flex: 0 0 auto;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  gap: 14px;
   border-bottom: 1px solid var(--border-subtle);
-  background: #fbfbfc;
-  padding: 8px 12px;
+  background: #ffffff;
+  padding: 12px 14px;
 }
 
 .create-issue-meta-control {
@@ -2596,57 +2690,25 @@ textarea {
   box-shadow: none;
 }
 
-.create-issue-status-select {
-  height: 28px;
-  min-width: 154px;
-}
-
-.create-issue-status-trigger {
-  height: 28px;
-  min-width: 154px;
-  border-radius: 6px;
-  background: #ffffff;
-  padding: 0 7px;
-  font-size: 12.5px;
-}
-
-.create-issue-label-control {
-  flex: 1 1 240px;
-}
-
-.create-issue-label-input-shell {
-  display: grid;
-  height: 28px;
-  min-width: 180px;
-  width: 100%;
-  grid-template-columns: 18px minmax(0, 1fr);
+.label-editor.create-issue-label-editor {
+  display: inline-flex;
+  flex: 1 1 260px;
+  min-width: 220px;
   align-items: center;
-  gap: 5px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 6px;
-  background: #ffffff;
-  padding: 0 7px;
-  color: var(--muted-2);
-  transition:
-    border-color 120ms ease,
-    box-shadow 120ms ease;
+  gap: 10px;
 }
 
-.create-issue-label-input-shell:focus-within {
-  border-color: #cfd4dc;
+.label-editor.create-issue-label-editor .label-editor-header {
+  flex: 0 0 auto;
+  min-height: 24px;
 }
 
-.create-issue-label-input-shell input {
+.label-editor.create-issue-label-editor .label-editor-body {
   min-width: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font-size: 12.5px;
-  outline: none;
 }
 
-.create-issue-label-input-shell input::placeholder {
-  color: var(--muted-2);
+.label-editor.create-issue-label-editor .label-editor-input-shell {
+  min-height: 24px;
 }
 
 .create-issue-error {
@@ -2788,6 +2850,10 @@ textarea {
   transform: translate(-50%, -50%);
 }
 
+.issue-detail-dialog.has-merge-request-panel {
+  width: min(1180px, calc(100vw - 32px));
+}
+
 .issue-detail-dialog::after {
   position: absolute;
   right: 0;
@@ -2813,12 +2879,38 @@ textarea {
   transform: none;
 }
 
-.issue-detail-dialog-body {
+.issue-detail-dialog-content {
   display: flex;
   flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
+}
+
+.issue-detail-dialog.has-merge-request-panel .issue-detail-dialog-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.issue-detail-dialog.has-merge-request-panel.is-issue-expanded .issue-detail-dialog-content,
+.issue-detail-dialog.has-merge-request-panel.is-merge-request-expanded .issue-detail-dialog-content {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.issue-detail-dialog.is-issue-expanded .merge-request-detail-panel {
+  display: none;
+}
+
+.issue-detail-dialog.is-merge-request-expanded .issue-detail-dialog-body {
+  display: none;
+}
+
+.issue-detail-dialog-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
   overflow: auto;
   scrollbar-width: none;
   padding: 18px 18px 28px;
@@ -2828,20 +2920,20 @@ textarea {
   display: none;
 }
 
+.issue-detail-dialog.has-merge-request-panel .issue-detail-dialog-body,
+.issue-detail-dialog.has-merge-request-panel .merge-request-detail-panel.is-visible {
+  width: auto;
+}
+
 .issue-detail-dialog-header {
   display: flex;
   min-width: 0;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  padding-right: 68px;
 }
 
-.issue-detail-dialog-actions {
-  position: absolute;
-  top: 18px;
-  right: 18px;
-  z-index: 2;
+.pane-actions {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
@@ -2849,6 +2941,315 @@ textarea {
   border-radius: 7px;
   background: rgba(255, 255, 255, 0.86);
   backdrop-filter: blur(6px);
+}
+
+.merge-request-selector {
+  position: relative;
+  flex: 0 0 auto;
+  z-index: 120;
+}
+
+.merge-request-trigger {
+  display: inline-flex;
+  height: 24px;
+  min-width: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid #d4ddd9;
+  border-radius: 999px;
+  background: #f7fbf9;
+  color: #246b52;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 20px;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.merge-request-trigger:hover,
+.merge-request-trigger.is-open,
+.merge-request-trigger.has-selection {
+  border-color: #aec7bd;
+  background: #ecf7f1;
+  color: #1d5f49;
+}
+
+.merge-request-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 160;
+  width: min(260px, calc(100vw - 40px));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(17, 24, 39, 0.11);
+}
+
+.merge-request-menu-header {
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 4px 8px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.merge-request-list {
+  max-height: min(42vh, 220px);
+  overflow: auto;
+}
+
+.merge-request-row {
+  display: grid;
+  width: 100%;
+  min-height: 32px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: #ffffff;
+  padding: 5px 8px;
+  color: var(--text);
+  text-align: left;
+}
+
+.merge-request-row:last-child {
+  border-bottom: 0;
+}
+
+.merge-request-row:hover,
+.merge-request-row.is-selected {
+  background: var(--hover);
+}
+
+.merge-request-row-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+
+.merge-request-row-main .merge-request-icon {
+  width: 11px;
+  height: 11px;
+}
+
+.merge-request-row-title-text {
+  min-width: 0;
+  overflow: hidden;
+  color: #1d1d1f;
+  font-size: 11px;
+  font-weight: 610;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.merge-request-row-iid,
+.merge-request-menu-empty {
+  color: #6f7480;
+  font-size: 10px;
+  line-height: 15px;
+}
+
+.merge-request-row-iid {
+  flex: 0 0 auto;
+  font-weight: 650;
+}
+
+.merge-request-row-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.merge-request-menu-empty {
+  padding: 8px;
+}
+
+.merge-request-state-badge {
+  display: inline-flex;
+  min-height: 20px;
+  align-items: center;
+  border: 1px solid #d7d9df;
+  border-radius: 999px;
+  background: #f8f8f9;
+  color: #5c606a;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.merge-request-state-badge.is-opened,
+.merge-request-state-badge.is-open {
+  border-color: #cfded8;
+  background: #f4faf7;
+  color: #247356;
+}
+
+.merge-request-state-badge.is-draft {
+  border-color: #e9c2a9;
+  background: #fff3eb;
+  color: #895021;
+}
+
+.merge-request-state-badge.is-merged {
+  border-color: #ced8ff;
+  background: #f4f6ff;
+  color: #4459c8;
+}
+
+.merge-request-state-badge.is-closed {
+  border-color: #e2d3cf;
+  background: #fff7f4;
+  color: #a14f38;
+}
+
+.merge-request-detail-panel {
+  flex: 0 0 0;
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  border-left: 1px solid transparent;
+  background: #ffffff;
+  opacity: 0;
+  transform: translateX(18px);
+  transition:
+    flex-basis 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    width 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 180ms ease,
+    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 180ms ease;
+}
+
+.merge-request-detail-panel.is-visible {
+  flex: 1 1 0;
+  width: auto;
+  border-left-color: #e1e3e8;
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.merge-request-detail-body {
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  flex-direction: column;
+  gap: 16px;
+  overflow: auto;
+  padding: 18px 18px 28px;
+  scrollbar-width: none;
+}
+
+.merge-request-detail-body::-webkit-scrollbar {
+  display: none;
+}
+
+.merge-request-detail-dialog-header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.merge-request-header-meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.merge-request-gitlab-state-badge {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #d7d9df;
+  border-radius: 999px;
+  background: #f8f8f9;
+  padding: 2px 8px 2px 7px;
+  color: #5c606a;
+  font-size: 12px;
+  font-weight: 620;
+  line-height: 18px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  white-space: nowrap;
+}
+
+.merge-request-gitlab-state-badge.is-compact {
+  min-height: 16px;
+  gap: 2px;
+  padding: 0 5px 0 4px;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.merge-request-row .merge-request-draft-text {
+  display: none;
+}
+
+.merge-request-row .merge-request-gitlab-state-badge .merge-request-icon {
+  width: 10px;
+  height: 10px;
+}
+
+.merge-request-gitlab-state-badge.is-open {
+  border-color: #bad9c9;
+  background: #effaf3;
+  color: #2f6849;
+}
+
+.merge-request-gitlab-state-badge.is-closed {
+  border-color: #e2d3cf;
+  background: #fff7f4;
+  color: #9b4a37;
+}
+
+.merge-request-gitlab-state-badge .merge-request-icon {
+  color: currentColor;
+}
+
+.merge-request-gitlab-state-badge .merge-request-icon svg {
+  display: block;
+  overflow: visible;
+}
+
+.merge-request-branch-strip {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #e0e3e8;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 3px 8px;
+  color: #555965;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.merge-request-branch-strip .mono {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .issue-description-section {
@@ -2867,13 +3268,14 @@ textarea {
   gap: 5px;
 }
 
-.issue-description-header h3 {
+.label-editor-header h3,
+.issue-description-header h3,
+.issue-activity-title {
   margin: 0;
-  color: #686b73;
-  font-size: 11px;
+  color: #2f333b;
+  font-size: 13px;
   font-weight: 650;
-  line-height: 16px;
-  text-transform: uppercase;
+  line-height: 20px;
 }
 
 .issue-description-edit-button {
@@ -3016,14 +3418,6 @@ textarea {
   justify-content: space-between;
   gap: 12px;
   padding-bottom: 2px;
-}
-
-.issue-activity-title {
-  margin: 0;
-  color: #2f333b;
-  font-size: 13px;
-  font-weight: 650;
-  line-height: 20px;
 }
 
 .issue-activity-count {
@@ -3209,6 +3603,16 @@ textarea {
   color: #686b73;
   font-size: 12px;
   line-height: 18px;
+}
+
+.issue-activity-username-link {
+  text-decoration: none;
+}
+
+.issue-activity-username-link:hover {
+  color: #1f5f99;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .issue-activity-time {
@@ -3418,6 +3822,10 @@ textarea {
   text-underline-offset: 2px;
 }
 
+.issue-note-strong {
+  font-weight: 650;
+}
+
 .issue-note-image-link {
   display: block;
   width: fit-content;
@@ -3445,15 +3853,20 @@ textarea {
   line-height: 20px;
 }
 
+.issue-activity-empty.is-error {
+  color: #9f3131;
+}
+
 .issue-activity-composer {
   padding-left: 0;
 }
 
 .issue-note-composer {
+  position: relative;
   display: flex;
   min-width: 0;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid #dcdcde;
   border-radius: 7px;
   background: #ffffff;
@@ -3486,6 +3899,89 @@ textarea {
 .issue-note-composer-textarea:disabled {
   cursor: not-allowed;
   opacity: 0.68;
+}
+
+.issue-note-composer.has-quick-action-preview .issue-note-composer-textarea {
+  color: transparent;
+  caret-color: #2f333b;
+  font-weight: 650;
+}
+
+.issue-note-quick-action-inline-preview {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  right: 14px;
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 5px;
+  overflow: hidden;
+  color: #737782;
+  font-size: 13px;
+  line-height: 21px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.issue-note-quick-action-inline-preview .issue-note-quick-action-command,
+.issue-note-quick-action-inline-preview .issue-note-quick-action-description {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.issue-note-quick-action-inline-preview .issue-note-quick-action-description {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.issue-note-quick-action-menu {
+  position: absolute;
+  top: 34px;
+  left: 12px;
+  z-index: 8;
+  display: flex;
+  width: min(220px, calc(100% - 24px));
+  max-height: 88px;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #dcdcde;
+  border-radius: 5px;
+  background: #ffffff;
+  box-shadow: 0 6px 16px rgba(17, 24, 39, 0.1);
+}
+
+.issue-note-quick-action-option {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  border: 0;
+  background: transparent;
+  padding: 4px 7px;
+  color: #2f333b;
+  text-align: left;
+}
+
+.issue-note-quick-action-option:hover,
+.issue-note-quick-action-option.is-highlighted {
+  background: #f1f4f8;
+}
+
+.issue-note-quick-action-command {
+  color: #2f333b;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 15px;
+}
+
+.issue-note-quick-action-description {
+  color: #737782;
+  font-size: 11px;
+  font-style: italic;
+  line-height: 14px;
 }
 
 .issue-note-attachments {
@@ -3612,6 +4108,33 @@ textarea {
   opacity: 0.58;
 }
 
+.merge-request-title-editor .issue-title-display {
+  max-width: calc(100% - 32px);
+}
+
+.merge-request-title-editor .issue-detail-title {
+  display: -webkit-box;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.merge-request-draft-text {
+  flex: 0 0 auto;
+  margin-left: 1px;
+  font-size: 13px;
+  font-weight: 760;
+  line-height: 20px;
+}
+
+.merge-request-draft-text.is-draft {
+  color: #895021;
+}
+
+.merge-request-draft-text.is-ready {
+  color: #2f6849;
+}
+
 .issue-detail-title {
   min-width: 1ch;
   max-width: 100%;
@@ -3625,11 +4148,14 @@ textarea {
 }
 
 .issue-title-identifier {
+  display: inline-flex;
+  height: 28px;
   flex: 0 0 auto;
+  align-items: center;
   color: #6f7480;
   font-size: 13px;
   font-weight: 620;
-  line-height: 22px;
+  line-height: 28px;
 }
 
 .issue-title-editor--editing .issue-title-identifier {
@@ -3756,27 +4282,21 @@ textarea {
 
 .label-editor {
   display: grid;
-  gap: 7px;
+  gap: 5px;
 }
 
 .label-editor-header {
   display: flex;
-  min-height: 24px;
+  min-height: 20px;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
 }
 
 .label-editor-header h3 {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  margin: 0;
-  color: #686b73;
-  font-size: 11px;
-  font-weight: 650;
-  line-height: 16px;
-  text-transform: uppercase;
 }
 
 .label-editor-header h3 > svg {
@@ -3790,12 +4310,12 @@ textarea {
 
 .label-editor-body {
   display: grid;
-  gap: 7px;
+  gap: 5px;
 }
 
 .label-editor-input-shell {
   display: flex;
-  min-height: 36px;
+  min-height: 30px;
   min-width: 0;
   flex-wrap: wrap;
   align-items: center;
@@ -4113,8 +4633,52 @@ textarea {
     max-height: calc(100vh - 20px);
   }
 
+  .issue-detail-dialog.has-merge-request-panel {
+    width: calc(100vw - 20px);
+  }
+
   .issue-detail-dialog.is-expanded {
     inset: 0;
+  }
+
+  .issue-detail-dialog-content {
+    flex-direction: column;
+    overflow: auto;
+  }
+
+  .issue-detail-dialog.has-merge-request-panel .issue-detail-dialog-content {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .issue-detail-dialog.has-merge-request-panel .issue-detail-dialog-body,
+  .issue-detail-dialog.has-merge-request-panel .merge-request-detail-panel.is-visible {
+    flex: 0 0 auto;
+    width: auto;
+  }
+
+  .issue-detail-dialog-body {
+    overflow: visible;
+  }
+
+  .merge-request-detail-panel,
+  .merge-request-detail-panel.is-visible {
+    flex: 0 0 auto;
+    width: auto;
+    max-height: none;
+    border-top: 1px solid #e1e3e8;
+    border-left: 0;
+    opacity: 1;
+    transform: none;
+  }
+
+  .merge-request-detail-panel:not(.is-visible) {
+    display: none;
+  }
+
+  .merge-request-detail-body {
+    height: auto;
+    max-height: none;
   }
 }
 
@@ -4122,6 +4686,10 @@ textarea {
   .issue-detail-dialog {
     width: calc(100vw - 16px);
     max-height: calc(100vh - 16px);
+  }
+
+  .issue-detail-dialog.has-merge-request-panel {
+    width: calc(100vw - 16px);
   }
 
   .issue-detail-dialog.is-expanded {
@@ -4171,6 +4739,17 @@ textarea {
 
   .issue-comment-menu {
     width: min(196px, calc(100vw - 24px));
+  }
+
+  .merge-request-menu {
+    left: auto;
+    right: 0;
+    transform: none;
+    width: min(260px, calc(100vw - 28px));
+  }
+
+  .issue-detail-dialog.has-merge-request-panel .merge-request-menu {
+    width: min(260px, calc(100vw - 28px));
   }
 
   .issue-note-composer-footer {

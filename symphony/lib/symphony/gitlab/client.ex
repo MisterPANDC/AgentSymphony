@@ -37,6 +37,17 @@ defmodule Symphony.GitLab.Client do
     paginated_get(config, project_path(config) <> "/issues", params, opts)
   end
 
+  @spec list_project_merge_requests(Config.t(), map() | keyword(), keyword()) :: {:ok, [map()]} | {:error, Error.t()}
+  def list_project_merge_requests(%Config{} = config, params \\ %{}, opts \\ []) do
+    paginated_get(config, project_path(config) <> "/merge_requests", params, opts)
+  end
+
+  @spec update_project_merge_request(Config.t(), integer() | String.t(), map(), keyword()) ::
+          {:ok, map()} | {:error, Error.t()}
+  def update_project_merge_request(%Config{} = config, merge_request_iid, attrs, opts \\ []) when is_map(attrs) do
+    request(config, :put, project_path(config) <> "/merge_requests/#{merge_request_iid}", Keyword.merge(opts, json: attrs))
+  end
+
   @spec get_project_issue(Config.t(), integer() | String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def get_project_issue(%Config{} = config, issue_iid, opts \\ []) do
     request(config, :get, project_path(config) <> "/issues/#{issue_iid}", opts)
@@ -59,10 +70,22 @@ defmodule Symphony.GitLab.Client do
     paginated_get(config, project_path(config) <> "/issues/#{issue_iid}/notes", params, opts)
   end
 
+  @spec list_merge_request_notes(Config.t(), integer() | String.t(), map() | keyword(), keyword()) ::
+          {:ok, [map()]} | {:error, Error.t()}
+  def list_merge_request_notes(%Config{} = config, merge_request_iid, params \\ %{}, opts \\ []) do
+    paginated_get(config, project_path(config) <> "/merge_requests/#{merge_request_iid}/notes", params, opts)
+  end
+
   @spec create_issue_note(Config.t(), integer() | String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, Error.t()}
   def create_issue_note(%Config{} = config, issue_iid, body, opts \\ []) when is_binary(body) do
     request(config, :post, project_path(config) <> "/issues/#{issue_iid}/notes", Keyword.merge(opts, json: %{body: body}))
+  end
+
+  @spec create_merge_request_note(Config.t(), integer() | String.t(), String.t(), keyword()) ::
+          {:ok, map()} | {:error, Error.t()}
+  def create_merge_request_note(%Config{} = config, merge_request_iid, body, opts \\ []) when is_binary(body) do
+    request(config, :post, project_path(config) <> "/merge_requests/#{merge_request_iid}/notes", Keyword.merge(opts, json: %{body: body}))
   end
 
   @spec update_issue_note(Config.t(), integer() | String.t(), integer() | String.t(), String.t(), keyword()) ::
@@ -71,9 +94,23 @@ defmodule Symphony.GitLab.Client do
     request(config, :put, project_path(config) <> "/issues/#{issue_iid}/notes/#{note_id}", Keyword.merge(opts, json: %{body: body}))
   end
 
+  @spec update_merge_request_note(Config.t(), integer() | String.t(), integer() | String.t(), String.t(), keyword()) ::
+          {:ok, map()} | {:error, Error.t()}
+  def update_merge_request_note(%Config{} = config, merge_request_iid, note_id, body, opts \\ []) when is_binary(body) do
+    request(config, :put, project_path(config) <> "/merge_requests/#{merge_request_iid}/notes/#{note_id}", Keyword.merge(opts, json: %{body: body}))
+  end
+
   @spec delete_issue_note(Config.t(), integer() | String.t(), integer() | String.t(), keyword()) :: :ok | {:error, Error.t()}
   def delete_issue_note(%Config{} = config, issue_iid, note_id, opts \\ []) do
     case request(config, :delete, project_path(config) <> "/issues/#{issue_iid}/notes/#{note_id}", opts) do
+      {:ok, _body} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec delete_merge_request_note(Config.t(), integer() | String.t(), integer() | String.t(), keyword()) :: :ok | {:error, Error.t()}
+  def delete_merge_request_note(%Config{} = config, merge_request_iid, note_id, opts \\ []) do
+    case request(config, :delete, project_path(config) <> "/merge_requests/#{merge_request_iid}/notes/#{note_id}", opts) do
       {:ok, _body} -> :ok
       {:error, reason} -> {:error, reason}
     end

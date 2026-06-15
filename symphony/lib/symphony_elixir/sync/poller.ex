@@ -6,7 +6,7 @@ defmodule SymphonyElixir.Sync.Poller do
   use GenServer
   require Logger
 
-  alias Symphony.GitLab.{Client, Config, IssueMapper, NoteMapper}
+  alias Symphony.GitLab.{Client, Config, IssueMapper, MergeRequestMapper, NoteMapper}
   alias SymphonyElixir.GitLab.IssueLifecycle
   alias SymphonyElixir.{StatusDashboard, Store}
 
@@ -129,6 +129,7 @@ defmodule SymphonyElixir.Sync.Poller do
          %{
            projects: summaries,
            issue_count: Enum.sum(Enum.map(summaries, & &1.issue_count)),
+           merge_request_count: Enum.sum(Enum.map(summaries, &Map.get(&1, :merge_request_count, 0))),
            backfilled_issue_count: Enum.sum(Enum.map(summaries, &Map.get(&1, :backfilled_issue_count, 0)))
          }}
       else
@@ -148,6 +149,7 @@ defmodule SymphonyElixir.Sync.Poller do
          project_setting <- upsert_project(config, raw_project),
          backfilled_issue_count = Store.backfill_issue_project_setting(project_setting),
          {:ok, issues} <- sync_issues(config, project_setting),
+         {:ok, merge_requests} <- sync_merge_requests(config, project_setting),
          :ok <- put_success_cursor(cursor_name, DateTime.utc_now()) do
       Store.record_event("sync_project_validated", "gitlab_sync", %{project_id: raw_project["id"]})
 
@@ -155,6 +157,7 @@ defmodule SymphonyElixir.Sync.Poller do
        %{
          project_id: project_setting.project_id,
          issue_count: length(issues),
+         merge_request_count: length(merge_requests),
          backfilled_issue_count: backfilled_issue_count
        }}
     else
@@ -257,6 +260,49 @@ defmodule SymphonyElixir.Sync.Poller do
     Store.list_issues(project_setting_id: project_setting_id)
     |> Map.new(&{&1.iid, &1})
   end
+
+  defp sync_merge_requests(config, project_setting) do
+    params = %{
+      state: "all",
+      scope: "all",
+      order_by: "updated_at",
+      sort: "asc",
+      per_page: config.sync_page_size
+    }
+
+    with {:ok, raw_merge_requests} <- Client.list_project_merge_requests(config, params) do
+      issues_by_iid = local_project_issues_by_iid(project_setting.id)
+
+      entries =
+        raw_merge_requests
+        |> Enum.flat_map(&merge_request_issue_entries(&1, issues_by_iid))
+
+      {:ok, Store.replace_project_merge_requests(project_setting.id, entries)}
+    end
+  end
+
+  defp merge_request_issue_entries(raw_merge_request, issues_by_iid) do
+    raw_merge_request
+    |> closing_issue_iids()
+    |> Enum.uniq()
+    |> Enum.flat_map(fn iid ->
+      case Map.get(issues_by_iid, iid) do
+        %{id: issue_id} ->
+          [%{issue_id: issue_id, attrs: MergeRequestMapper.from_gitlab(raw_merge_request)}]
+
+        _issue ->
+          []
+      end
+    end)
+  end
+
+  defp closing_issue_iids(%{"description" => description}) when is_binary(description) do
+    ~r/(?:^|[^\w])Closes\s+#(\d+)(?!\d)/i
+    |> Regex.scan(description)
+    |> Enum.map(fn [_match, iid] -> String.to_integer(iid) end)
+  end
+
+  defp closing_issue_iids(_merge_request), do: []
 
   defp maybe_put_updated_after(params, config, project_setting) do
     case issue_last_success_at(project_setting) do

@@ -43,6 +43,21 @@ defmodule Symphony.GitLab.ClientTest do
     assert issue["title"] == "Follow-up"
   end
 
+  test "updates a project merge request with scoped attributes" do
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: merge_request_update_plug())
+
+    assert {:ok, merge_request} =
+             Client.update_project_merge_request(config(), 7, %{
+               "title" => "Updated MR",
+               "description" => "Updated body",
+               "labels" => "frontend,review"
+             })
+
+    assert merge_request["iid"] == 7
+    assert merge_request["title"] == "Updated MR"
+    assert merge_request["labels"] == ["frontend", "review"]
+  end
+
   test "updates and deletes issue notes" do
     Application.put_env(:symphony_elixir, :gitlab_req_options, plug: note_update_plug())
 
@@ -50,6 +65,23 @@ defmodule Symphony.GitLab.ClientTest do
     assert note["id"] == 44
     assert note["body"] == "Updated body"
     assert :ok = Client.delete_issue_note(config(), 3, 44)
+  end
+
+  test "lists, creates, updates, and deletes merge request notes" do
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: merge_request_note_plug())
+
+    assert {:ok, [note]} = Client.list_merge_request_notes(config(), 7, per_page: 1)
+    assert note["body"] == "Existing MR note"
+
+    assert {:ok, note} = Client.create_merge_request_note(config(), 7, "New MR note")
+    assert note["id"] == 55
+    assert note["body"] == "New MR note"
+
+    assert {:ok, note} = Client.update_merge_request_note(config(), 7, 55, "Updated MR note")
+    assert note["id"] == 55
+    assert note["body"] == "Updated MR note"
+
+    assert :ok = Client.delete_merge_request_note(config(), 7, 55)
   end
 
   test "uploads and downloads project markdown uploads" do
@@ -147,6 +179,83 @@ defmodule Symphony.GitLab.ClientTest do
           })
 
         {"DELETE", "/api/v4/projects/123/issues/3/notes/44"} ->
+          Plug.Conn.send_resp(conn, 204, "")
+      end
+    end
+  end
+
+  defp merge_request_update_plug do
+    fn conn ->
+      assert conn.method == "PUT"
+      assert conn.request_path == "/api/v4/projects/123/merge_requests/7"
+      assert Plug.Conn.get_req_header(conn, "private-token") == ["test-token"]
+
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      payload = Jason.decode!(body)
+      assert payload["title"] == "Updated MR"
+      assert payload["description"] == "Updated body"
+      assert payload["labels"] == "frontend,review"
+
+      Req.Test.json(conn, %{
+        "id" => 700,
+        "project_id" => 123,
+        "iid" => 7,
+        "web_url" => "https://gitlab.example.com/group/project/-/merge_requests/7",
+        "title" => payload["title"],
+        "description" => payload["description"],
+        "state" => "opened",
+        "draft" => false,
+        "work_in_progress" => false,
+        "source_branch" => "feature",
+        "target_branch" => "main",
+        "labels" => ["frontend", "review"]
+      })
+    end
+  end
+
+  defp merge_request_note_plug do
+    fn conn ->
+      assert Plug.Conn.get_req_header(conn, "private-token") == ["test-token"]
+
+      case {conn.method, conn.request_path} do
+        {"GET", "/api/v4/projects/123/merge_requests/7/notes"} ->
+          Req.Test.json(conn, [
+            %{
+              "id" => 54,
+              "body" => "Existing MR note",
+              "system" => false,
+              "internal" => false,
+              "author" => %{"name" => "Developer", "username" => "dev"}
+            }
+          ])
+
+        {"POST", "/api/v4/projects/123/merge_requests/7/notes"} ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          payload = Jason.decode!(body)
+          assert payload["body"] == "New MR note"
+
+          Req.Test.json(conn, %{
+            "id" => 55,
+            "body" => payload["body"],
+            "system" => false,
+            "internal" => false,
+            "author" => %{"name" => "Developer", "username" => "dev"}
+          })
+
+        {"PUT", "/api/v4/projects/123/merge_requests/7/notes/55"} ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          payload = Jason.decode!(body)
+          assert payload["body"] == "Updated MR note"
+
+          Req.Test.json(conn, %{
+            "id" => 55,
+            "body" => payload["body"],
+            "system" => false,
+            "internal" => false,
+            "author" => %{"name" => "Developer", "username" => "dev"}
+          })
+
+        {"DELETE", "/api/v4/projects/123/merge_requests/7/notes/55"} ->
           Plug.Conn.send_resp(conn, 204, "")
       end
     end

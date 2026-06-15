@@ -64,6 +64,8 @@ defmodule SymphonyElixirWeb.Router do
     get("/api/issues", IssueController, :index)
     get("/api/issues/:id", IssueController, :show)
     get("/api/issues/:id/notes", IssueController, :notes)
+    get("/api/issues/:id/merge_requests", IssueController, :merge_requests)
+    get("/api/issues/:id/merge_requests/:merge_request_iid/notes", IssueController, :merge_request_notes)
     get("/api/issues/:id/uploads/:secret/:filename", IssueController, :upload)
     get("/api/issues/:id/events", IssueController, :events)
 
@@ -95,9 +97,13 @@ defmodule SymphonyElixirWeb.Router do
 
     post("/api/issues", IssueController, :create)
     post("/api/issues/:id/notes", IssueController, :create_note)
+    post("/api/issues/:id/merge_requests/:merge_request_iid/notes", IssueController, :create_merge_request_note)
     put("/api/issues/:id/notes/:note_id", IssueController, :update_note)
+    put("/api/issues/:id/merge_requests/:merge_request_iid/notes/:note_id", IssueController, :update_merge_request_note)
     delete("/api/issues/:id/notes/:note_id", IssueController, :delete_note)
+    delete("/api/issues/:id/merge_requests/:merge_request_iid/notes/:note_id", IssueController, :delete_merge_request_note)
     patch("/api/issues/:id/gitlab", IssueController, :update_gitlab)
+    patch("/api/issues/:id/merge_requests/:merge_request_iid/gitlab", IssueController, :update_merge_request_gitlab)
     patch("/api/issues/:id/workflow", IssueController, :update_workflow)
 
     post("/api/workflow/transitions", WorkflowController, :transition)

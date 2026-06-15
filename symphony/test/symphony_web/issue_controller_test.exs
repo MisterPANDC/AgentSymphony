@@ -180,6 +180,134 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
     assert note.body == "![proof](/api/issues/#{issue.id}/uploads/0123456789abcdef0123456789abcdef/proof.txt)"
   end
 
+  test "lists synced merge requests that close the issue", %{identity: identity, iid: iid, project: project} do
+    issue = seed_issue(iid, project)
+
+    Store.replace_project_merge_requests(project.id, [
+      %{issue_id: issue.id, attrs: merge_request_attrs(7, "Implement drawer", "Implements the UI.\n\nCloses ##{iid}")}
+    ])
+
+    conn =
+      :get
+      |> conn("/api/issues/#{issue.id}/merge_requests")
+      |> assign_user(identity, project)
+
+    conn = IssueController.merge_requests(conn, %{"id" => issue.id})
+    assert conn.status == 200
+
+    payload = Jason.decode!(conn.resp_body)
+    assert [%{"iid" => 7, "title" => "Implement drawer"}] = payload["mergeRequests"]
+  end
+
+  test "updates merge request title description and labels through user OAuth", %{identity: identity, iid: iid, project: project} do
+    issue = seed_issue(iid, project)
+    merge_request_iid = 7
+
+    Store.replace_project_merge_requests(project.id, [
+      %{issue_id: issue.id, attrs: merge_request_attrs(merge_request_iid, "Implement drawer", "Closes ##{iid}")}
+    ])
+
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: merge_request_update_plug(project.project_ref, merge_request_iid, identity))
+
+    conn =
+      :patch
+      |> conn("/api/issues/#{issue.id}/merge_requests/#{merge_request_iid}/gitlab")
+      |> assign_user(identity, project)
+
+    conn =
+      IssueController.update_merge_request_gitlab(conn, %{
+        "id" => issue.id,
+        "merge_request_iid" => to_string(merge_request_iid),
+        "title" => "Updated MR",
+        "description" => "Updated description",
+        "labels" => "frontend,review"
+      })
+
+    assert conn.status == 200
+
+    payload = Jason.decode!(conn.resp_body)
+    assert payload["mergeRequest"]["title"] == "Updated MR"
+    assert payload["mergeRequest"]["description"] == "Updated description"
+    assert payload["mergeRequest"]["labels"] == ["frontend", "review"]
+
+    assert [%{title: "Updated MR", description: "Updated description", labels: ["frontend", "review"]}] = Store.list_merge_requests(issue.id)
+  end
+
+  test "lists and manages merge request notes through user OAuth", %{identity: identity, iid: iid, project: project} do
+    issue = seed_issue(iid, project)
+    merge_request_iid = 7
+
+    Store.replace_project_merge_requests(project.id, [
+      %{issue_id: issue.id, attrs: merge_request_attrs(merge_request_iid, "Implement drawer", "Closes ##{iid}")}
+    ])
+
+    {:ok, notes} = Agent.start_link(fn -> [raw_gitlab_note(54, "Existing MR note")] end)
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: merge_request_notes_plug(project.project_ref, merge_request_iid, identity, notes))
+
+    conn =
+      :get
+      |> conn("/api/issues/#{issue.id}/merge_requests/#{merge_request_iid}/notes")
+      |> assign_user(identity, project)
+
+    conn = IssueController.merge_request_notes(conn, %{"id" => issue.id, "merge_request_iid" => to_string(merge_request_iid)})
+    assert conn.status == 200
+    assert [%{"body" => "Existing MR note", "id" => "gitlab-note-54"}] = Jason.decode!(conn.resp_body)["notes"]
+
+    conn =
+      :post
+      |> conn("/api/issues/#{issue.id}/merge_requests/#{merge_request_iid}/notes")
+      |> assign_user(identity, project)
+
+    conn = IssueController.create_merge_request_note(conn, %{"id" => issue.id, "merge_request_iid" => to_string(merge_request_iid), "body" => "New MR note"})
+    assert conn.status == 200
+    assert [%{"body" => "Existing MR note"}, %{"body" => "New MR note"}] = Jason.decode!(conn.resp_body)["notes"]
+
+    conn =
+      :put
+      |> conn("/api/issues/#{issue.id}/merge_requests/#{merge_request_iid}/notes/55")
+      |> assign_user(identity, project)
+
+    conn =
+      IssueController.update_merge_request_note(conn, %{
+        "id" => issue.id,
+        "merge_request_iid" => to_string(merge_request_iid),
+        "note_id" => "55",
+        "body" => "Updated MR note"
+      })
+
+    assert conn.status == 200
+    assert [%{"body" => "Existing MR note"}, %{"body" => "Updated MR note"}] = Jason.decode!(conn.resp_body)["notes"]
+
+    conn =
+      :delete
+      |> conn("/api/issues/#{issue.id}/merge_requests/#{merge_request_iid}/notes/55")
+      |> assign_user(identity, project)
+
+    conn = IssueController.delete_merge_request_note(conn, %{"id" => issue.id, "merge_request_iid" => to_string(merge_request_iid), "note_id" => "55"})
+    assert conn.status == 200
+    assert [%{"body" => "Existing MR note"}] = Jason.decode!(conn.resp_body)["notes"]
+  end
+
+  test "submits merge request quick action commands as note text through user OAuth", %{identity: identity, iid: iid, project: project} do
+    issue = seed_issue(iid, project)
+    merge_request_iid = 7
+
+    Store.replace_project_merge_requests(project.id, [
+      %{issue_id: issue.id, attrs: merge_request_attrs(merge_request_iid, "Implement drawer", "Closes ##{iid}")}
+    ])
+
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: merge_request_quick_action_note_plug(project.project_ref, merge_request_iid, identity))
+
+    conn =
+      :post
+      |> conn("/api/issues/#{issue.id}/merge_requests/#{merge_request_iid}/notes")
+      |> assign_user(identity, project)
+
+    conn = IssueController.create_merge_request_note(conn, %{"id" => issue.id, "merge_request_iid" => to_string(merge_request_iid), "body" => "/ready "})
+    assert conn.status == 200
+    assert [%{"body" => "/ready "}] = Jason.decode!(conn.resp_body)["notes"]
+  end
+
   test "updates an issue note through user OAuth", %{identity: identity, iid: iid, project: project} do
     issue = seed_issue(iid, project)
     Store.upsert_note(issue.id, note_attrs(45, "Old body"))
@@ -400,6 +528,93 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
     end
   end
 
+  defp merge_request_notes_plug(project_ref, merge_request_iid, identity, notes) do
+    fn conn ->
+      assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer oauth-token-#{identity.gitlab_user_id}"]
+
+      notes_path = "/api/v4/projects/#{project_ref}/merge_requests/#{merge_request_iid}/notes"
+      note_path = notes_path <> "/55"
+
+      case {conn.method, conn.request_path} do
+        {"GET", ^notes_path} ->
+          Req.Test.json(conn, Agent.get(notes, & &1))
+
+        {"POST", ^notes_path} ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          payload = Jason.decode!(body)
+          assert payload["body"] == "New MR note"
+
+          note = raw_gitlab_note(55, payload["body"])
+          Agent.update(notes, &(&1 ++ [note]))
+          Req.Test.json(conn, note)
+
+        {"PUT", ^note_path} ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          payload = Jason.decode!(body)
+          assert payload["body"] == "Updated MR note"
+
+          note = raw_gitlab_note(55, payload["body"])
+          Agent.update(notes, fn current -> Enum.map(current, &if(&1["id"] == 55, do: note, else: &1)) end)
+          Req.Test.json(conn, note)
+
+        {"DELETE", ^note_path} ->
+          Agent.update(notes, &Enum.reject(&1, fn note -> note["id"] == 55 end))
+          Plug.Conn.send_resp(conn, 204, "")
+      end
+    end
+  end
+
+  defp merge_request_update_plug(project_ref, merge_request_iid, identity) do
+    fn conn ->
+      assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer oauth-token-#{identity.gitlab_user_id}"]
+      assert conn.method == "PUT"
+      assert conn.request_path == "/api/v4/projects/#{project_ref}/merge_requests/#{merge_request_iid}"
+
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      payload = Jason.decode!(body)
+      assert payload["title"] == "Updated MR"
+      assert payload["description"] == "Updated description"
+      assert payload["labels"] == "frontend,review"
+
+      Req.Test.json(conn, %{
+        "id" => 990_000 + merge_request_iid,
+        "project_id" => 123,
+        "iid" => merge_request_iid,
+        "web_url" => "https://gitlab.example.com/group/project/-/merge_requests/#{merge_request_iid}",
+        "title" => payload["title"],
+        "description" => payload["description"],
+        "state" => "opened",
+        "draft" => false,
+        "work_in_progress" => false,
+        "source_branch" => "feature/mr-#{merge_request_iid}",
+        "target_branch" => "main",
+        "labels" => ["frontend", "review"],
+        "assignees" => [],
+        "reviewers" => [],
+        "references" => %{"relative" => "!#{merge_request_iid}"}
+      })
+    end
+  end
+
+  defp merge_request_quick_action_note_plug(project_ref, merge_request_iid, identity) do
+    fn conn ->
+      assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer oauth-token-#{identity.gitlab_user_id}"]
+      notes_path = "/api/v4/projects/#{project_ref}/merge_requests/#{merge_request_iid}/notes"
+
+      case {conn.method, conn.request_path} do
+        {"POST", ^notes_path} ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          payload = Jason.decode!(body)
+          assert payload["body"] == "/ready "
+
+          Req.Test.json(conn, raw_gitlab_note(55, payload["body"]))
+
+        {"GET", ^notes_path} ->
+          Req.Test.json(conn, [raw_gitlab_note(55, "/ready ")])
+      end
+    end
+  end
+
   defp second_upload_failure_plug(project_ref, identity, calls) do
     fn conn ->
       assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer oauth-token-#{identity.gitlab_user_id}"]
@@ -554,6 +769,33 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
       "internal" => false,
       "resolvable" => false,
       "author" => %{"name" => "Developer", "username" => "dev"}
+    }
+  end
+
+  defp merge_request_attrs(iid, title, description) do
+    %{
+      merge_request_id: 990_000 + iid,
+      iid: iid,
+      title: title,
+      description: description,
+      state: "opened",
+      draft: false,
+      work_in_progress: false,
+      web_url: "https://gitlab.example.com/group/project/-/merge_requests/#{iid}",
+      source_branch: "feature/mr-#{iid}",
+      target_branch: "main",
+      merge_status: "can_be_merged",
+      detailed_merge_status: "mergeable",
+      labels: ["frontend"],
+      author: %{id: 5, name: "Developer", username: "dev"},
+      assignees: [],
+      reviewers: [],
+      references: %{relative: "!#{iid}", full: "group/project!#{iid}"},
+      user_notes_count: 1,
+      upvotes: 0,
+      downvotes: 0,
+      changes_count: "3",
+      raw_gitlab: %{"description" => description}
     }
   end
 

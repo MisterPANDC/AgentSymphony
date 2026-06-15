@@ -6,6 +6,7 @@ defmodule Symphony.GitLab.NoteMapper do
   @spec from_gitlab(map()) :: map()
   def from_gitlab(%{} = raw) do
     %{
+      id: "gitlab-note-#{raw["id"]}",
       note_id: raw["id"],
       body: raw["body"] || "",
       author: slim_user(raw["author"]),

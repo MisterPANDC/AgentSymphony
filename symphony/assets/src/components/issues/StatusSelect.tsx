@@ -44,8 +44,9 @@ export function WorkflowStatusSelect({
 
     const viewportMargin = 8;
     const menuOffset = 6;
-    const menuWidth = 192;
-    const fullMenuHeight = optionStatuses.length * 36 + 2;
+    const menuWidth = 128;
+    const menuHeaderHeight = 26;
+    const fullMenuHeight = menuHeaderHeight + optionStatuses.length * 32 + 2;
     const rect = trigger.getBoundingClientRect();
     const containingBlock = findFixedContainingBlock(trigger);
     const availableBelow = window.innerHeight - rect.bottom - viewportMargin;
@@ -128,6 +129,9 @@ export function WorkflowStatusSelect({
       </button>
       {open && (
         <div className="status-select-menu" ref={menuPanelRef} role="menu" style={menuStyle}>
+          <div className="status-select-menu-header">
+            <span>Status</span>
+          </div>
           {optionStatuses.map((status) => {
             const selected = status === value;
             const optionDisabled = !selected && Boolean(isOptionDisabled?.(status));

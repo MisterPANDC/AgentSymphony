@@ -148,6 +148,20 @@ defmodule SymphonyElixir.Store do
   @spec delete_note(String.t(), integer() | String.t()) :: :ok | {:error, term()}
   def delete_note(issue_id, note_id), do: backend().delete_note(issue_id, note_id)
 
+  @spec replace_project_merge_requests(String.t(), [map()]) :: [map()]
+  def replace_project_merge_requests(project_setting_id, entries),
+    do: backend().replace_project_merge_requests(project_setting_id, entries)
+
+  @spec upsert_merge_request(String.t(), String.t(), map()) :: map()
+  def upsert_merge_request(project_setting_id, issue_id, attrs),
+    do: backend().upsert_merge_request(project_setting_id, issue_id, attrs)
+
+  @spec list_merge_requests(String.t()) :: [map()]
+  def list_merge_requests(issue_id), do: backend().list_merge_requests(issue_id)
+
+  @spec merge_request_counts([String.t()]) :: map()
+  def merge_request_counts(issue_ids), do: backend().merge_request_counts(issue_ids)
+
   @spec list_events(keyword()) :: [map()]
   def list_events(filters \\ []), do: backend().list_events(filters)
 

@@ -18,6 +18,7 @@ defmodule SymphonyElixir.Store.Postgres do
   alias SymphonyElixir.Persistence.IssueEvent
   alias SymphonyElixir.Persistence.IssueNote
   alias SymphonyElixir.Persistence.IssueRelation
+  alias SymphonyElixir.Persistence.MergeRequest
   alias SymphonyElixir.Persistence.ProjectSetting
   alias SymphonyElixir.Persistence.RuntimeBlock
   alias SymphonyElixir.Persistence.SyncCursor
@@ -599,6 +600,94 @@ defmodule SymphonyElixir.Store.Postgres do
 
         append_event("gitlab_note_deleted", "gitlab_sync", %{note_id: note_id}, issue_id: issue_id)
         :ok
+    end
+  end
+
+  @spec replace_project_merge_requests(String.t(), [map()]) :: [map()]
+  def replace_project_merge_requests(project_setting_id, entries) when is_binary(project_setting_id) and is_list(entries) do
+    Repo.transaction(fn ->
+      from(mr in MergeRequest, where: mr.gitlab_project_setting_id == ^project_setting_id)
+      |> Repo.delete_all()
+
+      entries
+      |> Enum.map(fn entry ->
+        issue_id = entry[:issue_id] || entry["issue_id"]
+
+        attrs =
+          entry
+          |> Map.get(:attrs, Map.get(entry, "attrs", %{}))
+          |> atomize_keys()
+          |> Map.put(:gitlab_project_setting_id, project_setting_id)
+          |> Map.put(:gitlab_issue_id, issue_id)
+          |> Map.update(:labels, [], &(&1 || []))
+          |> Map.update(:assignees, [], &(&1 || []))
+          |> Map.update(:reviewers, [], &(&1 || []))
+          |> Map.put_new(:draft, false)
+          |> Map.put_new(:work_in_progress, false)
+
+        %MergeRequest{}
+        |> MergeRequest.changeset(attrs)
+        |> Repo.insert!()
+        |> plain()
+      end)
+    end)
+    |> case do
+      {:ok, merge_requests} -> merge_requests
+      {:error, reason} -> raise inspect(reason)
+    end
+  end
+
+  @spec upsert_merge_request(String.t(), String.t(), map()) :: map()
+  def upsert_merge_request(project_setting_id, issue_id, attrs) when is_binary(project_setting_id) and is_binary(issue_id) do
+    attrs =
+      attrs
+      |> atomize_keys()
+      |> Map.put(:gitlab_project_setting_id, project_setting_id)
+      |> Map.put(:gitlab_issue_id, issue_id)
+      |> Map.update(:labels, [], &(&1 || []))
+      |> Map.update(:assignees, [], &(&1 || []))
+      |> Map.update(:reviewers, [], &(&1 || []))
+      |> Map.put_new(:draft, false)
+      |> Map.put_new(:work_in_progress, false)
+
+    merge_request =
+      Repo.one(
+        from(mr in MergeRequest,
+          where: mr.gitlab_issue_id == ^issue_id and mr.merge_request_id == ^attrs.merge_request_id,
+          limit: 1
+        )
+      )
+
+    (merge_request || %MergeRequest{})
+    |> MergeRequest.changeset(attrs)
+    |> Repo.insert_or_update!()
+    |> plain()
+  end
+
+  @spec list_merge_requests(String.t()) :: [map()]
+  def list_merge_requests(issue_id) do
+    from(mr in MergeRequest,
+      where: mr.gitlab_issue_id == ^issue_id,
+      order_by: [desc: coalesce(mr.gitlab_updated_at, mr.updated_at), desc: mr.iid]
+    )
+    |> Repo.all()
+    |> Enum.map(&plain/1)
+  end
+
+  @spec merge_request_counts([String.t()]) :: map()
+  def merge_request_counts(issue_ids) when is_list(issue_ids) do
+    wanted = Enum.filter(issue_ids, &is_binary/1)
+
+    if wanted == [] do
+      %{}
+    else
+      from(mr in MergeRequest,
+        where: mr.gitlab_issue_id in ^wanted,
+        group_by: mr.gitlab_issue_id,
+        select: {mr.gitlab_issue_id, count(mr.id)}
+      )
+      |> Repo.all()
+      |> Map.new(fn {issue_id, count} -> {issue_id, count} end)
     end
   end
 

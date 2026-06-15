@@ -1,6 +1,7 @@
 import type { IssueDTO } from "../../types/issue";
 import { GitLabMeta } from "./GitLabMeta";
 import { IssueLabelList } from "./IssueLabelEditor";
+import { MergeRequestIcon } from "./MergeRequestIcon";
 import { formatStatusLabel, StatusIcon } from "./StatusIcon";
 
 export function IssueRow({ issue, onOpen }: { issue: IssueDTO; onOpen: (issue: IssueDTO) => void }) {
@@ -25,6 +26,7 @@ export function IssueRow({ issue, onOpen }: { issue: IssueDTO; onOpen: (issue: I
         )}
       </div>
       <div className="issue-row-secondary">
+        <MergeRequestListIcon count={issue.mergeRequestCount} />
         <GitLabMeta issue={issue} />
       </div>
       <div className="issue-row-preview" aria-hidden="true">
@@ -39,9 +41,22 @@ export function IssueRow({ issue, onOpen }: { issue: IssueDTO; onOpen: (issue: I
         <p>{previewDescription}</p>
         <div className="issue-row-preview-footer">
           <IssueLabelList labels={issue.labels} limit={3} emptyLabel="No labels" />
-          {issue.isBlocked && <span className="issue-row-preview-flags">Blocked</span>}
+          <span className="issue-row-preview-flags">
+            <MergeRequestListIcon count={issue.mergeRequestCount} />
+            {issue.isBlocked && "Blocked"}
+          </span>
         </div>
       </div>
     </article>
+  );
+}
+
+function MergeRequestListIcon({ count }: { count?: number | null }) {
+  if (!count || count < 1) return null;
+
+  return (
+    <span className="issue-row-merge-request-icon" title={`${count} linked merge ${count === 1 ? "request" : "requests"}`} aria-label={`${count} linked merge ${count === 1 ? "request" : "requests"}`}>
+      <MergeRequestIcon size={18} />
+    </span>
   );
 }

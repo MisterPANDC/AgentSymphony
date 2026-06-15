@@ -1,41 +1,99 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Check, CornerUpLeft, ExternalLink, Link2, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, Pencil, Trash2, X } from "lucide-react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { deleteIssueNote, getIssueNotes, updateIssueDescription, updateIssueTitle } from "../../api/issues";
-import type { IssueDTO, NoteDTO } from "../../types/issue";
+import { Check, CornerUpLeft, ExternalLink, Link2, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, Pencil, Plus, Tag, Trash2, X } from "lucide-react";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import {
+  createMergeRequestNote,
+  deleteIssueNote,
+  deleteMergeRequestNote,
+  getIssueMergeRequests,
+  getIssueNotes,
+  getMergeRequestNotes,
+  updateIssueDescription,
+  updateIssueTitle,
+  updateMergeRequestGitLab,
+  updateMergeRequestNote
+} from "../../api/issues";
+import type { IssueDTO, MergeRequestDTO, NoteDTO } from "../../types/issue";
 import { IssueRelationsSummary } from "./BlockerEditor";
 import { GitLabMeta } from "./GitLabMeta";
 import { IssueLabelEditor } from "./IssueLabelEditor";
-import { IssueNoteComposer } from "./IssueNoteComposer";
+import { ClosedMergeRequestIcon, MergeRequestIcon } from "./MergeRequestIcon";
+import { IssueNoteComposer, type NoteQuickAction } from "./IssueNoteComposer";
 import { StatusSelect } from "./StatusSelect";
 import { StatusIcon } from "./StatusIcon";
 
 type InlineComposerState = { noteId: string; mode: "reply" | "edit" } | null;
+type NoteMutationResult = Promise<{ notes: NoteDTO[] }>;
+type NoteThreadTarget = {
+  queryKey?: readonly unknown[];
+  webUrl?: string;
+  createNote?: (body: string, files: File[]) => NoteMutationResult;
+  updateNote?: (noteId: number | string, body: string, files: File[]) => NoteMutationResult;
+  deleteNote?: (noteId: number | string) => NoteMutationResult;
+};
+
+const MERGE_REQUEST_QUICK_ACTIONS: NoteQuickAction[] = [
+  { command: "/ready", description: "Marks this merge request as ready." },
+  { command: "/draft", description: "Marks this merge request as draft." }
+];
 
 export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; onClose: () => void }) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const unlockDialogHeightFrameRef = useRef<number | null>(null);
-  const [expanded, setExpanded] = useState(false);
+  const [expandedPane, setExpandedPane] = useState<"issue" | "merge-request" | null>(null);
   const [inlineComposer, setInlineComposer] = useState<InlineComposerState>(null);
+  const [mergeRequestInlineComposer, setMergeRequestInlineComposer] = useState<InlineComposerState>(null);
   const [descriptionEditing, setDescriptionEditing] = useState(false);
+  const [mergeRequestDescriptionEditing, setMergeRequestDescriptionEditing] = useState(false);
   const [lockedDialogHeight, setLockedDialogHeight] = useState<number | null>(null);
+  const [mergeRequestMenuOpen, setMergeRequestMenuOpen] = useState(false);
+  const [selectedMergeRequestId, setSelectedMergeRequestId] = useState<number | null>(null);
   const { data } = useQuery({
     queryKey: ["issue-notes", issue?.id],
     queryFn: () => getIssueNotes(issue!.id),
     enabled: Boolean(issue)
   });
+  const mergeRequestQuery = useQuery({
+    queryKey: ["issue-merge-requests", issue?.id],
+    queryFn: () => getIssueMergeRequests(issue!.id),
+    enabled: Boolean(issue && (issue.mergeRequestCount ?? 0) > 0),
+    staleTime: 30_000
+  });
   const notes = data?.notes ?? [];
   const userCommentCount = notes.filter((note) => !note.system).length;
+  const mergeRequests = mergeRequestQuery.data?.mergeRequests ?? [];
+  const selectedMergeRequest = mergeRequests.find((mergeRequest) => mergeRequest.id === selectedMergeRequestId) ?? null;
+  const mergeRequestNotesQueryKey = ["merge-request-notes", issue?.id, selectedMergeRequest?.iid] as const;
+  const mergeRequestNotesQuery = useQuery({
+    queryKey: mergeRequestNotesQueryKey,
+    queryFn: () => getMergeRequestNotes(issue!.id, selectedMergeRequest!.iid),
+    enabled: Boolean(issue && selectedMergeRequest),
+    staleTime: 30_000
+  });
+  const mergeRequestNotes = mergeRequestNotesQuery.data?.notes ?? [];
 
   useEffect(() => {
     clearScheduledDialogHeightUnlock();
-    setExpanded(false);
+    setExpandedPane(null);
     setInlineComposer(null);
+    setMergeRequestInlineComposer(null);
     setDescriptionEditing(false);
+    setMergeRequestDescriptionEditing(false);
     setLockedDialogHeight(null);
+    setMergeRequestMenuOpen(false);
+    setSelectedMergeRequestId(null);
   }, [issue?.id]);
+
+  useEffect(() => {
+    if (!selectedMergeRequestId || mergeRequests.some((mergeRequest) => mergeRequest.id === selectedMergeRequestId)) return;
+    setSelectedMergeRequestId(null);
+  }, [mergeRequests, selectedMergeRequestId]);
+
+  useEffect(() => {
+    setMergeRequestInlineComposer(null);
+  }, [selectedMergeRequestId]);
 
   useEffect(() => {
     return () => clearScheduledDialogHeightUnlock();
@@ -59,7 +117,7 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
 
   function lockDialogHeight() {
     clearScheduledDialogHeightUnlock();
-    if (!expanded) {
+    if (!expandedPane) {
       const height = dialogRef.current?.getBoundingClientRect().height;
       setLockedDialogHeight(height ? Math.round(height) : null);
     }
@@ -70,9 +128,21 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
     setInlineComposer({ noteId, mode });
   }
 
+  function startMergeRequestInlineComposer(noteId: string, mode: "reply" | "edit") {
+    lockDialogHeight();
+    setMergeRequestInlineComposer({ noteId, mode });
+  }
+
   function cancelInlineComposer() {
     setInlineComposer(null);
     if (!descriptionEditing) {
+      unlockDialogHeightAfterLayout();
+    }
+  }
+
+  function cancelMergeRequestInlineComposer() {
+    setMergeRequestInlineComposer(null);
+    if (!mergeRequestDescriptionEditing) {
       unlockDialogHeightAfterLayout();
     }
   }
@@ -82,6 +152,11 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
     setDescriptionEditing(true);
   }
 
+  function startMergeRequestDescriptionEditing() {
+    lockDialogHeight();
+    setMergeRequestDescriptionEditing(true);
+  }
+
   function finishDescriptionEditing() {
     setDescriptionEditing(false);
     if (!inlineComposer) {
@@ -89,10 +164,46 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
     }
   }
 
-  function toggleExpanded() {
+  function finishMergeRequestDescriptionEditing() {
+    setMergeRequestDescriptionEditing(false);
+    if (!mergeRequestInlineComposer) {
+      unlockDialogHeightAfterLayout();
+    }
+  }
+
+  function toggleIssueExpanded() {
     clearScheduledDialogHeightUnlock();
     setLockedDialogHeight(null);
-    setExpanded((value) => !value);
+    setExpandedPane((value) => (value === "issue" ? null : "issue"));
+  }
+
+  function toggleMergeRequestExpanded() {
+    clearScheduledDialogHeightUnlock();
+    setLockedDialogHeight(null);
+    setExpandedPane((value) => (value === "merge-request" ? null : "merge-request"));
+  }
+
+  function closeDrawer() {
+    clearScheduledDialogHeightUnlock();
+    setExpandedPane(null);
+    setDescriptionEditing(false);
+    setMergeRequestDescriptionEditing(false);
+    setLockedDialogHeight(null);
+    onClose();
+  }
+
+  function closeIssuePane() {
+    if (!selectedMergeRequest) {
+      closeDrawer();
+      return;
+    }
+
+    clearScheduledDialogHeightUnlock();
+    setLockedDialogHeight(null);
+    setMergeRequestMenuOpen(false);
+    setInlineComposer(null);
+    setDescriptionEditing(false);
+    setExpandedPane("merge-request");
   }
 
   return (
@@ -100,11 +211,7 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
       open={Boolean(issue)}
       onOpenChange={(open) => {
         if (!open) {
-          clearScheduledDialogHeightUnlock();
-          setExpanded(false);
-          setDescriptionEditing(false);
-          setLockedDialogHeight(null);
-          onClose();
+          closeDrawer();
         }
       }}
     >
@@ -112,8 +219,8 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
         <Dialog.Overlay className="issue-detail-overlay" />
         <Dialog.Content
           ref={dialogRef}
-          className={`issue-detail-dialog${expanded ? " is-expanded" : ""}`}
-          style={!expanded && lockedDialogHeight ? { height: lockedDialogHeight } : undefined}
+          className={`issue-detail-dialog${expandedPane ? " is-expanded" : ""}${expandedPane === "issue" ? " is-issue-expanded" : ""}${expandedPane === "merge-request" ? " is-merge-request-expanded" : ""}${selectedMergeRequest ? " has-merge-request-panel" : ""}`}
+          style={!expandedPane && lockedDialogHeight ? { height: lockedDialogHeight } : undefined}
           onEscapeKeyDown={keepDrawerOpenForInlineEditing}
         >
           {issue && (
@@ -121,69 +228,122 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
               <Dialog.Description className="issue-detail-title--hidden">
                 Issue details, description, labels, and activity for {issue.identifier}.
               </Dialog.Description>
-              <div className="issue-detail-dialog-actions">
-                <button
-                  className="dialog-close-button"
-                  type="button"
-                  aria-label={expanded ? "Restore issue dialog" : "Expand issue dialog"}
-                  title={expanded ? "Restore" : "Expand"}
-                  onClick={toggleExpanded}
-                >
-                  {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-                </button>
-                <Dialog.Close className="dialog-close-button" title="Close">
-                  <X size={15} />
-                </Dialog.Close>
-              </div>
-              <div className="issue-detail-dialog-body">
-                <div className="issue-detail-dialog-header">
-                  <div className="min-w-0 flex-1">
-                    <IssueTitleEditor issue={issue} />
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <GitLabMeta issue={issue} showLink={false} />
-                      <StatusSelect issue={issue} />
-                      <IssueRelationsSummary issue={issue} />
-                      {issue.isBlocked && (
-                        <span className="status-pill blocked">
-                          <StatusIcon status="blocked" size={12} />
-                          blocked
-                        </span>
+              <div className="issue-detail-dialog-content">
+                <div className="issue-detail-dialog-body">
+                  <div className="issue-detail-dialog-header">
+                    <div className="min-w-0 flex-1">
+                      <IssueTitleEditor issue={issue} />
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <GitLabMeta issue={issue} showLink={false} />
+                        <StatusSelect issue={issue} />
+                        <MergeRequestSelector
+                          issue={issue}
+                          mergeRequests={mergeRequests}
+                          loading={mergeRequestQuery.isFetching}
+                          error={mergeRequestQuery.isError ? mergeRequestQuery.error.message : null}
+                          open={mergeRequestMenuOpen}
+                          onOpenChange={setMergeRequestMenuOpen}
+                          selectedMergeRequest={selectedMergeRequest}
+                          onSelect={(mergeRequest) => {
+                            setSelectedMergeRequestId(mergeRequest.id);
+                            setMergeRequestMenuOpen(false);
+                          }}
+                        />
+                        <IssueRelationsSummary issue={issue} />
+                        {issue.isBlocked && (
+                          <span className="status-pill blocked">
+                            <StatusIcon status="blocked" size={12} />
+                            blocked
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="pane-actions issue-pane-actions" aria-label="Issue pane actions">
+                      <button
+                        className="dialog-close-button"
+                        type="button"
+                        aria-label={expandedPane === "issue" ? "Restore issue pane" : "Expand issue pane"}
+                        title={expandedPane === "issue" ? "Restore issue pane" : "Expand issue pane"}
+                        onClick={toggleIssueExpanded}
+                      >
+                        {expandedPane === "issue" ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                      </button>
+                      <button
+                        className="dialog-close-button"
+                        type="button"
+                        aria-label={selectedMergeRequest ? "Close issue pane" : "Close issue details"}
+                        title={selectedMergeRequest ? "Close issue pane" : "Close issue details"}
+                        onClick={closeIssuePane}
+                      >
+                        <X size={15} />
+                      </button>
+                    </div>
+                  </div>
+                  <IssueLabelEditor issue={issue} />
+                  <IssueDescriptionEditor issue={issue} onStartEditing={startDescriptionEditing} onFinishEditing={finishDescriptionEditing} />
+                  <section className="issue-activity-section">
+                    <div className="issue-activity-header">
+                      <h3 className="issue-activity-title">Activity</h3>
+                      <span className="issue-activity-count">
+                        {userCommentCount} {userCommentCount === 1 ? "comment" : "comments"}
+                      </span>
+                    </div>
+                    <div className="issue-activity-list" aria-label="Issue activity">
+                      {notes.length > 0 ? (
+                        notes.map((note) => (
+                          <ActivityNote
+                            key={note.id}
+                            note={note}
+                            issue={issue}
+                            activeComposer={inlineComposer?.noteId === note.id ? inlineComposer.mode : null}
+                            onStartReply={() => startInlineComposer(note.id, "reply")}
+                            onStartEdit={() => startInlineComposer(note.id, "edit")}
+                            onCancelInline={cancelInlineComposer}
+                          />
+                        ))
+                      ) : (
+                        <div className="issue-activity-empty">No activity yet.</div>
                       )}
                     </div>
-                  </div>
-                </div>
-                <IssueLabelEditor issue={issue} />
-                <IssueDescriptionEditor issue={issue} onStartEditing={startDescriptionEditing} onFinishEditing={finishDescriptionEditing} />
-                <section className="issue-activity-section">
-                  <div className="issue-activity-header">
-                    <h3 className="issue-activity-title">Activity</h3>
-                    <span className="issue-activity-count">
-                      {userCommentCount} {userCommentCount === 1 ? "comment" : "comments"}
-                    </span>
-                  </div>
-                  <div className="issue-activity-list" aria-label="Issue activity">
-                    {notes.length > 0 ? (
-                      notes.map((note) => (
-                        <ActivityNote
-                          key={note.id}
-                          note={note}
-                          issue={issue}
-                          activeComposer={inlineComposer?.noteId === note.id ? inlineComposer.mode : null}
-                          onStartReply={() => startInlineComposer(note.id, "reply")}
-                          onStartEdit={() => startInlineComposer(note.id, "edit")}
-                          onCancelInline={cancelInlineComposer}
-                        />
-                      ))
-                    ) : (
-                      <div className="issue-activity-empty">No activity yet.</div>
+                    {!inlineComposer && (
+                      <div className="issue-activity-composer">
+                        <IssueNoteComposer issueId={issue.id} />
+                      </div>
                     )}
-                  </div>
-                  {!inlineComposer && (
-                    <div className="issue-activity-composer">
-                      <IssueNoteComposer issueId={issue.id} />
-                    </div>
-                  )}
-                </section>
+                  </section>
+                </div>
+                <MergeRequestDetailPanel
+                  issue={issue}
+                  mergeRequest={selectedMergeRequest}
+                  onStartDescriptionEditing={startMergeRequestDescriptionEditing}
+                  onFinishDescriptionEditing={finishMergeRequestDescriptionEditing}
+                  notes={mergeRequestNotes}
+                  notesLoading={mergeRequestNotesQuery.isFetching}
+                  notesError={mergeRequestNotesQuery.isError ? mergeRequestNotesQuery.error.message : null}
+                  noteTarget={
+                    selectedMergeRequest
+                      ? {
+                          queryKey: mergeRequestNotesQueryKey,
+                          webUrl: selectedMergeRequest.webUrl,
+                          createNote: (body, files) => createMergeRequestNote(issue.id, selectedMergeRequest.iid, body, files),
+                          updateNote: (noteId, body, files) => updateMergeRequestNote(issue.id, selectedMergeRequest.iid, noteId, body, files),
+                          deleteNote: (noteId) => deleteMergeRequestNote(issue.id, selectedMergeRequest.iid, noteId)
+                        }
+                      : undefined
+                  }
+                  activeComposer={mergeRequestInlineComposer}
+                  onStartReply={(noteId) => startMergeRequestInlineComposer(noteId, "reply")}
+                  onStartEdit={(noteId) => startMergeRequestInlineComposer(noteId, "edit")}
+                  onCancelInline={cancelMergeRequestInlineComposer}
+                  expanded={expandedPane === "merge-request"}
+                  onToggleExpanded={toggleMergeRequestExpanded}
+                  onClose={() => {
+                    if (expandedPane === "merge-request") {
+                      setExpandedPane(null);
+                    }
+                    setSelectedMergeRequestId(null);
+                  }}
+                />
               </div>
             </>
           )}
@@ -193,9 +353,795 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
   );
 }
 
+function MergeRequestSelector({
+  issue,
+  mergeRequests,
+  loading,
+  error,
+  open,
+  onOpenChange,
+  selectedMergeRequest,
+  onSelect
+}: {
+  issue: IssueDTO;
+  mergeRequests: MergeRequestDTO[];
+  loading: boolean;
+  error: string | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  selectedMergeRequest: MergeRequestDTO | null;
+  onSelect: (mergeRequest: MergeRequestDTO) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const availableCount = mergeRequests.length || issue.mergeRequestCount || 0;
+  const shouldRender = availableCount > 0 || loading || Boolean(error);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function closeMenu(event: MouseEvent) {
+      const target = event.target;
+      if (target instanceof HTMLElement && containerRef.current?.contains(target)) return;
+      onOpenChange(false);
+    }
+
+    document.addEventListener("mousedown", closeMenu);
+    return () => document.removeEventListener("mousedown", closeMenu);
+  }, [open, onOpenChange]);
+
+  if (!shouldRender) return null;
+
+  return (
+    <div ref={containerRef} className="merge-request-selector">
+      <button
+        className={`merge-request-trigger${open ? " is-open" : ""}${selectedMergeRequest ? " has-selection" : ""}`}
+        type="button"
+        aria-label="Show linked merge requests"
+        aria-expanded={open}
+        title="Linked merge requests"
+        onClick={() => onOpenChange(!open)}
+      >
+        <MergeRequestIcon size={13} />
+        <span>{availableCount || "MR"}</span>
+      </button>
+      {open && (
+        <div className="merge-request-menu" role="menu">
+          <div className="merge-request-menu-header">
+            <span>Merge requests</span>
+            {loading && <LoaderCircle size={12} className="animate-spin" />}
+          </div>
+          {error ? (
+            <div className="merge-request-menu-empty">{error}</div>
+          ) : mergeRequests.length > 0 ? (
+            <div className="merge-request-list">
+              {mergeRequests.map((mergeRequest) => (
+                <button
+                  key={mergeRequest.id}
+                  className={`merge-request-row${selectedMergeRequest?.id === mergeRequest.id ? " is-selected" : ""}`}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => onSelect(mergeRequest)}
+                >
+                  <span className="merge-request-row-main">
+                    <MergeRequestIcon size={14} className={mergeRequest.draft ? "is-draft" : "is-ready"} />
+                    <span className="merge-request-row-iid">!{mergeRequest.iid}</span>
+                    <span className="merge-request-row-title-text">{mergeRequest.title}</span>
+                  </span>
+                  <span className="merge-request-row-status">
+                    <MergeRequestDraftStatusText mergeRequest={mergeRequest} />
+                    <MergeRequestGitLabStateBadge mergeRequest={mergeRequest} compact />
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="merge-request-menu-empty">Searching for Closes #{issue.iid}.</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MergeRequestDetailPanel({
+  issue,
+  mergeRequest,
+  onStartDescriptionEditing,
+  onFinishDescriptionEditing,
+  notes,
+  notesLoading,
+  notesError,
+  noteTarget,
+  activeComposer,
+  onStartReply,
+  onStartEdit,
+  onCancelInline,
+  expanded,
+  onToggleExpanded,
+  onClose
+}: {
+  issue: IssueDTO;
+  mergeRequest: MergeRequestDTO | null;
+  onStartDescriptionEditing: () => void;
+  onFinishDescriptionEditing: () => void;
+  notes: NoteDTO[];
+  notesLoading: boolean;
+  notesError: string | null;
+  noteTarget?: NoteThreadTarget;
+  activeComposer: InlineComposerState;
+  onStartReply: (noteId: string) => void;
+  onStartEdit: (noteId: string) => void;
+  onCancelInline: () => void;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const notesLoaded = !notesLoading && !notesError;
+  const userCommentCount = notesLoaded ? notes.filter((note) => !note.system).length : mergeRequest?.userNotesCount ?? 0;
+
+  async function applyMergeRequestQuickAction(action: NoteQuickAction) {
+    if (!mergeRequest) throw new Error("Merge request is required");
+
+    const draft = draftValueForMergeRequestQuickAction(action);
+    if (draft === null) {
+      throw new Error(`Unsupported merge request command: ${action.command}`);
+    }
+
+    updateMergeRequestCache(queryClient, issue.id, {
+      ...mergeRequest,
+      draft,
+      workInProgress: draft
+    });
+
+    if (noteTarget?.queryKey) {
+      queryClient.invalidateQueries({ queryKey: noteTarget.queryKey });
+    }
+  }
+
+  return (
+    <aside className={`merge-request-detail-panel${mergeRequest ? " is-visible" : ""}`} aria-hidden={!mergeRequest}>
+      {mergeRequest && (
+        <div className="merge-request-detail-body">
+          <div className="merge-request-detail-dialog-header">
+            <div className="min-w-0 flex-1">
+              <MergeRequestTitleEditor issue={issue} mergeRequest={mergeRequest} />
+              <div className="merge-request-header-meta">
+                <MergeRequestGitLabStateBadge mergeRequest={mergeRequest} />
+                <div className="merge-request-branch-strip">
+                  <span className="mono">{mergeRequest.sourceBranch || "source"}</span>
+                  <span aria-hidden="true">-&gt;</span>
+                  <span className="mono">{mergeRequest.targetBranch || "target"}</span>
+                </div>
+                <MergeRequestDraftStatusText mergeRequest={mergeRequest} />
+              </div>
+            </div>
+            <div className="pane-actions merge-request-pane-actions" aria-label="Merge request pane actions">
+              <button
+                className="dialog-close-button"
+                type="button"
+                aria-label={expanded ? "Restore merge request pane" : "Expand merge request pane"}
+                title={expanded ? "Restore merge request pane" : "Expand merge request pane"}
+                onClick={onToggleExpanded}
+              >
+                {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+              </button>
+              <button className="dialog-close-button" type="button" aria-label="Close merge request pane" title="Close merge request pane" onClick={onClose}>
+                <X size={15} />
+              </button>
+            </div>
+          </div>
+
+          <MergeRequestLabelEditor issue={issue} mergeRequest={mergeRequest} />
+
+          <MergeRequestDescriptionEditor
+            issue={issue}
+            mergeRequest={mergeRequest}
+            onStartEditing={onStartDescriptionEditing}
+            onFinishEditing={onFinishDescriptionEditing}
+          />
+
+          <section className="issue-activity-section">
+            <div className="issue-activity-header">
+              <h3 className="issue-activity-title">Activity</h3>
+              <span className="issue-activity-count">
+                {userCommentCount} {userCommentCount === 1 ? "comment" : "comments"}
+              </span>
+            </div>
+            <div className="issue-activity-list" aria-label="Merge request activity">
+              {notesError ? (
+                <div className="issue-activity-empty is-error">{notesError}</div>
+              ) : notes.length > 0 ? (
+                notes.map((note) => (
+                  <ActivityNote
+                    key={note.id}
+                    note={note}
+                    issue={issue}
+                    noteTarget={noteTarget}
+                    activeComposer={activeComposer?.noteId === note.id ? activeComposer.mode : null}
+                    onStartReply={() => onStartReply(note.id)}
+                    onStartEdit={() => onStartEdit(note.id)}
+                    onCancelInline={onCancelInline}
+                  />
+                ))
+              ) : (
+                <div className="issue-activity-empty">{notesLoading ? "Loading activity..." : "No activity yet."}</div>
+              )}
+            </div>
+            {!activeComposer && noteTarget && (
+              <div className="issue-activity-composer">
+                <IssueNoteComposer
+                  issueId={issue.id}
+                  queryKey={noteTarget.queryKey}
+                  createNote={noteTarget.createNote}
+                  updateNote={noteTarget.updateNote}
+                  quickActions={MERGE_REQUEST_QUICK_ACTIONS}
+                  onQuickAction={applyMergeRequestQuickAction}
+                />
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+    </aside>
+  );
+}
+
+function MergeRequestTitleEditor({ issue, mergeRequest }: { issue: IssueDTO; mergeRequest: MergeRequestDTO }) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(mergeRequest.title);
+  const shortIdentifier = `!${mergeRequest.iid}`;
+  const titleHasChanges = draft.trim().length > 0 && draft.trim() !== mergeRequest.title;
+  const mutation = useMutation({
+    mutationFn: (title: string) => updateMergeRequestGitLab(issue.id, mergeRequest.iid, { title }),
+    onSuccess: ({ mergeRequest: updatedMergeRequest }) => {
+      updateMergeRequestCache(queryClient, issue.id, updatedMergeRequest);
+      setEditing(false);
+      setDraft(updatedMergeRequest.title);
+    }
+  });
+
+  useEffect(() => {
+    setEditing(false);
+    setDraft(mergeRequest.title);
+    mutation.reset();
+  }, [mergeRequest.id, mergeRequest.title]);
+
+  function beginEditing() {
+    mutation.reset();
+    setDraft(mergeRequest.title);
+    setEditing(true);
+  }
+
+  function cancelEditing() {
+    mutation.reset();
+    setDraft(mergeRequest.title);
+    setEditing(false);
+  }
+
+  function commitTitle() {
+    if (mutation.isPending) return;
+
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === mergeRequest.title) {
+      cancelEditing();
+      return;
+    }
+
+    mutation.mutate(trimmed);
+  }
+
+  function handleTitleKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      commitTitle();
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelEditing();
+    }
+  }
+
+  return (
+    <div className={`issue-title-editor merge-request-title-editor${editing ? " issue-title-editor--editing" : ""}`}>
+      {editing ? (
+        <>
+          <span className="issue-title-identifier">{shortIdentifier}</span>
+          <input
+            autoFocus
+            aria-label="Merge request title"
+            className="issue-title-input"
+            disabled={mutation.isPending}
+            size={titleInputSize(draft || mergeRequest.title)}
+            value={draft}
+            onBlur={commitTitle}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={handleTitleKeyDown}
+          />
+          {titleHasChanges && (
+            <button
+              className="issue-title-confirm"
+              type="button"
+              aria-label="Save merge request title"
+              title="Save title"
+              disabled={mutation.isPending}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={commitTitle}
+            >
+              <Check size={13} />
+            </button>
+          )}
+          {mutation.isPending && <LoaderCircle className="issue-title-saving animate-spin" size={14} />}
+        </>
+      ) : (
+        <>
+          <button className="issue-title-display" type="button" aria-label="Edit merge request title" title="Edit title" disabled={mutation.isPending} onClick={beginEditing}>
+            <span className="issue-title-identifier">{shortIdentifier}</span>
+            <span className="issue-detail-title">{mergeRequest.title}</span>
+          </button>
+          {mergeRequest.webUrl && (
+            <a className="issue-title-link" href={mergeRequest.webUrl} target="_blank" rel="noreferrer" aria-label="Open merge request in GitLab" title="Open in GitLab">
+              <ExternalLink size={14} />
+            </a>
+          )}
+          {mutation.isPending && <LoaderCircle className="issue-title-saving animate-spin" size={14} />}
+        </>
+      )}
+      {mutation.isError && <div className="issue-title-error">{mutation.error.message}</div>}
+    </div>
+  );
+}
+
+function MergeRequestDraftStatusText({ mergeRequest }: { mergeRequest: MergeRequestDTO }) {
+  const status = mergeRequest.draft ? "draft" : "ready";
+  return <span className={`merge-request-draft-text is-${status}`}>{status.toUpperCase()}</span>;
+}
+
+function MergeRequestGitLabStateBadge({ mergeRequest, compact = false }: { mergeRequest: MergeRequestDTO; compact?: boolean }) {
+  const state = mergeRequestGitLabState(mergeRequest);
+
+  return (
+    <span className={`merge-request-gitlab-state-badge is-${state}${compact ? " is-compact" : ""}`} aria-label={`GitLab merge request is ${state}`}>
+      {state === "closed" ? <ClosedMergeRequestIcon size={compact ? 13 : 14} /> : <MergeRequestIcon size={compact ? 13 : 14} />}
+      <span className="merge-request-gitlab-state-label">{state}</span>
+    </span>
+  );
+}
+
+function MergeRequestLabelEditor({ issue, mergeRequest }: { issue: IssueDTO; mergeRequest: MergeRequestDTO }) {
+  const queryClient = useQueryClient();
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [newValue, setNewValue] = useState("");
+  const currentLabels = normalizeEditableLabels(mergeRequest.labels);
+  const currentLabelsKey = editableLabelsKey(currentLabels);
+  const mutation = useMutation({
+    mutationFn: (labels: string[]) => updateMergeRequestGitLab(issue.id, mergeRequest.iid, { labels }),
+    onSuccess: ({ mergeRequest: updatedMergeRequest }) => {
+      updateMergeRequestCache(queryClient, issue.id, updatedMergeRequest);
+      resetInlineState();
+    }
+  });
+
+  useEffect(() => {
+    resetInlineState();
+    mutation.reset();
+  }, [mergeRequest.id, currentLabelsKey]);
+
+  function resetInlineState() {
+    setEditingIndex(null);
+    setEditingValue("");
+    setAdding(false);
+    setNewValue("");
+  }
+
+  function beginEditing(index: number, label: string) {
+    mutation.reset();
+    setAdding(false);
+    setNewValue("");
+    setEditingIndex(index);
+    setEditingValue(label);
+  }
+
+  function beginAdding() {
+    mutation.reset();
+    setEditingIndex(null);
+    setEditingValue("");
+    setAdding(true);
+    setNewValue("");
+  }
+
+  function commitNewLabel() {
+    const labels = splitEditableLabelInput(newValue);
+    if (labels.length === 0) {
+      cancelInlineEdit();
+      return;
+    }
+
+    commitLabels(normalizeEditableLabels([...currentLabels, ...labels]));
+  }
+
+  function commitExistingLabel(index: number) {
+    const nextLabels = [...currentLabels];
+    const trimmed = editingValue.trim();
+
+    if (trimmed) {
+      nextLabels[index] = trimmed;
+    } else {
+      nextLabels.splice(index, 1);
+    }
+
+    commitLabels(normalizeEditableLabels(nextLabels));
+  }
+
+  function removeLabel(index: number) {
+    commitLabels(currentLabels.filter((_label, itemIndex) => itemIndex !== index));
+  }
+
+  function commitLabels(labels: string[]) {
+    if (mutation.isPending) return;
+
+    if (editableLabelsKey(labels) === currentLabelsKey) {
+      cancelInlineEdit();
+      return;
+    }
+
+    resetInlineState();
+    mutation.mutate(labels);
+  }
+
+  function cancelInlineEdit() {
+    resetInlineState();
+    mutation.reset();
+  }
+
+  function handleNewLabelKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter" || event.key === ",") {
+      event.preventDefault();
+      event.stopPropagation();
+      commitNewLabel();
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelInlineEdit();
+    }
+  }
+
+  function handleExistingLabelKeyDown(event: ReactKeyboardEvent<HTMLInputElement>, index: number) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      commitExistingLabel(index);
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelInlineEdit();
+    }
+  }
+
+  return (
+    <section className="label-editor">
+      <div className="label-editor-header">
+        <h3>
+          <Tag size={12} />
+          Labels
+        </h3>
+        {mutation.isPending && <LoaderCircle className="label-editor-saving animate-spin" size={13} />}
+      </div>
+      <div className="label-editor-body">
+        <div className="label-editor-input-shell">
+          {currentLabels.map((label, index) => {
+            const labelHasChanges = editingIndex === index && editingValue.trim().length > 0 && editingValue.trim() !== label;
+
+            return editingIndex === index ? (
+              <span key={`${label}-${index}`} className="label-editor-edit-chip">
+                <input
+                  autoFocus
+                  aria-label={`Edit merge request label ${index + 1}`}
+                  value={editingValue}
+                  disabled={mutation.isPending}
+                  placeholder="Label name"
+                  size={labelInputSize(editingValue || label)}
+                  onBlur={() => commitExistingLabel(index)}
+                  onChange={(event) => setEditingValue(event.target.value)}
+                  onKeyDown={(event) => handleExistingLabelKeyDown(event, index)}
+                />
+                {labelHasChanges && (
+                  <button
+                    className="label-editor-chip-confirm"
+                    type="button"
+                    aria-label={`Save label ${editingValue.trim()}`}
+                    title="Save label"
+                    disabled={mutation.isPending}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => commitExistingLabel(index)}
+                  >
+                    <Check size={11} />
+                  </button>
+                )}
+                <button
+                  className="label-editor-chip-delete"
+                  type="button"
+                  aria-label={`Remove ${label}`}
+                  title={`Remove ${label}`}
+                  disabled={mutation.isPending}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => removeLabel(index)}
+                >
+                  <Trash2 size={11} />
+                </button>
+              </span>
+            ) : (
+              <span key={`${label}-${index}`} className="label-editor-value-chip">
+                <button
+                  className="label-editor-chip-label"
+                  type="button"
+                  aria-label={`Edit merge request label ${label}`}
+                  title={`Edit ${label}`}
+                  disabled={mutation.isPending}
+                  onClick={() => beginEditing(index, label)}
+                >
+                  <span>{label}</span>
+                </button>
+              </span>
+            );
+          })}
+          {adding ? (
+            <span className="label-editor-new-chip">
+              <input
+                autoFocus
+                value={newValue}
+                disabled={mutation.isPending}
+                placeholder={currentLabels.length === 0 ? "Add label..." : "New label"}
+                size={labelInputSize(newValue || "New label")}
+                onBlur={commitNewLabel}
+                onChange={(event) => setNewValue(event.target.value)}
+                onKeyDown={handleNewLabelKeyDown}
+              />
+              <button type="button" title="Cancel new label" disabled={mutation.isPending} onMouseDown={(event) => event.preventDefault()} onClick={cancelInlineEdit}>
+                <X size={11} />
+              </button>
+            </span>
+          ) : (
+            <button className="label-editor-add-chip" type="button" aria-label="Add merge request label" title="Add label" disabled={mutation.isPending} onClick={beginAdding}>
+              <Plus size={13} />
+            </button>
+          )}
+        </div>
+        {mutation.isError && <div className="label-editor-error">{mutation.error.message}</div>}
+      </div>
+    </section>
+  );
+}
+
+function MergeRequestDescriptionEditor({
+  issue,
+  mergeRequest,
+  onStartEditing,
+  onFinishEditing
+}: {
+  issue: IssueDTO;
+  mergeRequest: MergeRequestDTO;
+  onStartEditing: () => void;
+  onFinishEditing: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const currentDescription = mergeRequest.description ?? "";
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(currentDescription);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const hasDescription = currentDescription.trim().length > 0;
+  const descriptionHasChanges = draft !== currentDescription;
+  const mutation = useMutation({
+    mutationFn: (description: string) => updateMergeRequestGitLab(issue.id, mergeRequest.iid, { description }),
+    onSuccess: ({ mergeRequest: updatedMergeRequest }) => {
+      updateMergeRequestCache(queryClient, issue.id, updatedMergeRequest);
+      setEditing(false);
+      setDraft(updatedMergeRequest.description ?? "");
+      onFinishEditing();
+    }
+  });
+
+  useEffect(() => {
+    setEditing(false);
+    setDraft(currentDescription);
+    mutation.reset();
+  }, [mergeRequest.id, currentDescription]);
+
+  useEffect(() => {
+    if (!editing) return;
+
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const selectionPosition = textarea.value.length;
+    const frame = window.requestAnimationFrame(() => {
+      textarea.focus({ preventScroll: true });
+      textarea.setSelectionRange(selectionPosition, selectionPosition);
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [editing, mergeRequest.id]);
+
+  function beginEditing() {
+    mutation.reset();
+    setDraft(currentDescription);
+    onStartEditing();
+    setEditing(true);
+  }
+
+  function cancelEditing() {
+    mutation.reset();
+    setDraft(currentDescription);
+    setEditing(false);
+    onFinishEditing();
+  }
+
+  function commitDescription() {
+    if (mutation.isPending) return;
+
+    if (!descriptionHasChanges) {
+      cancelEditing();
+      return;
+    }
+
+    mutation.mutate(draft.trim().length > 0 ? draft : "");
+  }
+
+  function handleDescriptionKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      event.stopPropagation();
+      commitDescription();
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelEditing();
+    }
+  }
+
+  return (
+    <section className={`issue-description-section${editing ? " is-editing" : ""}`}>
+      <div className="issue-description-header">
+        <h3>Description</h3>
+        {!editing && (
+          <button
+            className="issue-description-edit-button"
+            type="button"
+            aria-label="Edit merge request description"
+            title="Edit description"
+            disabled={mutation.isPending}
+            onClick={beginEditing}
+          >
+            <Pencil size={12} />
+          </button>
+        )}
+      </div>
+      {editing ? (
+        <div className="issue-description-editor">
+          <textarea
+            ref={textareaRef}
+            autoFocus
+            aria-label="Merge request description"
+            className="issue-description-textarea"
+            disabled={mutation.isPending}
+            placeholder="Add description..."
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={handleDescriptionKeyDown}
+          />
+          <div className="issue-description-editor-footer">
+            <div className="issue-description-status" aria-live="polite">
+              {mutation.isError ? mutation.error.message : mutation.isPending ? "Saving..." : ""}
+            </div>
+            <div className="issue-description-actions">
+              <button className="text-button issue-description-secondary" type="button" disabled={mutation.isPending} onClick={cancelEditing}>
+                Cancel
+              </button>
+              <button className="text-button issue-description-primary" type="button" disabled={mutation.isPending || !descriptionHasChanges} onClick={commitDescription}>
+                {mutation.isPending ? <LoaderCircle className="animate-spin" size={13} /> : <Check size={13} />}
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className={`issue-description-card${hasDescription ? "" : " is-empty"}`}>{hasDescription ? renderMarkdown(currentDescription, issue) : "No description provided."}</div>
+      )}
+    </section>
+  );
+}
+
+function updateMergeRequestCache(queryClient: QueryClient, issueId: string, updatedMergeRequest: MergeRequestDTO) {
+  queryClient.setQueryData<{ mergeRequests: MergeRequestDTO[] }>(["issue-merge-requests", issueId], (previous) =>
+    previous
+      ? {
+          ...previous,
+          mergeRequests: previous.mergeRequests.map((mergeRequest) => (mergeRequest.id === updatedMergeRequest.id ? updatedMergeRequest : mergeRequest))
+        }
+      : previous
+  );
+  queryClient.invalidateQueries({ queryKey: ["issue-merge-requests", issueId] });
+  queryClient.invalidateQueries({ queryKey: ["monitor-state"] });
+}
+
+function draftValueForMergeRequestQuickAction(action: NoteQuickAction) {
+  if (action.command === "/draft") return true;
+  if (action.command === "/ready") return false;
+  return null;
+}
+
+function splitEditableLabelInput(input: string) {
+  return input
+    .split(",")
+    .map((label) => label.trim())
+    .filter(Boolean);
+}
+
+function normalizeEditableLabels(labels: string[]) {
+  const seen = new Set<string>();
+
+  return labels.reduce<string[]>((normalized, label) => {
+    const trimmed = label.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      return normalized;
+    }
+
+    seen.add(trimmed);
+    return [...normalized, trimmed];
+  }, []);
+}
+
+function editableLabelsKey(labels: string[]) {
+  return labels.join("\n");
+}
+
+function labelInputSize(value: string) {
+  return Math.min(Math.max(value.trim().length + 1, 9), 28);
+}
+
+function formatMergeRequestState(mergeRequest: MergeRequestDTO) {
+  if (mergeRequest.state === "merged") return "merged";
+  if (mergeRequest.state === "closed") return "closed";
+  if (mergeRequest.state === "opened") return mergeRequest.draft ? "draft" : "open";
+  return humanizeStatus(mergeRequest.state);
+}
+
+function mergeRequestStateClass(mergeRequest: MergeRequestDTO) {
+  return formatMergeRequestState(mergeRequest).toLowerCase().replace(/\s+/g, "-");
+}
+
+function mergeRequestGitLabState(mergeRequest: MergeRequestDTO): "open" | "closed" {
+  return mergeRequest.state === "closed" ? "closed" : "open";
+}
+
+function humanizeStatus(value: string) {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^\w/, (letter) => letter.toUpperCase());
+}
+
 function ActivityNote({
   note,
   issue,
+  noteTarget,
   activeComposer,
   onStartReply,
   onStartEdit,
@@ -203,6 +1149,7 @@ function ActivityNote({
 }: {
   note: NoteDTO;
   issue: IssueDTO;
+  noteTarget?: NoteThreadTarget;
   activeComposer: "reply" | "edit" | null;
   onStartReply: () => void;
   onStartEdit: () => void;
@@ -227,7 +1174,6 @@ function ActivityNote({
               href={authorProfileUrl}
               target="_blank"
               rel="noreferrer"
-              title={`Open ${authorName} profile in GitLab`}
             >
               {authorName}
             </a>
@@ -260,14 +1206,25 @@ function ActivityNote({
                 href={authorProfileUrl}
                 target="_blank"
                 rel="noreferrer"
-                title={`Open ${authorName} profile in GitLab`}
               >
                 {authorName}
               </a>
             ) : (
               <span className="issue-activity-author">{authorName}</span>
             )}
-            {authorUsername && <span className="issue-activity-username">{authorUsername}</span>}
+            {authorUsername &&
+              (authorProfileUrl ? (
+                <a
+                  className="issue-activity-username issue-activity-username-link"
+                  href={authorProfileUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {authorUsername}
+                </a>
+              ) : (
+                <span className="issue-activity-username">{authorUsername}</span>
+              ))}
             <span className="issue-activity-action">commented</span>
             {createdAt && (
               <time className="issue-activity-time" dateTime={createdAt} title={formatExactDate(createdAt)}>
@@ -281,20 +1238,40 @@ function ActivityNote({
             {activeComposer ? (
               <span className="issue-comment-actions-placeholder" aria-hidden="true" />
             ) : (
-              <CommentActions note={note} issue={issue} onStartReply={onStartReply} onStartEdit={onStartEdit} onCancelInline={onCancelInline} />
+              <CommentActions note={note} issue={issue} noteTarget={noteTarget} onStartReply={onStartReply} onStartEdit={onStartEdit} onCancelInline={onCancelInline} />
             )}
           </div>
         </div>
         {activeComposer === "edit" ? (
           <div className="issue-activity-inline-composer is-edit">
-            <IssueNoteComposer issueId={issue.id} mode="edit" noteId={note.note_id} initialBody={note.body} autoFocus onCancel={onCancelInline} onSuccess={onCancelInline} />
+            <IssueNoteComposer
+              issueId={issue.id}
+              mode="edit"
+              noteId={note.note_id}
+              initialBody={note.body}
+              autoFocus
+              queryKey={noteTarget?.queryKey}
+              updateNote={noteTarget?.updateNote}
+              createNote={noteTarget?.createNote}
+              onCancel={onCancelInline}
+              onSuccess={onCancelInline}
+            />
           </div>
         ) : (
           <NoteBody body={note.body} issue={issue} />
         )}
         {activeComposer === "reply" && (
           <div className="issue-activity-inline-composer is-reply">
-            <IssueNoteComposer issueId={issue.id} mode="reply" autoFocus onCancel={onCancelInline} onSuccess={onCancelInline} />
+            <IssueNoteComposer
+              issueId={issue.id}
+              mode="reply"
+              autoFocus
+              queryKey={noteTarget?.queryKey}
+              createNote={noteTarget?.createNote}
+              updateNote={noteTarget?.updateNote}
+              onCancel={onCancelInline}
+              onSuccess={onCancelInline}
+            />
           </div>
         )}
       </div>
@@ -305,12 +1282,14 @@ function ActivityNote({
 function CommentActions({
   note,
   issue,
+  noteTarget,
   onStartReply,
   onStartEdit,
   onCancelInline
 }: {
   note: NoteDTO;
   issue: IssueDTO;
+  noteTarget?: NoteThreadTarget;
   onStartReply: () => void;
   onStartEdit: () => void;
   onCancelInline: () => void;
@@ -320,11 +1299,12 @@ function CommentActions({
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
-  const commentUrl = `${issue.webUrl}#note_${note.note_id}`;
+  const notesQueryKey = noteTarget?.queryKey ?? ["issue-notes", issue.id];
+  const commentUrl = `${noteTarget?.webUrl ?? issue.webUrl}#note_${note.note_id}`;
   const deleteMutation = useMutation({
-    mutationFn: () => deleteIssueNote(issue.id, note.note_id),
+    mutationFn: () => (noteTarget?.deleteNote ? noteTarget.deleteNote(note.note_id) : deleteIssueNote(issue.id, note.note_id)),
     onSuccess: (data) => {
-      queryClient.setQueryData<{ notes: NoteDTO[] }>(["issue-notes", issue.id], data);
+      queryClient.setQueryData<{ notes: NoteDTO[] }>(notesQueryKey, data);
       queryClient.invalidateQueries({ queryKey: ["monitor-state"] });
       onCancelInline();
       setMenuOpen(false);
@@ -488,7 +1468,7 @@ function renderMarkdown(body: string, issue: IssueDTO) {
     if (match.index > lastIndex) {
       nodes.push(
         <span key={`text-${lastIndex}`} className="whitespace-pre-wrap">
-          {body.slice(lastIndex, match.index)}
+          {renderPlainTextMarkdown(body.slice(lastIndex, match.index), issue, `text-${lastIndex}`)}
         </span>
       );
     }
@@ -511,12 +1491,12 @@ function renderMarkdown(body: string, issue: IssueDTO) {
   if (lastIndex < body.length) {
     nodes.push(
       <span key={`text-${lastIndex}`} className="whitespace-pre-wrap">
-        {body.slice(lastIndex)}
+        {renderPlainTextMarkdown(body.slice(lastIndex), issue, `text-${lastIndex}`)}
       </span>
     );
   }
 
-  return nodes.length > 0 ? nodes : <span className="whitespace-pre-wrap">{body}</span>;
+  return nodes.length > 0 ? nodes : <span className="whitespace-pre-wrap">{renderPlainTextMarkdown(body, issue, "text-0")}</span>;
 }
 
 function renderImage(label: string, url: string, key: number) {
@@ -536,6 +1516,90 @@ function renderLink(label: string, url: string, key: number) {
       {referenceLabel || label || url}
     </a>
   );
+}
+
+function renderPlainTextMarkdown(text: string, issue: IssueDTO, keyPrefix: string) {
+  const nodes: Array<JSX.Element | string> = [];
+  const pattern = /\*\*([^*]+)\*\*/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text))) {
+    if (match.index > lastIndex) {
+      nodes.push(...renderGitLabReferences(text.slice(lastIndex, match.index), issue, `${keyPrefix}-plain-${lastIndex}`));
+    }
+
+    nodes.push(
+      <strong key={`${keyPrefix}-strong-${match.index}`} className="issue-note-strong">
+        {renderGitLabReferences(match[1], issue, `${keyPrefix}-strong-${match.index}`)}
+      </strong>
+    );
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(...renderGitLabReferences(text.slice(lastIndex), issue, `${keyPrefix}-plain-${lastIndex}`));
+  }
+
+  return nodes.length > 0 ? nodes : [text];
+}
+
+function renderGitLabReferences(text: string, issue: IssueDTO, keyPrefix: string): Array<JSX.Element | string> {
+  const nodes: Array<JSX.Element | string> = [];
+  const pattern = /(^|[^\w`/])([#!]\d+|@[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text))) {
+    const [raw, prefix, reference] = match;
+    const referenceStart = match.index + prefix.length;
+
+    if (referenceStart > lastIndex) {
+      nodes.push(text.slice(lastIndex, referenceStart));
+    }
+
+    nodes.push(
+      <a key={`${keyPrefix}-ref-${referenceStart}`} className="issue-note-link issue-note-link--reference" href={resolveGitLabReferenceUrl(reference, issue)} target="_blank" rel="noreferrer">
+        {reference}
+      </a>
+    );
+
+    lastIndex = match.index + raw.length;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes.length > 0 ? nodes : [text];
+}
+
+function resolveGitLabReferenceUrl(reference: string, issue: IssueDTO) {
+  const projectUrl = gitLabProjectUrl(issue);
+
+  if (reference.startsWith("!")) {
+    return `${projectUrl}/-/merge_requests/${reference.slice(1)}`;
+  }
+
+  if (reference.startsWith("#")) {
+    return `${projectUrl}/-/issues/${reference.slice(1)}`;
+  }
+
+  return `${gitLabOriginUrl(issue)}/${encodeURIComponent(reference.slice(1))}`;
+}
+
+function gitLabProjectUrl(issue: IssueDTO) {
+  const match = issue.webUrl.match(/^(.*)\/-\/issues\/\d+(?:[#?].*)?$/);
+  return match ? match[1] : issue.webUrl.replace(/\/+$/, "");
+}
+
+function gitLabOriginUrl(issue: IssueDTO) {
+  try {
+    return new URL(issue.webUrl).origin;
+  } catch {
+    return gitLabProjectUrl(issue).split("/-/")[0];
+  }
 }
 
 function safeMarkdownUrl(url: string) {
@@ -896,9 +1960,7 @@ function IssueDescriptionEditor({
           </div>
         </div>
       ) : (
-        <div className={`issue-description-card${hasDescription ? "" : " is-empty"}`}>
-          {hasDescription ? currentDescription : "No description provided."}
-        </div>
+        <div className={`issue-description-card${hasDescription ? "" : " is-empty"}`}>{hasDescription ? renderMarkdown(currentDescription, issue) : "No description provided."}</div>
       )}
     </section>
   );
