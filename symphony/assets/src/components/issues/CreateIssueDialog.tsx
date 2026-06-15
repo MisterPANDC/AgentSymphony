@@ -12,7 +12,7 @@ interface CreateIssueDialogProps {
   onCreated?: (issue: IssueDTO) => void;
 }
 
-export function CreateIssueDialog({ defaultStatus = "triage", trigger, onCreated }: CreateIssueDialogProps) {
+export function CreateIssueDialog({ defaultStatus = "backlog", trigger, onCreated }: CreateIssueDialogProps) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -120,7 +120,7 @@ export function CreateIssueDialog({ defaultStatus = "triage", trigger, onCreated
 }
 
 function creatableStatus(status: WorkflowStatus): WorkflowStatus {
-  return canUserCreateIssueInStatus(status) ? status : "triage";
+  return canUserCreateIssueInStatus(status) ? status : "backlog";
 }
 
 function CreateIssueLabelEditor({ labels, onChange }: { labels: string[]; onChange: (labels: string[]) => void }) {

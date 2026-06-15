@@ -237,7 +237,7 @@ defmodule SymphonyElixir.Store.Postgres do
       |> Issue.changeset(attrs)
       |> Repo.insert_or_update!()
 
-    ensure_workflow_state(issue.id, "triage", "synced from GitLab")
+    ensure_workflow_state(issue.id, "backlog", "synced from GitLab")
     append_event("gitlab_issue_synced", "gitlab_sync", %{iid: issue.iid, title: issue.title}, issue_id: issue.id)
 
     decorate_issue(issue)
@@ -987,7 +987,7 @@ defmodule SymphonyElixir.Store.Postgres do
     end
   end
 
-  defp ensure_workflow_state(issue_id, status \\ "triage", reason \\ nil) do
+  defp ensure_workflow_state(issue_id, status \\ "backlog", reason \\ nil) do
     case Repo.one(from(w in WorkflowState, where: w.gitlab_issue_id == ^issue_id, limit: 1)) do
       nil ->
         %WorkflowState{}

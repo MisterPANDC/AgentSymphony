@@ -57,7 +57,7 @@ defmodule SymphonyElixir.Tracker.Memory do
       iid: System.unique_integer([:positive]),
       identifier: "MEM-FOLLOWUP",
       web_url: "memory://followup",
-      workflow_status: "triage",
+      workflow_status: "backlog",
       related_to_current_issue: Map.get(attrs, :related_to_current_issue, true),
       blocked_by_current_issue: Map.get(attrs, :blocked_by_current_issue, false)
     }

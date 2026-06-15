@@ -703,7 +703,7 @@ textarea {
   color: #d05847;
 }
 
-.linear-status-icon--triage {
+.linear-status-icon--backlog {
   color: #a8adb7;
 }
 
@@ -1047,7 +1047,7 @@ textarea {
   text-overflow: ellipsis;
 }
 
-.status-pill.triage {
+.status-pill.backlog {
   border-color: #efc4ae;
   color: #9a4c25;
   background: #fff1ea;

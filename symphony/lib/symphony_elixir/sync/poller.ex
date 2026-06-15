@@ -220,7 +220,7 @@ defmodule SymphonyElixir.Sync.Poller do
   end
 
   defp restore_externally_reopened_issue(config, issue) do
-    case Store.transition_workflow(issue.id, "triage",
+    case Store.transition_workflow(issue.id, "backlog",
            source: "gitlab_sync",
            actor: "gitlab_sync",
            reason: "GitLab issue reopened"

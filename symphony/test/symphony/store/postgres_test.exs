@@ -56,7 +56,7 @@ defmodule SymphonyElixir.Store.PostgresTest do
       })
 
     assert Repo.aggregate(Issue, :count) == 1
-    assert Repo.one(from(w in WorkflowState, where: w.gitlab_issue_id == ^issue.id)).status == "triage"
+    assert Repo.one(from(w in WorkflowState, where: w.gitlab_issue_id == ^issue.id)).status == "backlog"
 
     assert {:ok, workflow} = Store.transition_workflow(issue.id, "todo", reason: "ready")
     assert workflow.status == "todo"

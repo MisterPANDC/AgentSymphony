@@ -31,7 +31,7 @@ description:
 `elixir/docs/logging.md` requires these fields for issue/session lifecycle logs. Use
 them as your join keys during debugging.
 
-## Quick Triage (Stuck Run)
+## Quick Backlog (Stuck Run)
 
 1. Confirm scheduler/worker symptoms for the ticket.
 2. Find recent lines for the ticket (`issue_identifier` first).

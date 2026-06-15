@@ -3,7 +3,7 @@ defmodule SymphonyElixir.Workflow.Transitions do
   Central workflow status transition rules for the GitLab-backed issue model.
   """
 
-  @statuses ~w(triage todo in_progress review merging rework done canceled)
+  @statuses ~w(backlog todo in_progress review merging rework done canceled)
   @dispatch_candidate_statuses ~w(todo in_progress merging rework)
 
   @type status :: String.t()
@@ -55,22 +55,22 @@ defmodule SymphonyElixir.Workflow.Transitions do
   defp normalize_source(source) when is_atom(source), do: source |> Atom.to_string() |> normalize()
   defp normalize_source(source), do: normalize(source)
 
-  defp user_transition_allowed?("triage", status), do: status in ["todo", "canceled"]
-  defp user_transition_allowed?("todo", status), do: status in ["triage", "canceled"]
-  defp user_transition_allowed?("in_progress", status), do: status in ["triage", "canceled"]
-  defp user_transition_allowed?("review", status), do: status in ["triage", "merging", "rework", "canceled"]
-  defp user_transition_allowed?("rework", status), do: status in ["triage", "canceled"]
-  defp user_transition_allowed?("canceled", status), do: status in ["triage", "todo"]
+  defp user_transition_allowed?("backlog", status), do: status in ["todo", "canceled"]
+  defp user_transition_allowed?("todo", status), do: status in ["backlog", "canceled"]
+  defp user_transition_allowed?("in_progress", status), do: status in ["backlog", "canceled"]
+  defp user_transition_allowed?("review", status), do: status in ["backlog", "merging", "rework", "canceled"]
+  defp user_transition_allowed?("rework", status), do: status in ["backlog", "canceled"]
+  defp user_transition_allowed?("canceled", status), do: status in ["backlog", "todo"]
   defp user_transition_allowed?(_from, "canceled"), do: true
   defp user_transition_allowed?(_from, _to), do: false
 
   defp system_transition_allowed?(_from, "canceled"), do: true
-  defp system_transition_allowed?("triage", "todo"), do: true
-  defp system_transition_allowed?("todo", status), do: status in ["in_progress", "triage"]
-  defp system_transition_allowed?("in_progress", status), do: status in ["review", "todo", "triage"]
-  defp system_transition_allowed?("review", status), do: status in ["todo", "merging", "rework", "triage"]
+  defp system_transition_allowed?("backlog", "todo"), do: true
+  defp system_transition_allowed?("todo", status), do: status in ["in_progress", "backlog"]
+  defp system_transition_allowed?("in_progress", status), do: status in ["review", "todo", "backlog"]
+  defp system_transition_allowed?("review", status), do: status in ["todo", "merging", "rework", "backlog"]
   defp system_transition_allowed?("merging", status), do: status in ["done", "review"]
-  defp system_transition_allowed?("rework", status), do: status in ["in_progress", "review", "triage"]
-  defp system_transition_allowed?("canceled", status), do: status in ["triage", "todo"]
+  defp system_transition_allowed?("rework", status), do: status in ["in_progress", "review", "backlog"]
+  defp system_transition_allowed?("canceled", status), do: status in ["backlog", "todo"]
   defp system_transition_allowed?(_from, _to), do: false
 end

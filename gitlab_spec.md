@@ -55,7 +55,7 @@ A conforming implementation MUST satisfy all of the following goals:
    - Background sync and Agent GitLab writes MUST use the selected project's Project Access Token.
 
 6. **Maintain Symphony workflow state internally**
-   - Symphony workflow statuses such as `triage`, `todo`, `in_progress`, `review`, `merging`, `rework`, `done`, and `canceled` MUST be stored in the Symphony database.
+   - Symphony workflow statuses such as `backlog`, `todo`, `in_progress`, `review`, `merging`, `rework`, `done`, and `canceled` MUST be stored in the Symphony database.
    - Blocker/dependency relationships and issue-level blocked state MUST be stored or derived in the Symphony database separately from workflow status.
    - Dashboard ordering, run state, dispatch state, blocked/operator-input state, project memberships, encrypted token records, and sync cursors MUST be stored in the Symphony database.
    - GitLab paid workflow/blocker/status features MUST NOT be required for the core workflow.
@@ -693,7 +693,7 @@ updated_at utc_datetime_usec
 Allowed `status` values:
 
 ```text
-triage
+backlog
 todo
 in_progress
 review
@@ -916,7 +916,7 @@ On startup, the sync process MUST:
 7. Fetch project issues with `state=all`.
 8. Page through all results.
 9. Upsert `gitlab_issues`.
-10. Create missing `issue_workflow_states` with default status `triage`.
+10. Create missing `issue_workflow_states` with default status `backlog`.
 11. Record sync events.
 12. Update that project's `sync_cursors` entry.
 13. Broadcast UI updates through PubSub.
@@ -1015,7 +1015,7 @@ confidential
 The requested `workflow_status` MUST be one of the user-creatable initial statuses:
 
 ```text
-triage
+backlog
 todo
 ```
 
@@ -1072,7 +1072,7 @@ blocked_by_current_issue
 After GitLab returns the created issue, Symphony MUST:
 
 1. Upsert the returned issue into `gitlab_issues`.
-2. Create its `issue_workflow_states` row with default status `triage`.
+2. Create its `issue_workflow_states` row with default status `backlog`.
 3. Record an `issue_events` row with source `agent`, actor `agent`, and a
    payload containing the current issue id, created issue iid, and relationship
    flags.
@@ -1105,7 +1105,7 @@ When GitLab fields change externally:
 - Internal workflow status MUST remain unchanged unless an explicit Symphony rule changes it.
 - If a GitLab issue is closed externally, the issue MUST stop being an Agent dispatch candidate.
 - If a GitLab issue is reopened externally while its internal workflow status is
-  `canceled`, Symphony MUST move the issue back to `triage` and add the
+  `canceled`, Symphony MUST move the issue back to `backlog` and add the
   `reopen` label.
 - If a GitLab issue is reopened externally from any other internal workflow
   status, the issue MAY re-enter dispatch only if its internal workflow status is
@@ -1119,14 +1119,14 @@ When GitLab fields change externally:
 
 | Status | Meaning | Dispatch candidate |
 |---|---|---|
-| `triage` | Needs human analysis, scoping, decomposition, or acceptance before Agent dispatch. This includes newly synced issues and work returned for re-analysis. | No |
+| `backlog` | Needs human analysis, scoping, decomposition, or acceptance before Agent dispatch. This includes newly synced issues and work returned for re-analysis. | No |
 | `todo` | Ready for Agent work. | Yes |
 | `in_progress` | Implementation actively underway. | Yes |
 | `review` | Implementation is validated and waiting for human review or merge approval. | No |
 | `merging` | Human approved the change; Agent should run the merge/land flow. | Yes |
 | `rework` | Reviewer requested changes; Agent should restart the implementation/review loop. | Yes |
 | `done` | Merge is complete and work is terminal. | No |
-| `canceled` | Work is intentionally stopped. It may be returned to `triage` for re-analysis or `todo` when a human explicitly restores it as ready. | No |
+| `canceled` | Work is intentionally stopped. It may be returned to `backlog` for re-analysis or `todo` when a human explicitly restores it as ready. | No |
 
 ### 9.2 Status transitions
 
@@ -1135,22 +1135,22 @@ The implementation MUST centralize transitions in `Symphony.Workflow`.
 Required transitions:
 
 ```text
-triage -> todo
-todo -> triage
+backlog -> todo
+todo -> backlog
 todo -> in_progress
 in_progress -> review
 in_progress -> todo
-in_progress -> triage
+in_progress -> backlog
 review -> todo
 review -> merging
 review -> rework
-review -> triage
+review -> backlog
 merging -> done
 merging -> review
 rework -> in_progress
 rework -> review
-rework -> triage
-canceled -> triage
+rework -> backlog
+canceled -> backlog
 canceled -> todo
 any non-terminal -> canceled
 ```
@@ -1158,18 +1158,18 @@ any non-terminal -> canceled
 User-initiated dashboard transitions MUST be a restricted subset of the full workflow graph:
 
 ```text
-triage -> todo
-todo -> triage
+backlog -> todo
+todo -> backlog
 todo -> canceled
-in_progress -> triage
+in_progress -> backlog
 in_progress -> canceled
-review -> triage
+review -> backlog
 review -> merging
 review -> rework
 review -> canceled
-rework -> triage
+rework -> backlog
 rework -> canceled
-canceled -> triage
+canceled -> backlog
 canceled -> todo
 any non-terminal -> canceled
 ```
@@ -1179,7 +1179,7 @@ Transitions such as `todo -> in_progress`, `in_progress -> review`, and
 by ordinary dashboard status selection.
 
 If a dashboard transition moves an issue with a running agent into a
-non-dispatch-candidate status such as `triage`, `review`, or `canceled`, the UI
+non-dispatch-candidate status such as `backlog`, `review`, or `canceled`, the UI
 MUST ask for explicit confirmation and the server MUST stop or release the
 running agent run.
 
@@ -1191,7 +1191,7 @@ done
 
 `canceled` is a stopped state, not a dispatch candidate. When an issue enters
 `canceled`, Symphony SHOULD close the GitLab issue. A canceled issue may be
-restored through `canceled -> triage` for re-analysis or `canceled -> todo` when
+restored through `canceled -> backlog` for re-analysis or `canceled -> todo` when
 a human explicitly marks it ready again. If the corresponding GitLab issue is
 closed, either restore path MUST reopen it and add the `reopen` label.
 
@@ -1231,7 +1231,7 @@ The implementation MAY mirror internal status to a GitLab label only when explic
 after cancellation. It MUST NOT be treated as a workflow status and MUST NOT be
 used as an Agent dispatch condition. The marker SHOULD be added when GitLab
 externally reopens a canceled issue or when Symphony restores a canceled issue to
-`triage` or `todo`.
+`backlog` or `todo`.
 
 ---
 
@@ -1317,7 +1317,7 @@ The tools MUST be scoped to the current selected project and current issue.
 `create_followup_issue` MAY create a new issue in the current selected
 project through that project's Project Access Token, but it MUST require
 explicit title, description, and acceptance criteria, and it MUST initialize
-the new issue as internal status `triage`.
+the new issue as internal status `backlog`.
 The tool surface MUST NOT expose arbitrary GitLab REST calls to the agent by
 default.
 
@@ -1894,7 +1894,7 @@ The frontend MUST consume backend DTOs, not GitLab raw payloads.
 
 ```ts
 export type WorkflowStatus =
-  | "triage"
+  | "backlog"
   | "todo"
   | "in_progress"
   | "review"
@@ -2244,7 +2244,7 @@ Acceptance:
 - A `todo` GitLab issue can be claimed and run.
 - Agent run history persists.
 - Operator-input blocked state appears after restart.
-- Agent-created follow-up issues are created in the current selected GitLab project and enter internal `triage`.
+- Agent-created follow-up issues are created in the current selected GitLab project and enter internal `backlog`.
 - No Linear prompt fields remain.
 
 ### Phase 8 — React control frontend
@@ -2388,7 +2388,7 @@ The test MUST prove:
 8. Internal status changes to `todo`.
 9. Agent run starts.
 10. Stub runner creates a follow-up issue in the selected project.
-11. The follow-up issue appears in the dashboard with internal status `triage`.
+11. The follow-up issue appears in the dashboard with internal status `backlog`.
 12. Run appears in Run Monitor.
 13. Stub runner blocks for operator input.
 14. Block appears in Run Monitor and `/api/v1/state`.

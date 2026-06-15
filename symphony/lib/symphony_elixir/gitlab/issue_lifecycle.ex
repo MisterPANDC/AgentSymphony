@@ -17,7 +17,7 @@ defmodule SymphonyElixir.GitLab.IssueLifecycle do
 
   @spec reopen_transition?(term(), term()) :: boolean()
   def reopen_transition?(from_status, to_status) do
-    normalize(from_status) == "canceled" and normalize(to_status) in ["triage", "todo"]
+    normalize(from_status) == "canceled" and normalize(to_status) in ["backlog", "todo"]
   end
 
   @spec external_reopen?(map() | nil, map()) :: boolean()

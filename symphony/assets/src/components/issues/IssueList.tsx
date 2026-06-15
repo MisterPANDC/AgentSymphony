@@ -19,7 +19,7 @@ export function IssueList() {
   const { data, isLoading, refetch } = useQuery({ queryKey: ["issues"], queryFn: () => listIssues() });
   const allIssues = data?.issues ?? [];
   const { selectedIssue, openIssue, closeIssue } = useIssueDetailSelection(allIssues);
-  const createDefaultStatus: WorkflowStatus = status !== "all" && status !== "blocked" && canUserCreateIssueInStatus(status) ? status : "triage";
+  const createDefaultStatus: WorkflowStatus = status !== "all" && status !== "blocked" && canUserCreateIssueInStatus(status) ? status : "backlog";
 
   useEffect(() => {
     if (!filterOpen) {

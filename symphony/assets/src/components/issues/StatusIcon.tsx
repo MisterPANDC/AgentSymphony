@@ -5,7 +5,7 @@ export type StatusIconStatus = IssueStatusFilter | WorkflowStatus;
 const statusLabels: Record<StatusIconStatus, string> = {
   all: "All",
   blocked: "Blocked",
-  triage: "Triage",
+  backlog: "Backlog",
   todo: "Todo",
   in_progress: "In Progress",
   review: "Human Review",
@@ -18,7 +18,6 @@ const statusLabels: Record<StatusIconStatus, string> = {
 const statusKinds: Record<
   StatusIconStatus,
   | "all"
-  | "triage"
   | "backlog"
   | "todo"
   | "started-quarter"
@@ -31,7 +30,7 @@ const statusKinds: Record<
 > = {
   all: "all",
   blocked: "blocked",
-  triage: "triage",
+  backlog: "backlog",
   todo: "todo",
   in_progress: "started-quarter",
   review: "started-half",
@@ -78,9 +77,6 @@ export function StatusIcon({
             <circle cx="5" cy="11" r="2" fill="currentColor" opacity="0.78" />
             <circle cx="11" cy="11" r="2" fill="currentColor" opacity="0.55" />
           </>
-        )}
-        {kind === "triage" && (
-          <circle cx="8" cy="8" r="5.35" fill="none" stroke="currentColor" strokeDasharray="0.85 2.55" strokeLinecap="butt" strokeWidth="2.35" />
         )}
         {kind === "backlog" && <circle cx="8" cy="8" r="5.2" fill="none" stroke="currentColor" strokeDasharray="0.01 3.1" strokeLinecap="round" strokeWidth="2" />}
         {kind === "todo" && <circle cx="8" cy="8" r="5.2" fill="none" stroke="currentColor" strokeWidth="2" />}

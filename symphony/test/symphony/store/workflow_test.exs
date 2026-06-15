@@ -12,7 +12,7 @@ defmodule SymphonyElixir.Store.WorkflowTest do
   test "supports the GitLab workflow transition graph" do
     issue = seed_issue(10)
 
-    assert issue.workflow_status == "triage"
+    assert issue.workflow_status == "backlog"
     assert {:ok, todo} = Store.transition_workflow(issue.id, "todo", reason: "accepted")
     assert todo.status == "todo"
 
@@ -39,20 +39,20 @@ defmodule SymphonyElixir.Store.WorkflowTest do
     assert {:ok, done} = Store.transition_workflow(issue.id, "done", reason: "merged")
     assert done.status == "done"
 
-    assert {:error, :invalid_transition} = Store.transition_workflow(issue.id, "triage")
+    assert {:error, :invalid_transition} = Store.transition_workflow(issue.id, "backlog")
   end
 
-  test "allows work to return to triage for re-analysis" do
+  test "allows work to return to backlog for re-analysis" do
     todo_issue = seed_issue(11)
     {:ok, _todo} = Store.transition_workflow(todo_issue.id, "todo", reason: "accepted")
-    assert {:ok, triage} = Store.transition_workflow(todo_issue.id, "triage", reason: "needs re-analysis")
-    assert triage.status == "triage"
+    assert {:ok, backlog} = Store.transition_workflow(todo_issue.id, "backlog", reason: "needs re-analysis")
+    assert backlog.status == "backlog"
 
     in_progress_issue = seed_issue(12)
     {:ok, _todo} = Store.transition_workflow(in_progress_issue.id, "todo", reason: "accepted")
     {:ok, _in_progress} = Store.transition_workflow(in_progress_issue.id, "in_progress", reason: "started")
-    assert {:ok, triage} = Store.transition_workflow(in_progress_issue.id, "triage", reason: "scope changed")
-    assert triage.status == "triage"
+    assert {:ok, backlog} = Store.transition_workflow(in_progress_issue.id, "backlog", reason: "scope changed")
+    assert backlog.status == "backlog"
   end
 
   test "restricts user initiated workflow transitions" do
@@ -60,12 +60,12 @@ defmodule SymphonyElixir.Store.WorkflowTest do
 
     assert {:ok, _todo} = Store.transition_workflow(issue.id, "todo", source: "user_ui", reason: "accepted")
     assert {:error, :invalid_transition} = Store.transition_workflow(issue.id, "in_progress", source: "user_ui")
-    assert {:ok, _triage} = Store.transition_workflow(issue.id, "triage", source: "user_ui", reason: "needs triage")
+    assert {:ok, _backlog} = Store.transition_workflow(issue.id, "backlog", source: "user_ui", reason: "needs backlog")
 
     {:ok, _todo} = Store.transition_workflow(issue.id, "todo", reason: "accepted")
     {:ok, _in_progress} = Store.transition_workflow(issue.id, "in_progress", reason: "agent dispatch")
     assert {:error, :invalid_transition} = Store.transition_workflow(issue.id, "review", source: "user_ui")
-    assert {:ok, _triage} = Store.transition_workflow(issue.id, "triage", source: "user_ui", reason: "scope changed")
+    assert {:ok, _backlog} = Store.transition_workflow(issue.id, "backlog", source: "user_ui", reason: "scope changed")
 
     review_issue = seed_issue(14)
     {:ok, _todo} = Store.transition_workflow(review_issue.id, "todo", reason: "accepted")
@@ -77,15 +77,15 @@ defmodule SymphonyElixir.Store.WorkflowTest do
     assert merging.status == "merging"
   end
 
-  test "allows canceled issues to return to triage or todo" do
+  test "allows canceled issues to return to backlog or todo" do
     issue = seed_issue(16)
 
     assert {:ok, _todo} = Store.transition_workflow(issue.id, "todo", source: "user_ui", reason: "accepted")
     assert {:ok, canceled} = Store.transition_workflow(issue.id, "canceled", source: "user_ui", reason: "no longer needed")
     assert canceled.status == "canceled"
 
-    assert {:ok, triage} = Store.transition_workflow(issue.id, "triage", source: "user_ui", reason: "restore for re-analysis")
-    assert triage.status == "triage"
+    assert {:ok, backlog} = Store.transition_workflow(issue.id, "backlog", source: "user_ui", reason: "restore for re-analysis")
+    assert backlog.status == "backlog"
 
     todo_issue = seed_issue(17)
     assert {:ok, _todo} = Store.transition_workflow(todo_issue.id, "todo", source: "user_ui", reason: "accepted")
@@ -103,14 +103,14 @@ defmodule SymphonyElixir.Store.WorkflowTest do
     active_issue = Store.get_issue(issue.id)
 
     assert {:error, :active_run_stop_confirmation_required} =
-             WorkflowTransition.require_active_run_stop_confirmation(active_issue, "triage", %{})
+             WorkflowTransition.require_active_run_stop_confirmation(active_issue, "backlog", %{})
 
-    assert :ok = WorkflowTransition.require_active_run_stop_confirmation(active_issue, "triage", %{"confirmStopRun" => true})
-    assert :ok = WorkflowTransition.maybe_stop_active_run(active_issue, "triage", "tester")
+    assert :ok = WorkflowTransition.require_active_run_stop_confirmation(active_issue, "backlog", %{"confirmStopRun" => true})
+    assert :ok = WorkflowTransition.maybe_stop_active_run(active_issue, "backlog", "tester")
 
     canceled_run = Store.get_run(run.id)
     assert canceled_run.status == "canceled"
-    assert canceled_run.exit_reason == "canceled by workflow status change to triage"
+    assert canceled_run.exit_reason == "canceled by workflow status change to backlog"
   end
 
   test "rejects self dependencies and dependency cycles" do

@@ -1,19 +1,19 @@
-export const workflowStatuses = ["triage", "todo", "in_progress", "review", "merging", "rework", "done", "canceled"] as const;
+export const workflowStatuses = ["backlog", "todo", "in_progress", "review", "merging", "rework", "done", "canceled"] as const;
 
 export type WorkflowStatus = (typeof workflowStatuses)[number];
 export type IssueStatusFilter = WorkflowStatus | "all" | "blocked";
 export const issueStatusFilters: IssueStatusFilter[] = ["all", "blocked", ...workflowStatuses];
 export const dispatchCandidateStatuses = ["todo", "in_progress", "merging", "rework"] as const satisfies readonly WorkflowStatus[];
-export const userCreatableWorkflowStatuses = ["triage", "todo"] as const satisfies readonly WorkflowStatus[];
+export const userCreatableWorkflowStatuses = ["backlog", "todo"] as const satisfies readonly WorkflowStatus[];
 export const userTransitionTargets: Record<WorkflowStatus, WorkflowStatus[]> = {
-  triage: ["todo", "canceled"],
-  todo: ["triage", "canceled"],
-  in_progress: ["triage", "canceled"],
-  review: ["triage", "merging", "rework", "canceled"],
+  backlog: ["todo", "canceled"],
+  todo: ["backlog", "canceled"],
+  in_progress: ["backlog", "canceled"],
+  review: ["backlog", "merging", "rework", "canceled"],
   merging: ["canceled"],
-  rework: ["triage", "canceled"],
+  rework: ["backlog", "canceled"],
   done: [],
-  canceled: ["triage"]
+  canceled: ["backlog"]
 };
 
 export type Priority = "none" | "low" | "medium" | "high" | "urgent";

@@ -67,7 +67,7 @@ defmodule SymphonyElixir.Codex.DynamicTool do
       },
       %{
         "name" => @create_followup_tool,
-        "description" => "Create a scoped GitLab follow-up issue for out-of-scope work discovered while handling the current issue. The new issue is initialized in Symphony as triage.",
+        "description" => "Create a scoped GitLab follow-up issue for out-of-scope work discovered while handling the current issue. The new issue is initialized in Symphony as backlog.",
         "inputSchema" => %{
           "type" => "object",
           "additionalProperties" => false,

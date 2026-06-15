@@ -103,7 +103,7 @@ defmodule SymphonyElixir.Sync.PollerTest do
     assert Store.cursors()["gitlab:gitlab_issues_updated_after:#{project.id}"].last_success_at
   end
 
-  test "external GitLab reopen restores canceled issues to triage and adds reopened label" do
+  test "external GitLab reopen restores canceled issues to backlog and adds reopened label" do
     project_id = 84_000 + System.unique_integer([:positive])
     iid = 94_000 + System.unique_integer([:positive])
     Application.put_env(:symphony_elixir, :gitlab_req_options, plug: external_reopen_plug(project_id, iid))
@@ -135,7 +135,7 @@ defmodule SymphonyElixir.Sync.PollerTest do
     issue =
       eventually(fn ->
         case Store.get_issue(issue.id) do
-          %{workflow_status: "triage", gitlab_state: "opened", labels: labels} = issue ->
+          %{workflow_status: "backlog", gitlab_state: "opened", labels: labels} = issue ->
             if IssueLifecycle.reopened_label() in labels, do: issue
 
           _issue ->
@@ -143,7 +143,7 @@ defmodule SymphonyElixir.Sync.PollerTest do
         end
       end)
 
-    assert issue.workflow_status == "triage"
+    assert issue.workflow_status == "backlog"
     assert issue.gitlab_state == "opened"
     assert IssueLifecycle.reopened_label() in issue.labels
   end
@@ -362,7 +362,7 @@ defmodule SymphonyElixir.Sync.PollerTest do
       workflow_state = %{
         id: Ecto.UUID.generate(),
         gitlab_issue_id: issue_id,
-        status: "triage",
+        status: "backlog",
         priority: "none",
         rank: nil,
         claimed_by: nil,

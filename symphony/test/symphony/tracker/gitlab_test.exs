@@ -46,7 +46,7 @@ defmodule SymphonyElixir.Tracker.GitLabTest do
 
     created = result.issue
     assert created.iid == 11
-    assert created.workflow_status == "triage"
+    assert created.workflow_status == "backlog"
     assert result.relationship_flags.related_to_current_issue == true
     assert result.relationship_flags.blocked_by_current_issue == true
     assert result.note_created == true

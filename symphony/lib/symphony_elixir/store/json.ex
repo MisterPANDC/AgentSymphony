@@ -1150,7 +1150,7 @@ defmodule SymphonyElixir.Store.Json do
     %{
       id: Ecto.UUID.generate(),
       gitlab_issue_id: issue_id,
-      status: "triage",
+      status: "backlog",
       priority: "none",
       rank: nil,
       claimed_by: nil,
@@ -1165,7 +1165,7 @@ defmodule SymphonyElixir.Store.Json do
   defp hydrate_workflow_state(workflow) do
     workflow
     |> hydrate_datetime_fields([:claimed_at, :last_transition_at, :inserted_at, :updated_at])
-    |> Map.update(:status, "triage", &normalize_persisted_workflow_status/1)
+    |> Map.update(:status, "backlog", &normalize_persisted_workflow_status/1)
   end
 
   defp normalize_persisted_workflow_status(status) do
@@ -1174,7 +1174,7 @@ defmodule SymphonyElixir.Store.Json do
     cond do
       status == "blocked" -> "todo"
       status in @workflow_statuses -> status
-      true -> "triage"
+      true -> "backlog"
     end
   end
 

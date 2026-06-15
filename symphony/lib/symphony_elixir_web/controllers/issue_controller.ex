@@ -13,7 +13,7 @@ defmodule SymphonyElixirWeb.IssueController do
   alias SymphonyElixirWeb.WorkflowTransition
 
   @create_workflow_paths %{
-    "triage" => [],
+    "backlog" => [],
     "todo" => ["todo"]
   }
   @create_workflow_statuses Map.keys(@create_workflow_paths)
@@ -374,7 +374,7 @@ defmodule SymphonyElixirWeb.IssueController do
 
   defp optional_text(_value), do: nil
 
-  defp create_workflow_status(nil), do: {:ok, "triage"}
+  defp create_workflow_status(nil), do: {:ok, "backlog"}
 
   defp create_workflow_status(status) when is_binary(status) do
     normalized = status |> String.trim() |> String.downcase() |> String.replace("-", "_")
