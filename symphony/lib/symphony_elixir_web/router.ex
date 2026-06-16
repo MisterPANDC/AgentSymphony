@@ -74,6 +74,9 @@ defmodule SymphonyElixirWeb.Router do
     get("/api/runs/:id", RunController, :show)
     get("/api/runs/:id/events", RunController, :events)
 
+    get("/api/agents", AgentController, :index)
+    get("/api/agents/mcp", AgentController, :mcp)
+
     get("/api/monitor/state", MonitorController, :state)
     get("/api/monitor/events", MonitorController, :events)
     get("/api/monitor/blocks", MonitorController, :blocks)
@@ -102,6 +105,10 @@ defmodule SymphonyElixirWeb.Router do
     post("/api/issues/:id/blockers", WorkflowController, :add_blocker)
     delete("/api/issues/:id/blockers/:blocking_issue_id", WorkflowController, :remove_blocker)
 
+    post("/api/agents/register", AgentController, :register)
+    post("/api/agents/mcp", AgentController, :create_mcp)
+    post("/api/agents/:id/login", AgentController, :login)
+    post("/api/agents/:id/usage", AgentController, :refresh_usage)
     post("/api/agents/dispatch", AgentController, :dispatch)
     post("/api/runs/:id/cancel", RunController, :cancel)
     post("/api/runs/:id/retry", RunController, :retry)

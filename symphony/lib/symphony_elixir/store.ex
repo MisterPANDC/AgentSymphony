@@ -81,6 +81,15 @@ defmodule SymphonyElixir.Store do
   @spec project_access_token(map() | String.t()) :: {:ok, String.t()} | {:error, term()}
   def project_access_token(project_or_id), do: backend().project_access_token(project_or_id)
 
+  @spec list_registered_agents() :: [map()]
+  def list_registered_agents, do: backend().list_registered_agents()
+
+  @spec create_registered_agent(map()) :: {:ok, map()} | {:error, term()}
+  def create_registered_agent(attrs), do: backend().create_registered_agent(attrs)
+
+  @spec update_registered_agent(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def update_registered_agent(agent_id, attrs), do: backend().update_registered_agent(agent_id, attrs)
+
   @spec upsert_issue(map()) :: map()
   def upsert_issue(attrs), do: backend().upsert_issue(attrs)
 
