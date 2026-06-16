@@ -2138,6 +2138,74 @@ textarea {
   background: #ffedd5;
 }
 
+.issue-comment-delete-overlay {
+  background: rgba(17, 24, 39, 0.42);
+}
+
+.issue-comment-delete-dialog {
+  display: block;
+  width: min(520px, calc(100vw - 32px));
+  padding: 24px;
+}
+
+.issue-comment-delete-dialog .confirm-dialog-body {
+  position: relative;
+}
+
+.issue-comment-delete-dialog .confirm-dialog-title {
+  padding-right: 34px;
+  font-size: 20px;
+  line-height: 28px;
+}
+
+.issue-comment-delete-dialog .confirm-dialog-description {
+  margin-top: 18px;
+  color: #3f434c;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.issue-comment-delete-dialog .confirm-dialog-actions {
+  margin-top: 42px;
+}
+
+.issue-comment-delete-close {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #686b73;
+  cursor: pointer;
+}
+
+.issue-comment-delete-close:hover:not(:disabled),
+.issue-comment-delete-close:focus-visible {
+  background: #f1f3f6;
+  color: #2f333b;
+  outline: none;
+}
+
+.issue-comment-delete-confirm {
+  border-color: #f08f83;
+  background: #ffebe9;
+  color: #9f3131;
+}
+
+.issue-comment-delete-confirm:hover:not(:disabled),
+.issue-comment-delete-confirm:focus-visible {
+  border-color: #dd6b5e;
+  background: #ffd8d2;
+  color: #842424;
+  outline: none;
+}
+
 .issue-list-panel {
   overflow: visible;
 }
@@ -3082,6 +3150,7 @@ textarea {
   z-index: 70;
   display: flex;
   width: min(820px, calc(100vw - 32px));
+  height: min(760px, calc(100vh - 48px));
   max-height: calc(100vh - 48px);
   flex-direction: column;
   overflow: hidden;
@@ -3115,6 +3184,7 @@ textarea {
 .issue-detail-dialog.is-expanded {
   inset: 0;
   width: auto;
+  height: auto;
   max-height: none;
   border: 0;
   border-radius: 0;
@@ -3649,6 +3719,7 @@ textarea {
 .issue-activity-section {
   display: flex;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
   gap: 12px;
 }
@@ -3672,6 +3743,7 @@ textarea {
 .issue-activity-list {
   display: flex;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
   gap: 12px;
 }
@@ -4017,6 +4089,132 @@ textarea {
 
 .issue-activity-inline-composer.is-edit {
   background: #ffffff;
+}
+
+.issue-activity-reply-summary {
+  display: flex;
+  width: 100%;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-top: 1px solid #eceef2;
+  background: #fafbfc;
+  padding: 7px 10px;
+  color: #686b73;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.issue-activity-reply-summary:hover,
+.issue-activity-reply-summary:focus-visible {
+  background: #f3f6fa;
+  outline: none;
+}
+
+.issue-activity-reply-summary img {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border-radius: 50%;
+}
+
+.issue-activity-reply-summary-count {
+  color: #1f5f99;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.issue-activity-reply-summary-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issue-activity-replies {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-top: 1px solid #eceef2;
+  background: #fafbfc;
+  padding: 8px 10px 10px;
+}
+
+.issue-activity-replies-toggle {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #1f5f99;
+  padding: 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.issue-activity-replies-toggle:hover,
+.issue-activity-replies-toggle:focus-visible {
+  background: #eef4fb;
+  outline: none;
+}
+
+.issue-activity-reply {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 8px;
+  padding: 9px 0 0;
+}
+
+.issue-activity-reply-avatar {
+  display: flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid #d9dce2;
+  border-radius: 50%;
+  background: #f1f3f6;
+  color: #555965;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.issue-activity-reply-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.issue-activity-reply-content {
+  min-width: 0;
+}
+
+.issue-activity-reply-header {
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.issue-activity-reply .issue-activity-note-body {
+  padding: 1px 0 0;
+}
+
+.issue-activity-reply .issue-activity-inline-composer {
+  margin-top: 6px;
+  border: 1px solid #d9dce2;
+  border-radius: 6px;
+  padding: 8px;
 }
 
 .issue-activity-inline-composer .issue-note-composer {
@@ -4872,6 +5070,7 @@ textarea {
 
   .issue-detail-dialog {
     width: calc(100vw - 20px);
+    height: calc(100vh - 20px);
     max-height: calc(100vh - 20px);
   }
 
@@ -4881,6 +5080,7 @@ textarea {
 
   .issue-detail-dialog.is-expanded {
     inset: 0;
+    height: auto;
   }
 
   .issue-detail-dialog-content {
@@ -4927,6 +5127,7 @@ textarea {
 @media (max-width: 640px) {
   .issue-detail-dialog {
     width: calc(100vw - 16px);
+    height: calc(100vh - 16px);
     max-height: calc(100vh - 16px);
   }
 
@@ -4936,6 +5137,7 @@ textarea {
 
   .issue-detail-dialog.is-expanded {
     inset: 0;
+    height: auto;
   }
 
   .issue-detail-dialog-body {

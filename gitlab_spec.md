@@ -408,7 +408,9 @@ get_project_issue(config, issue_iid)
 create_project_issue(config, attrs)
 update_project_issue(config, issue_iid, attrs)
 list_issue_notes(config, issue_iid, params)
+list_issue_discussions(config, issue_iid, params)
 create_issue_note(config, issue_iid, body)
+create_issue_discussion_note(config, issue_iid, discussion_id, body)
 ```
 
 Raw GitLab payload handling MUST be contained inside GitLab modules and mapper modules. Other contexts MUST consume internal structs or schemas.
@@ -460,7 +462,9 @@ Issue endpoints MUST use `issue_iid`, not global issue `id`:
 ```text
 GET /projects/:id/issues/:issue_iid
 GET /projects/:id/issues/:issue_iid/notes
+GET /projects/:id/issues/:issue_iid/discussions
 POST /projects/:id/issues/:issue_iid/notes
+POST /projects/:id/issues/:issue_iid/discussions/:discussion_id/notes
 ```
 
 ### 6.5 Pagination
@@ -693,6 +697,10 @@ Required fields:
 id uuid primary key
 gitlab_issue_id uuid not null
 note_id bigint not null
+discussion_id text
+discussion_reply boolean not null default false
+discussion_individual_note boolean not null default false
+discussion_position integer
 body text not null
 author jsonb
 system boolean not null default false
@@ -994,17 +1002,18 @@ Notes sync MUST support these paths:
 2. Agent/tool sync: when an Agent needs current notes, fetch notes for the issue using the selected project's active automation credential.
 3. Periodic recent sync MAY fetch notes for recently changed issues if implemented.
 
-The implementation MUST use:
+The implementation MUST use GitLab discussions for read/reply semantics and notes for top-level note creation:
 
 ```text
-GET /projects/:id/issues/:issue_iid/notes
+GET /projects/:id/issues/:issue_iid/discussions
 POST /projects/:id/issues/:issue_iid/notes
+POST /projects/:id/issues/:issue_iid/discussions/:discussion_id/notes
 POST /projects/:id/uploads
 GET /projects/:id/uploads/:secret/:filename
 DELETE /projects/:id/uploads/:secret/:filename
 ```
 
-User-created comments MUST use the signed-in user's OAuth token. Agent-created comments MUST be posted through `create_issue_note/3` with the selected project's active automation credential and then inserted into local `gitlab_issue_notes` after GitLab returns the created note.
+User-created comments MUST use the signed-in user's OAuth token. User-created replies MUST be posted to the existing GitLab discussion id so they remain threaded in GitLab and Symphony. Agent-created top-level comments MUST be posted through `create_issue_note/3` with the selected project's active automation credential and then inserted into local `gitlab_issue_notes` after GitLab returns the created note.
 
 Comment attachments MUST follow GitLab's Markdown upload model:
 

@@ -105,7 +105,8 @@ defmodule SymphonyElixirWeb.IssueController do
          :ok <- validate_note_body(body),
          {:ok, files} <- upload_files(params),
          :ok <- validate_note_payload(body, files),
-         :ok <- create_user_note(conn, issue, body, files) do
+         :ok <- create_user_note(conn, issue, body, files),
+         {:ok, _notes} <- sync_issue_notes(conn, issue) do
       json(conn, %{notes: Store.list_notes(issue.id)})
     else
       nil -> error(conn, 404, "issue_not_found", "Issue not found")
@@ -115,6 +116,27 @@ defmodule SymphonyElixirWeb.IssueController do
   end
 
   def create_note(conn, _params), do: error(conn, 400, "missing_body", "Note body is required")
+
+  @spec create_note_reply(Conn.t(), map()) :: Conn.t()
+  def create_note_reply(conn, %{"id" => id, "discussion_id" => discussion_id} = params) do
+    body = Map.get(params, "body", "")
+
+    with %{} = issue <- find_issue(conn, id),
+         :ok <- validate_discussion_id(discussion_id),
+         :ok <- validate_note_body(body),
+         {:ok, files} <- upload_files(params),
+         :ok <- validate_note_payload(body, files),
+         :ok <- create_user_note_reply(conn, issue, discussion_id, body, files),
+         {:ok, _notes} <- sync_issue_notes(conn, issue) do
+      json(conn, %{notes: Store.list_notes(issue.id)})
+    else
+      nil -> error(conn, 404, "issue_not_found", "Issue not found")
+      {:error, {:validation, code, message}} -> error(conn, 400, code, message)
+      {:error, reason} -> error(conn, gitlab_error_status(reason), "note_reply_failed", gitlab_error_message(reason))
+    end
+  end
+
+  def create_note_reply(conn, _params), do: error(conn, 400, "missing_discussion", "Discussion ID is required")
 
   @spec create_merge_request_note(Conn.t(), map()) :: Conn.t()
   def create_merge_request_note(conn, %{"id" => id, "merge_request_iid" => merge_request_iid} = params) do
@@ -136,6 +158,28 @@ defmodule SymphonyElixirWeb.IssueController do
   end
 
   def create_merge_request_note(conn, _params), do: error(conn, 400, "missing_body", "Note body is required")
+
+  @spec create_merge_request_note_reply(Conn.t(), map()) :: Conn.t()
+  def create_merge_request_note_reply(conn, %{"id" => id, "merge_request_iid" => merge_request_iid, "discussion_id" => discussion_id} = params) do
+    body = Map.get(params, "body", "")
+
+    with %{} = issue <- find_issue(conn, id),
+         %{} = merge_request <- find_issue_merge_request(issue, merge_request_iid),
+         :ok <- validate_discussion_id(discussion_id),
+         :ok <- validate_note_body(body),
+         {:ok, files} <- upload_files(params),
+         :ok <- validate_note_payload(body, files),
+         :ok <- create_merge_request_user_note_reply(conn, issue, merge_request, discussion_id, body, files),
+         {:ok, notes} <- list_merge_request_notes(conn, issue, merge_request) do
+      json(conn, %{notes: notes})
+    else
+      nil -> error(conn, 404, "merge_request_not_found", "Merge request not found")
+      {:error, {:validation, code, message}} -> error(conn, 400, code, message)
+      {:error, reason} -> error(conn, gitlab_error_status(reason), "merge_request_note_reply_failed", gitlab_error_message(reason))
+    end
+  end
+
+  def create_merge_request_note_reply(conn, _params), do: error(conn, 400, "missing_discussion", "Discussion ID is required")
 
   @spec update_note(Conn.t(), map()) :: Conn.t()
   def update_note(conn, %{"id" => id, "note_id" => note_id} = params) do
@@ -537,16 +581,20 @@ defmodule SymphonyElixirWeb.IssueController do
 
   defp sync_issue_notes(conn, issue) do
     with {:ok, config, auth_opts} <- user_gitlab_context(conn, issue),
-         {:ok, raw_notes} <- Client.list_issue_notes(config, issue.iid, %{per_page: config.sync_page_size}, auth_opts) do
-      notes = Enum.map(raw_notes, &Store.upsert_note(issue.id, NoteMapper.from_gitlab(&1)))
+         {:ok, raw_discussions} <- Client.list_issue_discussions(config, issue.iid, %{per_page: config.sync_page_size}, auth_opts) do
+      notes =
+        raw_discussions
+        |> Enum.flat_map(&NoteMapper.from_gitlab_discussion/1)
+        |> Enum.map(&Store.upsert_note(issue.id, &1))
+
       {:ok, notes}
     end
   end
 
   defp list_merge_request_notes(conn, issue, merge_request) do
     with {:ok, config, auth_opts} <- user_gitlab_context(conn, issue),
-         {:ok, raw_notes} <- Client.list_merge_request_notes(config, value(merge_request, :iid), %{per_page: config.sync_page_size}, auth_opts) do
-      {:ok, Enum.map(raw_notes, &NoteMapper.from_gitlab/1)}
+         {:ok, raw_discussions} <- Client.list_merge_request_discussions(config, value(merge_request, :iid), %{per_page: config.sync_page_size}, auth_opts) do
+      {:ok, Enum.flat_map(raw_discussions, &NoteMapper.from_gitlab_discussion/1)}
     end
   end
 
@@ -559,10 +607,27 @@ defmodule SymphonyElixirWeb.IssueController do
     end
   end
 
+  defp create_user_note_reply(conn, issue, discussion_id, body, files) do
+    with {:ok, config, auth_opts} <- user_gitlab_context(conn, issue),
+         {:ok, final_body, uploaded} <- upload_note_files(config, auth_opts, issue.id, body, files),
+         {:ok, raw_note} <- create_discussion_note_with_cleanup(config, auth_opts, issue.iid, discussion_id, final_body, uploaded) do
+      Store.upsert_note(issue.id, NoteMapper.from_gitlab(Map.put_new(raw_note, "discussion_id", discussion_id)))
+      :ok
+    end
+  end
+
   defp create_merge_request_user_note(conn, issue, merge_request, body, files) do
     with {:ok, config, auth_opts} <- user_gitlab_context(conn, issue),
          {:ok, final_body, uploaded} <- upload_note_files(config, auth_opts, issue.id, body, files),
          {:ok, _raw_note} <- create_merge_request_note_with_cleanup(config, auth_opts, value(merge_request, :iid), final_body, uploaded) do
+      :ok
+    end
+  end
+
+  defp create_merge_request_user_note_reply(conn, issue, merge_request, discussion_id, body, files) do
+    with {:ok, config, auth_opts} <- user_gitlab_context(conn, issue),
+         {:ok, final_body, uploaded} <- upload_note_files(config, auth_opts, issue.id, body, files),
+         {:ok, _raw_note} <- create_merge_request_discussion_note_with_cleanup(config, auth_opts, value(merge_request, :iid), discussion_id, final_body, uploaded) do
       :ok
     end
   end
@@ -621,6 +686,16 @@ defmodule SymphonyElixirWeb.IssueController do
       :ok
     end
   end
+
+  defp validate_discussion_id(discussion_id) when is_binary(discussion_id) do
+    if String.trim(discussion_id) == "" do
+      {:error, {:validation, "invalid_discussion_id", "Discussion ID is required"}}
+    else
+      :ok
+    end
+  end
+
+  defp validate_discussion_id(_discussion_id), do: {:error, {:validation, "invalid_discussion_id", "Discussion ID is required"}}
 
   defp parse_note_id(note_id) do
     case parse_int(note_id) do
@@ -718,6 +793,20 @@ defmodule SymphonyElixirWeb.IssueController do
     end
   end
 
+  defp create_discussion_note_with_cleanup(config, auth_opts, issue_iid, discussion_id, body, uploaded) do
+    case Client.create_issue_discussion_note(config, issue_iid, discussion_id, body, auth_opts) do
+      {:ok, raw_note} ->
+        {:ok, raw_note}
+
+      {:error, %GitLabError{type: type} = reason} when type in [:validation_error, :unauthorized, :forbidden, :not_found] ->
+        cleanup_uploaded_files(config, auth_opts, uploaded)
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   defp update_note_with_cleanup(config, auth_opts, issue_iid, note_id, body, uploaded) do
     case Client.update_issue_note(config, issue_iid, note_id, body, auth_opts) do
       {:ok, raw_note} ->
@@ -734,6 +823,20 @@ defmodule SymphonyElixirWeb.IssueController do
 
   defp create_merge_request_note_with_cleanup(config, auth_opts, merge_request_iid, body, uploaded) do
     case Client.create_merge_request_note(config, merge_request_iid, body, auth_opts) do
+      {:ok, raw_note} ->
+        {:ok, raw_note}
+
+      {:error, %GitLabError{type: type} = reason} when type in [:validation_error, :unauthorized, :forbidden, :not_found] ->
+        cleanup_uploaded_files(config, auth_opts, uploaded)
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp create_merge_request_discussion_note_with_cleanup(config, auth_opts, merge_request_iid, discussion_id, body, uploaded) do
+    case Client.create_merge_request_discussion_note(config, merge_request_iid, discussion_id, body, auth_opts) do
       {:ok, raw_note} ->
         {:ok, raw_note}
 

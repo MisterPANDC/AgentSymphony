@@ -1384,6 +1384,8 @@ defmodule SymphonyElixir.Store.Json do
     attrs
     |> Map.put(:id, "note-#{issue_id}-#{attrs[:note_id] || attrs["note_id"]}")
     |> Map.put(:gitlab_issue_id, issue_id)
+    |> Map.put_new(:discussion_reply, false)
+    |> Map.put_new(:discussion_individual_note, false)
     |> Map.put_new(:inserted_at, now)
     |> Map.put(:updated_at, now)
   end
@@ -1848,7 +1850,14 @@ defmodule SymphonyElixir.Store.Json do
     end)
   end
 
-  defp sort_notes(notes), do: Enum.sort_by(notes, &(&1.gitlab_created_at || &1.inserted_at), DateTime)
+  defp sort_notes(notes) do
+    Enum.sort_by(notes, fn note ->
+      {note_sort_time(Map.get(note, :gitlab_created_at) || Map.get(note, :inserted_at)), Map.get(note, :discussion_position) || 0, Map.get(note, :note_id) || 0}
+    end)
+  end
+
+  defp note_sort_time(%DateTime{} = datetime), do: DateTime.to_unix(datetime, :microsecond)
+  defp note_sort_time(_datetime), do: 0
 
   defp notes_summary(state, issue_id) do
     case Map.get(state.notes, issue_id, []) do

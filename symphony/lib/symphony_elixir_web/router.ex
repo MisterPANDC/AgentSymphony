@@ -97,7 +97,9 @@ defmodule SymphonyElixirWeb.Router do
 
     post("/api/issues", IssueController, :create)
     post("/api/issues/:id/notes", IssueController, :create_note)
+    post("/api/issues/:id/discussions/:discussion_id/notes", IssueController, :create_note_reply)
     post("/api/issues/:id/merge_requests/:merge_request_iid/notes", IssueController, :create_merge_request_note)
+    post("/api/issues/:id/merge_requests/:merge_request_iid/discussions/:discussion_id/notes", IssueController, :create_merge_request_note_reply)
     put("/api/issues/:id/notes/:note_id", IssueController, :update_note)
     put("/api/issues/:id/merge_requests/:merge_request_iid/notes/:note_id", IssueController, :update_merge_request_note)
     delete("/api/issues/:id/notes/:note_id", IssueController, :delete_note)

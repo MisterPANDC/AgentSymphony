@@ -180,6 +180,39 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
     assert note.body == "![proof](/api/issues/#{issue.id}/uploads/0123456789abcdef0123456789abcdef/proof.txt)"
   end
 
+  test "syncs issue discussion replies and creates replies in the same GitLab thread", %{identity: identity, iid: iid, project: project} do
+    issue = seed_issue(iid, project)
+    {:ok, discussions} = Agent.start_link(fn -> [raw_gitlab_discussion("discussion-a", [raw_gitlab_note(40, "Parent"), raw_gitlab_note(41, "Existing reply")])] end)
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: issue_discussions_plug(project.project_ref, iid, identity, discussions))
+
+    conn =
+      :get
+      |> conn("/api/issues/#{issue.id}/notes")
+      |> assign_user(identity, project)
+
+    conn = IssueController.notes(conn, %{"id" => issue.id})
+    assert conn.status == 200
+
+    assert [
+             %{"body" => "Parent", "discussion_id" => "discussion-a", "discussion_reply" => false},
+             %{"body" => "Existing reply", "discussion_id" => "discussion-a", "discussion_reply" => true}
+           ] = Jason.decode!(conn.resp_body)["notes"]
+
+    conn =
+      :post
+      |> conn("/api/issues/#{issue.id}/discussions/discussion-a/notes")
+      |> assign_user(identity, project)
+
+    conn = IssueController.create_note_reply(conn, %{"id" => issue.id, "discussion_id" => "discussion-a", "body" => "New reply"})
+    assert conn.status == 200
+
+    assert [
+             %{"body" => "Parent"},
+             %{"body" => "Existing reply"},
+             %{"body" => "New reply", "discussion_id" => "discussion-a", "discussion_reply" => true}
+           ] = Jason.decode!(conn.resp_body)["notes"]
+  end
+
   test "lists synced merge requests that close the issue", %{identity: identity, iid: iid, project: project} do
     issue = seed_issue(iid, project)
 
@@ -477,10 +510,13 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
   end
 
   defp note_attachment_plug(project_ref, iid, identity) do
+    {:ok, posted_note} = Agent.start_link(fn -> nil end)
+
     fn conn ->
       assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer oauth-token-#{identity.gitlab_user_id}"]
       upload_path = "/api/v4/projects/#{project_ref}/uploads"
       notes_path = "/api/v4/projects/#{project_ref}/issues/#{iid}/notes"
+      discussions_path = "/api/v4/projects/#{project_ref}/issues/#{iid}/discussions"
 
       case {conn.method, conn.request_path} do
         {"POST", ^upload_path} ->
@@ -499,7 +535,12 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
           assert payload["body"] =~ "/api/issues/"
           assert payload["body"] =~ "/uploads/0123456789abcdef0123456789abcdef/proof.txt"
 
-          Req.Test.json(conn, raw_gitlab_note(99, payload["body"]))
+          note = raw_gitlab_note(99, payload["body"])
+          Agent.update(posted_note, fn _ -> note end)
+          Req.Test.json(conn, note)
+
+        {"GET", ^discussions_path} ->
+          Req.Test.json(conn, raw_gitlab_discussions([Agent.get(posted_note, & &1)]))
       end
     end
   end
@@ -528,16 +569,47 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
     end
   end
 
+  defp issue_discussions_plug(project_ref, iid, identity, discussions) do
+    fn conn ->
+      assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer oauth-token-#{identity.gitlab_user_id}"]
+
+      discussions_path = "/api/v4/projects/#{project_ref}/issues/#{iid}/discussions"
+      reply_path = discussions_path <> "/discussion-a/notes"
+
+      case {conn.method, conn.request_path} do
+        {"GET", ^discussions_path} ->
+          Req.Test.json(conn, Agent.get(discussions, & &1))
+
+        {"POST", ^reply_path} ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          payload = Jason.decode!(body)
+          assert payload["body"] == "New reply"
+
+          note = raw_gitlab_note(42, payload["body"])
+
+          Agent.update(discussions, fn current ->
+            Enum.map(current, fn
+              %{"id" => "discussion-a", "notes" => notes} = discussion -> %{discussion | "notes" => notes ++ [note]}
+              discussion -> discussion
+            end)
+          end)
+
+          Req.Test.json(conn, note)
+      end
+    end
+  end
+
   defp merge_request_notes_plug(project_ref, merge_request_iid, identity, notes) do
     fn conn ->
       assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer oauth-token-#{identity.gitlab_user_id}"]
 
       notes_path = "/api/v4/projects/#{project_ref}/merge_requests/#{merge_request_iid}/notes"
+      discussions_path = "/api/v4/projects/#{project_ref}/merge_requests/#{merge_request_iid}/discussions"
       note_path = notes_path <> "/55"
 
       case {conn.method, conn.request_path} do
-        {"GET", ^notes_path} ->
-          Req.Test.json(conn, Agent.get(notes, & &1))
+        {"GET", ^discussions_path} ->
+          Req.Test.json(conn, raw_gitlab_discussions(Agent.get(notes, & &1)))
 
         {"POST", ^notes_path} ->
           {:ok, body, conn} = Plug.Conn.read_body(conn)
@@ -600,6 +672,7 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
     fn conn ->
       assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer oauth-token-#{identity.gitlab_user_id}"]
       notes_path = "/api/v4/projects/#{project_ref}/merge_requests/#{merge_request_iid}/notes"
+      discussions_path = "/api/v4/projects/#{project_ref}/merge_requests/#{merge_request_iid}/discussions"
 
       case {conn.method, conn.request_path} do
         {"POST", ^notes_path} ->
@@ -609,8 +682,8 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
 
           Req.Test.json(conn, raw_gitlab_note(55, payload["body"]))
 
-        {"GET", ^notes_path} ->
-          Req.Test.json(conn, [raw_gitlab_note(55, "/ready ")])
+        {"GET", ^discussions_path} ->
+          Req.Test.json(conn, raw_gitlab_discussions([raw_gitlab_note(55, "/ready ")]))
       end
     end
   end
@@ -716,11 +789,11 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
   defp upload_proxy_plug(project_ref, iid, identity, secret) do
     fn conn ->
       assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer oauth-token-#{identity.gitlab_user_id}"]
-      notes_path = "/api/v4/projects/#{project_ref}/issues/#{iid}/notes"
+      discussions_path = "/api/v4/projects/#{project_ref}/issues/#{iid}/discussions"
       upload_path = "/api/v4/projects/#{project_ref}/uploads/#{secret}/proof.txt"
 
       case {conn.method, conn.request_path} do
-        {"GET", ^notes_path} ->
+        {"GET", ^discussions_path} ->
           Req.Test.json(conn, [])
 
         {"GET", ^upload_path} ->
@@ -770,6 +843,20 @@ defmodule SymphonyElixirWeb.IssueControllerTest do
       "resolvable" => false,
       "author" => %{"name" => "Developer", "username" => "dev"}
     }
+  end
+
+  defp raw_gitlab_discussion(id, notes) do
+    %{
+      "id" => id,
+      "individual_note" => length(notes) == 1,
+      "notes" => notes
+    }
+  end
+
+  defp raw_gitlab_discussions(notes) do
+    notes
+    |> Enum.reject(&is_nil/1)
+    |> Enum.map(fn note -> raw_gitlab_discussion("discussion-#{note["id"]}", [note]) end)
   end
 
   defp merge_request_attrs(iid, title, description) do

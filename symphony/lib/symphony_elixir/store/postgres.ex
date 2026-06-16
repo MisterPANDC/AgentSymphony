@@ -645,6 +645,8 @@ defmodule SymphonyElixir.Store.Postgres do
       |> Map.put_new(:system, false)
       |> Map.put_new(:internal, false)
       |> Map.put_new(:resolvable, false)
+      |> Map.put_new(:discussion_reply, false)
+      |> Map.put_new(:discussion_individual_note, false)
 
     note =
       Repo.one(
@@ -667,7 +669,11 @@ defmodule SymphonyElixir.Store.Postgres do
   def list_notes(issue_id) do
     from(n in IssueNote,
       where: n.gitlab_issue_id == ^issue_id,
-      order_by: [asc: coalesce(n.gitlab_created_at, n.inserted_at)]
+      order_by: [
+        asc: coalesce(n.gitlab_created_at, n.inserted_at),
+        asc: n.discussion_position,
+        asc: n.note_id
+      ]
     )
     |> Repo.all()
     |> Enum.map(&plain/1)

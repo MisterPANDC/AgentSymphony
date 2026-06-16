@@ -324,11 +324,11 @@ defmodule SymphonyElixir.Sync.Poller do
   def sync_issue_notes(issue_id) when is_binary(issue_id) do
     with %{} = issue <- Store.get_issue(issue_id),
          {:ok, config} <- config_for_issue(issue),
-         {:ok, raw_notes} <- Client.list_issue_notes(config, issue.iid, %{per_page: config.sync_page_size}, auth: {:private_token, config.token}) do
+         {:ok, raw_discussions} <- Client.list_issue_discussions(config, issue.iid, %{per_page: config.sync_page_size}, auth: {:private_token, config.token}) do
       notes =
-        Enum.map(raw_notes, fn raw ->
-          Store.upsert_note(issue_id, NoteMapper.from_gitlab(raw))
-        end)
+        raw_discussions
+        |> Enum.flat_map(&NoteMapper.from_gitlab_discussion/1)
+        |> Enum.map(&Store.upsert_note(issue_id, &1))
 
       put_success_cursor(@notes_cursor, DateTime.utc_now())
       {:ok, notes}

@@ -73,10 +73,22 @@ defmodule Symphony.GitLab.Client do
     paginated_get(config, project_path(config) <> "/issues/#{issue_iid}/notes", params, opts)
   end
 
+  @spec list_issue_discussions(Config.t(), integer() | String.t(), map() | keyword(), keyword()) ::
+          {:ok, [map()]} | {:error, Error.t()}
+  def list_issue_discussions(%Config{} = config, issue_iid, params \\ %{}, opts \\ []) do
+    paginated_get(config, project_path(config) <> "/issues/#{issue_iid}/discussions", params, opts)
+  end
+
   @spec list_merge_request_notes(Config.t(), integer() | String.t(), map() | keyword(), keyword()) ::
           {:ok, [map()]} | {:error, Error.t()}
   def list_merge_request_notes(%Config{} = config, merge_request_iid, params \\ %{}, opts \\ []) do
     paginated_get(config, project_path(config) <> "/merge_requests/#{merge_request_iid}/notes", params, opts)
+  end
+
+  @spec list_merge_request_discussions(Config.t(), integer() | String.t(), map() | keyword(), keyword()) ::
+          {:ok, [map()]} | {:error, Error.t()}
+  def list_merge_request_discussions(%Config{} = config, merge_request_iid, params \\ %{}, opts \\ []) do
+    paginated_get(config, project_path(config) <> "/merge_requests/#{merge_request_iid}/discussions", params, opts)
   end
 
   @spec create_issue_note(Config.t(), integer() | String.t(), String.t(), keyword()) ::
@@ -85,10 +97,26 @@ defmodule Symphony.GitLab.Client do
     request(config, :post, project_path(config) <> "/issues/#{issue_iid}/notes", Keyword.merge(opts, json: %{body: body}))
   end
 
+  @spec create_issue_discussion_note(Config.t(), integer() | String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, map()} | {:error, Error.t()}
+  def create_issue_discussion_note(%Config{} = config, issue_iid, discussion_id, body, opts \\ [])
+      when is_binary(discussion_id) and is_binary(body) do
+    path = project_path(config) <> "/issues/#{issue_iid}/discussions/#{URI.encode(discussion_id, &URI.char_unreserved?/1)}/notes"
+    request(config, :post, path, Keyword.merge(opts, json: %{body: body}))
+  end
+
   @spec create_merge_request_note(Config.t(), integer() | String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, Error.t()}
   def create_merge_request_note(%Config{} = config, merge_request_iid, body, opts \\ []) when is_binary(body) do
     request(config, :post, project_path(config) <> "/merge_requests/#{merge_request_iid}/notes", Keyword.merge(opts, json: %{body: body}))
+  end
+
+  @spec create_merge_request_discussion_note(Config.t(), integer() | String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, map()} | {:error, Error.t()}
+  def create_merge_request_discussion_note(%Config{} = config, merge_request_iid, discussion_id, body, opts \\ [])
+      when is_binary(discussion_id) and is_binary(body) do
+    path = project_path(config) <> "/merge_requests/#{merge_request_iid}/discussions/#{URI.encode(discussion_id, &URI.char_unreserved?/1)}/notes"
+    request(config, :post, path, Keyword.merge(opts, json: %{body: body}))
   end
 
   @spec update_issue_note(Config.t(), integer() | String.t(), integer() | String.t(), String.t(), keyword()) ::

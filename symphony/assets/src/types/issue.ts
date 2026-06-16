@@ -128,6 +128,10 @@ export function canUserCreateIssueInStatus(status: WorkflowStatus) {
 export interface NoteDTO {
   id: string;
   note_id: number;
+  discussion_id?: string | null;
+  discussion_reply?: boolean;
+  discussion_individual_note?: boolean;
+  discussion_position?: number | null;
   body: string;
   author: {
     id?: number | string | null;
