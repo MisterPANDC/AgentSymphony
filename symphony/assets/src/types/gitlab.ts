@@ -1,3 +1,6 @@
+export type AutomationCredentialMode = "project_access_token" | "service_account";
+export type CredentialStatus = "configured" | "missing";
+
 export interface GitLabSettingsDTO {
   gitlab: {
     gitlab_api_root?: string;
@@ -11,7 +14,21 @@ export interface GitLabSettingsDTO {
     name: string | null;
     web_url: string | null;
     read_only: boolean;
-    project_access_token_status: "configured" | "missing";
+    automation_credential_mode: AutomationCredentialMode;
+    automation_credential_status: CredentialStatus;
+    project_access_token_status: CredentialStatus;
     project_access_token_set_at?: string | null;
+    service_account_token_status: CredentialStatus;
+  } | null;
+  serviceAccount: {
+    id: string;
+    api_root: string;
+    service_account_token_status: CredentialStatus;
+    service_account_token_set_at?: string | null;
+    last_validated_at?: string | null;
+    gitlab_user_id?: string | null;
+    username?: string | null;
+    name?: string | null;
+    web_url?: string | null;
   } | null;
 }

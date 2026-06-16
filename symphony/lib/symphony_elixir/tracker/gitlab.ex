@@ -283,12 +283,12 @@ defmodule SymphonyElixir.Tracker.GitLab do
   defp project_gitlab_config(issue) do
     with project_id when is_binary(project_id) <- Map.get(issue, :gitlab_project_setting_id),
          %{} = project <- Store.project_by_id(project_id),
-         {:ok, token} <- Store.project_access_token(project.id) do
-      Config.from_project_setting(project, token)
+         {:ok, credential} <- Store.automation_credential(project.id) do
+      Config.from_project_setting(project, credential.token)
     else
       nil -> {:error, :project_not_found}
       {:error, reason} -> {:error, reason}
-      _ -> {:error, :project_access_token_missing}
+      _ -> {:error, :automation_credential_missing}
     end
   end
 

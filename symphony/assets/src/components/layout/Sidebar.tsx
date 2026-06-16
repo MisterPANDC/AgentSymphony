@@ -37,15 +37,17 @@ export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
   const session = useQuery({ queryKey: ["auth-session"], queryFn: getAuthSession, refetchInterval: 30_000 });
   const sync = monitor.data?.sync;
   const currentProject = session.data?.project;
-  const tokenMissing = currentProject?.project_access_token_status === "missing";
+  const credentialMissing =
+    currentProject?.automation_credential_status === "missing" ||
+    (!currentProject?.automation_credential_status && currentProject?.project_access_token_status === "missing");
   const monitorMatchesCurrentProject =
     Boolean(currentProject && sync) &&
     typeof currentProject?.project_id === "number" &&
     monitor.data?.gitlab.projectId === currentProject.project_id;
   const syncError = monitorMatchesCurrentProject ? sync?.issueLastError : null;
-  const syncUnsynced = Boolean(currentProject && (tokenMissing || syncError));
-  const syncTitle = tokenMissing
-    ? "Project Access Token is missing; GitLab sync has not run."
+  const syncUnsynced = Boolean(currentProject && (credentialMissing || syncError));
+  const syncTitle = credentialMissing
+    ? "GitLab automation credential is missing; GitLab sync has not run."
     : syncError ?? undefined;
   const CollapseIcon = collapsed ? PanelLeftOpen : PanelLeftClose;
 

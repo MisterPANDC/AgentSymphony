@@ -75,14 +75,23 @@ export function ProjectSwitcher({ collapsed = false, syncUnsynced = false, syncT
           projects: previous.projects.map((project) => {
             const selected = isCurrentProject(project, payload.project);
 
-            return {
-              ...project,
-              selected,
-              project_setting_id: selected ? payload.project?.id ?? project.project_setting_id : project.project_setting_id,
-              project_access_token_status: selected
-                ? payload.project?.project_access_token_status ?? project.project_access_token_status
-                : project.project_access_token_status
-            };
+	            return {
+	              ...project,
+	              selected,
+	              project_setting_id: selected ? payload.project?.id ?? project.project_setting_id : project.project_setting_id,
+	              automation_credential_mode: selected
+	                ? payload.project?.automation_credential_mode ?? project.automation_credential_mode
+	                : project.automation_credential_mode,
+	              automation_credential_status: selected
+	                ? payload.project?.automation_credential_status ?? project.automation_credential_status
+	                : project.automation_credential_status,
+	              project_access_token_status: selected
+	                ? payload.project?.project_access_token_status ?? project.project_access_token_status
+	                : project.project_access_token_status,
+	              service_account_token_status: selected
+	                ? payload.project?.service_account_token_status ?? project.service_account_token_status
+	                : project.service_account_token_status
+	            };
           })
         };
       });
@@ -209,7 +218,16 @@ export function ProjectSwitcher({ collapsed = false, syncUnsynced = false, syncT
             )}
             {filteredProjects.map((project) => {
               const selected = isCurrentProject(project, currentProject);
-              const tokenStatus = project.project_access_token_status;
+	              const credentialStatus = project.automation_credential_status ?? project.project_access_token_status;
+	              const credentialMode = project.automation_credential_mode ?? "project_access_token";
+	              const credentialLabel =
+	                credentialStatus === "configured"
+	                  ? credentialMode === "service_account"
+	                    ? "SA set"
+	                    : "PAT set"
+	                  : credentialMode === "service_account"
+	                    ? "SA missing"
+	                    : "PAT missing";
 
               return (
                 <button
@@ -227,9 +245,9 @@ export function ProjectSwitcher({ collapsed = false, syncUnsynced = false, syncT
                   </span>
                   <span className="project-switcher-row-meta">
                     {selected && <Check size={14} />}
-                    <span className={`repo-token-state ${tokenStatus}`}>
-                      {tokenStatus === "configured" ? "PAT set" : "PAT missing"}
-                    </span>
+	                    <span className={`repo-token-state ${credentialStatus}`}>
+	                      {credentialLabel}
+	                    </span>
                   </span>
                 </button>
               );

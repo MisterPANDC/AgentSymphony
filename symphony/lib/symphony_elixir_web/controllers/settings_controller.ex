@@ -9,6 +9,8 @@ defmodule SymphonyElixirWeb.SettingsController do
   alias SymphonyElixir.Workflow.Transitions
   alias SymphonyElixirWeb.AuthPlug
 
+  @credential_modes ~w(project_access_token service_account)
+
   @spec gitlab(Conn.t(), map()) :: Conn.t()
   def gitlab(conn, _params) do
     project = AuthPlug.current_project(conn)
@@ -19,19 +21,22 @@ defmodule SymphonyElixirWeb.SettingsController do
         _ -> %{token_status: (project && project.project_access_token_status) || "missing"}
       end
 
-    json(conn, %{gitlab: config, project: project})
+    service_account = project && Store.service_account_credential(project.api_root)
+
+    json(conn, %{gitlab: config, project: project, serviceAccount: service_account})
   end
 
   @spec test_gitlab(Conn.t(), map()) :: Conn.t()
   def test_gitlab(conn, _params) do
     with %{} = project <- AuthPlug.current_project(conn),
-         {:ok, token} <- Store.project_access_token(project.id),
-         {:ok, config} <- GitLabConfig.from_project_setting(project, token),
-         {:ok, result} <- Client.validate(config, auth: {:private_token, token}) do
+         {:ok, credential} <- Store.automation_credential(project.id),
+         {:ok, config} <- GitLabConfig.from_project_setting(project, credential.token),
+         {:ok, result} <- Client.validate(config, auth: {:private_token, credential.token}) do
       project = result.project
 
       json(conn, %{
         ok: true,
+        credentialMode: credential.mode,
         project: %{
           id: project["id"],
           name: project["name"],
@@ -51,7 +56,12 @@ defmodule SymphonyElixirWeb.SettingsController do
       {:error, :project_access_token_missing} ->
         conn
         |> put_status(422)
-        |> json(%{ok: false, error: %{type: :project_access_token_missing, message: "Set a Project Access Token before testing GitLab sync."}})
+        |> json(%{ok: false, error: %{type: :project_access_token_missing, message: "Set a Project Access Token or switch to a configured Service Account before testing GitLab sync."}})
+
+      {:error, :service_account_token_missing} ->
+        conn
+        |> put_status(422)
+        |> json(%{ok: false, error: %{type: :service_account_token_missing, message: "Set the global Service Account token before testing this repository in Service Account mode."}})
 
       {:error, reason} ->
         conn
@@ -68,7 +78,8 @@ defmodule SymphonyElixirWeb.SettingsController do
          %{} = project <- AuthPlug.current_project(conn),
          {:ok, config} <- GitLabConfig.from_project_setting(project, token),
          {:ok, _result} <- Client.validate(config, auth: {:private_token, token}),
-         {:ok, project} <- Store.put_project_access_token(project.id, token, current_identity_id(conn)),
+         {:ok, _project} <- Store.put_project_access_token(project.id, token, current_identity_id(conn)),
+         {:ok, project} <- Store.put_project_automation_credential_mode(project.id, "project_access_token"),
          :ok <- Poller.reset_issue_cursor(project.id) do
       json(conn, %{ok: true, project: project})
     else
@@ -93,6 +104,74 @@ defmodule SymphonyElixirWeb.SettingsController do
     conn
     |> put_status(400)
     |> json(%{ok: false, error: %{type: :missing_project_access_token, message: "projectAccessToken is required."}})
+  end
+
+  @spec update_service_account_token(Conn.t(), map()) :: Conn.t()
+  def update_service_account_token(conn, %{"serviceAccountToken" => token}) when is_binary(token) do
+    token = String.trim(token)
+    current_project = AuthPlug.current_project(conn)
+
+    with true <- token != "" || {:error, :empty_service_account_token},
+         %{} = project <- current_project,
+         {:ok, config} <- GitLabConfig.from_project_setting(project, token),
+         {:ok, _result} <- Client.validate(config, auth: {:private_token, token}),
+         {:ok, user} <- Client.get_current_user(config, auth: {:private_token, token}),
+         {:ok, service_account} <- Store.put_service_account_token(project.api_root, token, current_identity_id(conn), service_account_attrs(user)),
+         {:ok, project} <- Store.put_project_automation_credential_mode(project.id, "service_account"),
+         :ok <- Poller.reset_issue_cursor(project.id) do
+      json(conn, %{ok: true, project: project, serviceAccount: service_account})
+    else
+      nil ->
+        conn
+        |> put_status(422)
+        |> json(%{ok: false, error: %{type: :missing_project, message: "Select a GitLab project before saving a Service Account token."}})
+
+      {:error, :empty_service_account_token} ->
+        conn
+        |> put_status(400)
+        |> json(%{ok: false, error: %{type: :empty_service_account_token, message: "Service Account token is required."}})
+
+      {:error, %Error{type: type, status: status}} when type in [:not_found, :forbidden] ->
+        conn
+        |> put_status(422)
+        |> json(%{ok: false, error: service_account_project_access_payload(current_project, status)})
+
+      {:error, reason} ->
+        conn
+        |> put_status(422)
+        |> json(%{ok: false, error: error_payload(reason)})
+    end
+  end
+
+  def update_service_account_token(conn, _params) do
+    conn
+    |> put_status(400)
+    |> json(%{ok: false, error: %{type: :missing_service_account_token, message: "serviceAccountToken is required."}})
+  end
+
+  @spec update_credential_mode(Conn.t(), map()) :: Conn.t()
+  def update_credential_mode(conn, %{"mode" => mode}) when mode in @credential_modes do
+    with %{} = project <- AuthPlug.current_project(conn),
+         {:ok, project} <- Store.put_project_automation_credential_mode(project.id, mode),
+         :ok <- Poller.reset_issue_cursor(project.id) do
+      json(conn, %{ok: true, project: project, serviceAccount: Store.service_account_credential(project.api_root)})
+    else
+      nil ->
+        conn
+        |> put_status(422)
+        |> json(%{ok: false, error: %{type: :missing_project, message: "Select a GitLab project before switching credential mode."}})
+
+      {:error, reason} ->
+        conn
+        |> put_status(422)
+        |> json(%{ok: false, error: error_payload(reason)})
+    end
+  end
+
+  def update_credential_mode(conn, _params) do
+    conn
+    |> put_status(400)
+    |> json(%{ok: false, error: %{type: :invalid_automation_credential_mode, message: "mode must be project_access_token or service_account."}})
   end
 
   @spec workflow(Conn.t(), map()) :: Conn.t()
@@ -133,6 +212,32 @@ defmodule SymphonyElixirWeb.SettingsController do
       _ -> nil
     end
   end
+
+  defp service_account_attrs(user) when is_map(user) do
+    %{
+      gitlab_user_id: user["id"] || user[:id],
+      username: user["username"] || user[:username],
+      name: user["name"] || user[:name],
+      web_url: user["web_url"] || user["webUrl"] || user[:web_url] || user[:webUrl],
+      scopes: []
+    }
+  end
+
+  defp service_account_project_access_payload(project, status) do
+    %{
+      type: :service_account_project_access_denied,
+      status: status,
+      message:
+        "This Service Account token cannot see #{project_label(project)}. GitLab may return 404 for private projects the token cannot access. Add the Service Account user to the project or its group, then save the token again."
+    }
+  end
+
+  defp project_label(project) when is_map(project) do
+    project[:path_with_namespace] || project["path_with_namespace"] || project[:project_ref] || project["project_ref"] ||
+      "the selected GitLab project"
+  end
+
+  defp project_label(_project), do: "the selected GitLab project"
 
   defp error_payload(%Error{} = reason), do: %{type: reason.type, status: reason.status, message: reason.message}
   defp error_payload(reason), do: %{type: reason, message: inspect(reason)}

@@ -1590,6 +1590,180 @@ textarea {
   font-size: 12px;
 }
 
+.settings-page {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-title-block {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.settings-title-block h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 20px;
+}
+
+.settings-title-block span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-meta-grid {
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) minmax(0, 1fr);
+  gap: 8px 14px;
+  margin: 0;
+  padding: 14px;
+  font-size: 13px;
+}
+
+.settings-meta-grid dt {
+  color: var(--muted);
+}
+
+.settings-meta-grid dd {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--text);
+}
+
+.settings-meta-grid dd span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-meta-grid dd svg {
+  flex: 0 0 auto;
+  color: #40625d;
+}
+
+.settings-test-result {
+  margin: 0 14px 14px;
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--panel-subtle);
+  padding: 10px;
+  color: #333843;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.settings-mode-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 14px;
+}
+
+.settings-mode-option {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+  color: var(--text);
+  text-align: left;
+}
+
+.settings-mode-option:hover:not(:disabled) {
+  border-color: #c8ccd4;
+  background: #fbfbfc;
+}
+
+.settings-mode-option.is-active {
+  border-color: #cfd3dc;
+  background: #fbfbfc;
+}
+
+.settings-mode-option.is-active.is-configured {
+  border-color: #9fb8b2;
+  background: #f3faf7;
+}
+
+.settings-mode-option.is-active.is-missing {
+  border-color: #e5c97e;
+  background: #fffbf1;
+}
+
+.settings-mode-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.settings-mode-option > svg {
+  color: #40625d;
+}
+
+.settings-mode-option.is-missing > svg {
+  color: #8a5a05;
+}
+
+.settings-mode-option.is-configured > svg {
+  color: #2f6842;
+}
+
+.settings-mode-option strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 18px;
+}
+
+.settings-mode-option span:not(.repo-token-state):not(.settings-mode-state) {
+  display: block;
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.settings-mode-state {
+  align-self: start;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.settings-mode-option.is-active .settings-mode-state {
+  color: #4b5563;
+}
+
+.settings-mode-option.is-active.is-configured .settings-mode-state {
+  color: #2f6842;
+}
+
+.settings-mode-option.is-active.is-missing .settings-mode-state {
+  color: #8a5a05;
+}
+
+.settings-credential-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
 .settings-form {
   display: grid;
   gap: 10px;
@@ -1624,8 +1798,40 @@ textarea {
   color: var(--muted);
 }
 
+.settings-summary-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settings-inline-link {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  color: #44556b;
+  font-size: 12px;
+  font-weight: 620;
+  line-height: 17px;
+  text-decoration: none;
+}
+
+.settings-inline-link:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.settings-inline-link svg {
+  color: currentColor;
+}
+
 .settings-token-summary.configured svg {
   color: #2f6842;
+}
+
+.settings-token-summary.missing svg {
+  color: #8a5a05;
 }
 
 .settings-field {
@@ -1663,6 +1869,24 @@ textarea {
 }
 
 @media (max-width: 640px) {
+  .settings-meta-grid,
+  .settings-mode-options,
+  .settings-credential-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-meta-grid {
+    gap: 4px;
+  }
+
+  .settings-meta-grid dt {
+    font-size: 12px;
+  }
+
+  .settings-meta-grid dd {
+    margin-bottom: 6px;
+  }
+
   .settings-token-action-row {
     grid-template-columns: 1fr;
   }
@@ -1870,6 +2094,11 @@ textarea {
   border-radius: 7px;
   background: #fff4e6;
   color: #a6531a;
+}
+
+.settings-service-dialog .confirm-dialog-icon {
+  background: #edf8ef;
+  color: #2f6842;
 }
 
 .confirm-dialog-body {

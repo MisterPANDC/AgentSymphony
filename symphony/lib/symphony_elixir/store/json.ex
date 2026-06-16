@@ -17,6 +17,7 @@ defmodule SymphonyElixir.Store.Json do
   @block_types ~w(operator_input approval_required mcp_elicitation sandbox_rejection external_failure blocked_by_dependency)
   @event_sources ~w(gitlab_sync user_ui agent system)
   @relation_types ~w(relates_to)
+  @credential_modes ~w(project_access_token service_account)
 
   defstruct [
     :path,
@@ -25,6 +26,7 @@ defmodule SymphonyElixir.Store.Json do
     projects: %{},
     identities: %{},
     oauth_tokens: %{},
+    service_account_credentials: %{},
     project_memberships: %{},
     issues: %{},
     issue_order: [],
@@ -100,6 +102,23 @@ defmodule SymphonyElixir.Store.Json do
 
   @spec project_access_token(map() | String.t()) :: {:ok, String.t()} | {:error, term()}
   def project_access_token(project_or_id), do: call({:project_access_token, project_or_id})
+
+  @spec put_project_automation_credential_mode(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def put_project_automation_credential_mode(project_setting_id, mode),
+    do: call({:put_project_automation_credential_mode, project_setting_id, mode})
+
+  @spec put_service_account_token(String.t(), String.t(), String.t() | nil, map()) :: {:ok, map()} | {:error, term()}
+  def put_service_account_token(api_root, token, identity_id \\ nil, attrs \\ %{}),
+    do: call({:put_service_account_token, api_root, token, identity_id, attrs})
+
+  @spec service_account_credential(String.t()) :: map() | nil
+  def service_account_credential(api_root), do: call({:service_account_credential, api_root})
+
+  @spec service_account_token(String.t()) :: {:ok, String.t()} | {:error, term()}
+  def service_account_token(api_root), do: call({:service_account_token, api_root})
+
+  @spec automation_credential(map() | String.t()) :: {:ok, map()} | {:error, term()}
+  def automation_credential(project_or_id), do: call({:automation_credential, project_or_id})
 
   @spec upsert_issue(map()) :: map()
   def upsert_issue(attrs), do: call({:upsert_issue, attrs})
@@ -229,16 +248,16 @@ defmodule SymphonyElixir.Store.Json do
     project = normalize_project(attrs, existing, now)
     projects = Map.put(state.projects, project.id, project)
     state = persist(%{state | project: project, projects: projects})
-    {:reply, public_project(project), state}
+    {:reply, public_project(project, state), state}
   end
 
-  def handle_call(:project, _from, state), do: {:reply, state.project && public_project(state.project), state}
+  def handle_call(:project, _from, state), do: {:reply, state.project && public_project(state.project, state), state}
 
   def handle_call(:projects, _from, state) do
     projects =
       state.projects
       |> Map.values()
-      |> Enum.map(&public_project/1)
+      |> Enum.map(&public_project(&1, state))
 
     {:reply, projects, state}
   end
@@ -252,7 +271,7 @@ defmodule SymphonyElixir.Store.Json do
         project -> project
       end
 
-    {:reply, project && public_project(project), state}
+    {:reply, project && public_project(project, state), state}
   end
 
   def handle_call({:upsert_gitlab_identity, attrs}, _from, state) do
@@ -315,7 +334,7 @@ defmodule SymphonyElixir.Store.Json do
             projects = Map.put(state.projects, project.id, project)
             current_project = if state.project && state.project.id == project.id, do: project, else: state.project
             state = persist(%{state | project: current_project, projects: projects})
-            {:reply, {:ok, public_project(project)}, state}
+            {:reply, {:ok, public_project(project, state)}, state}
 
           {:error, reason} ->
             {:reply, {:error, reason}, state}
@@ -343,6 +362,114 @@ defmodule SymphonyElixir.Store.Json do
       case project do
         %{encrypted_project_access_token: encrypted} when is_binary(encrypted) ->
           SymphonyElixir.Auth.TokenVault.open(encrypted)
+
+        _ ->
+          {:error, :project_access_token_missing}
+      end
+
+    {:reply, reply, state}
+  end
+
+  def handle_call({:put_project_automation_credential_mode, project_setting_id, mode}, _from, state) when mode in @credential_modes do
+    case Map.get(state.projects, project_setting_id) || (state.project && state.project.id == project_setting_id && state.project) do
+      %{id: ^project_setting_id} = project ->
+        project =
+          project
+          |> Map.put(:automation_credential_mode, mode)
+          |> Map.put(:updated_at, now())
+
+        projects = Map.put(state.projects, project.id, project)
+        current_project = if state.project && state.project.id == project.id, do: project, else: state.project
+        state = persist(%{state | project: current_project, projects: projects})
+        {:reply, {:ok, public_project(project, state)}, state}
+
+      _ ->
+        {:reply, {:error, :project_not_found}, state}
+    end
+  end
+
+  def handle_call({:put_project_automation_credential_mode, _project_setting_id, _mode}, _from, state) do
+    {:reply, {:error, :invalid_automation_credential_mode}, state}
+  end
+
+  def handle_call({:put_service_account_token, api_root, token, identity_id, attrs}, _from, state)
+      when is_binary(api_root) and is_binary(token) do
+    case SymphonyElixir.Auth.TokenVault.seal(token) do
+      {:ok, encrypted} ->
+        existing = Map.get(state.service_account_credentials, api_root, %{})
+
+        credential =
+          existing
+          |> Map.merge(normalize_service_account_attrs(attrs))
+          |> Map.merge(%{
+            id: existing[:id] || Ecto.UUID.generate(),
+            api_root: api_root,
+            encrypted_service_account_token: encrypted,
+            service_account_token_set_by_identity_id: identity_id,
+            service_account_token_set_at: now(),
+            last_validated_at: now(),
+            last_validation_error: nil,
+            inserted_at: existing[:inserted_at] || now(),
+            updated_at: now()
+          })
+
+        state =
+          state
+          |> put_in([Access.key(:service_account_credentials), api_root], credential)
+          |> persist()
+
+        {:reply, {:ok, public_service_account_credential(credential)}, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:put_service_account_token, _api_root, _token, _identity_id, _attrs}, _from, state) do
+    {:reply, {:error, :missing_service_account_token}, state}
+  end
+
+  def handle_call({:service_account_credential, api_root}, _from, state) do
+    credential = if is_binary(api_root), do: Map.get(state.service_account_credentials, api_root)
+    {:reply, credential && public_service_account_credential(credential), state}
+  end
+
+  def handle_call({:service_account_token, api_root}, _from, state) do
+    reply =
+      case if(is_binary(api_root), do: Map.get(state.service_account_credentials, api_root)) do
+        %{encrypted_service_account_token: encrypted} when is_binary(encrypted) ->
+          open_encrypted_token(encrypted, :service_account_token_missing)
+
+        _ ->
+          {:error, :service_account_token_missing}
+      end
+
+    {:reply, reply, state}
+  end
+
+  def handle_call({:automation_credential, project_or_id}, _from, state) do
+    project = resolve_project(state, project_or_id)
+
+    reply =
+      case project do
+        nil ->
+          {:error, :project_not_found}
+
+        %{automation_credential_mode: "service_account", api_root: api_root, id: project_id} ->
+          case Map.get(state.service_account_credentials, api_root) do
+            %{encrypted_service_account_token: encrypted} when is_binary(encrypted) ->
+              with {:ok, token} <- open_encrypted_token(encrypted, :service_account_token_missing) do
+                {:ok, %{mode: "service_account", token: token, api_root: api_root, project_setting_id: project_id}}
+              end
+
+            _ ->
+              {:error, :service_account_token_missing}
+          end
+
+        %{encrypted_project_access_token: encrypted, api_root: api_root, id: project_id} when is_binary(encrypted) ->
+          with {:ok, token} <- open_encrypted_token(encrypted, :project_access_token_missing) do
+            {:ok, %{mode: "project_access_token", token: token, api_root: api_root, project_setting_id: project_id}}
+          end
 
         _ ->
           {:error, :project_access_token_missing}
@@ -898,6 +1025,7 @@ defmodule SymphonyElixir.Store.Json do
     map
     |> update_map_values(:identities, &hydrate_datetime_fields(&1, [:last_login_at, :inserted_at, :updated_at]))
     |> update_map_values(:oauth_tokens, &hydrate_datetime_fields(&1, [:expires_at, :last_refreshed_at, :inserted_at, :updated_at]))
+    |> update_map_values(:service_account_credentials, &hydrate_service_account_credential/1)
     |> update_map_values(:projects, &hydrate_project/1)
     |> update_map_values(:project_memberships, &hydrate_datetime_fields(&1, [:expires_at, :last_checked_at, :inserted_at, :updated_at]))
     |> update_map_values(:issues, &hydrate_issue/1)
@@ -940,6 +1068,7 @@ defmodule SymphonyElixir.Store.Json do
     existing
     |> Map.merge(Map.new(attrs))
     |> Map.put_new(:id, Ecto.UUID.generate())
+    |> Map.put_new(:automation_credential_mode, "project_access_token")
     |> Map.put(:updated_at, now)
     |> Map.put_new(:inserted_at, now)
   end
@@ -980,17 +1109,88 @@ defmodule SymphonyElixir.Store.Json do
   defp current_project(_project, projects), do: projects |> Map.values() |> List.first()
 
   defp hydrate_project(project) do
-    hydrate_datetime_fields(project, [:last_validated_at, :project_access_token_set_at, :inserted_at, :updated_at])
+    project
+    |> hydrate_datetime_fields([:last_validated_at, :project_access_token_set_at, :inserted_at, :updated_at])
+    |> Map.put_new(:automation_credential_mode, "project_access_token")
   end
 
-  defp public_project(project) when is_map(project) do
+  defp hydrate_service_account_credential(credential) do
+    hydrate_datetime_fields(credential, [:service_account_token_set_at, :last_validated_at, :inserted_at, :updated_at])
+  end
+
+  defp public_project(project, state) when is_map(project) do
+    mode = credential_mode(project)
+    project_token_status = token_status(project[:encrypted_project_access_token])
+    service_status = project |> service_account_for_project(state) |> service_account_token_status()
+
     project
     |> Map.drop([:encrypted_project_access_token, :project_access_token_set_by_identity_id])
-    |> Map.put(:project_access_token_status, token_status(project[:encrypted_project_access_token]))
+    |> Map.put(:automation_credential_mode, mode)
+    |> Map.put(:project_access_token_status, project_token_status)
+    |> Map.put(:service_account_token_status, service_status)
+    |> Map.put(:automation_credential_status, automation_credential_status(mode, project_token_status, service_status))
   end
 
   defp token_status(value) when is_binary(value) and value != "", do: "configured"
   defp token_status(_value), do: "missing"
+
+  defp public_service_account_credential(credential) when is_map(credential) do
+    credential
+    |> Map.drop([:encrypted_service_account_token, :service_account_token_set_by_identity_id])
+    |> Map.put(:service_account_token_status, token_status(credential[:encrypted_service_account_token]))
+  end
+
+  defp service_account_for_project(%{api_root: api_root}, %__MODULE__{} = state) when is_binary(api_root),
+    do: Map.get(state.service_account_credentials, api_root)
+
+  defp service_account_for_project(_project, _state), do: nil
+
+  defp service_account_token_status(%{encrypted_service_account_token: encrypted}), do: token_status(encrypted)
+  defp service_account_token_status(_credential), do: "missing"
+
+  defp automation_credential_status("service_account", _project_status, service_status), do: service_status
+  defp automation_credential_status(_mode, project_status, _service_status), do: project_status
+
+  defp credential_mode(%{automation_credential_mode: mode}) when mode in @credential_modes, do: mode
+  defp credential_mode(_project), do: "project_access_token"
+
+  defp open_encrypted_token(encrypted, missing_reason) do
+    case SymphonyElixir.Auth.TokenVault.open(encrypted) do
+      {:ok, token} when is_binary(token) and token != "" -> {:ok, token}
+      {:ok, _} -> {:error, missing_reason}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp resolve_project(%__MODULE__{} = state, id) when is_binary(id),
+    do: Map.get(state.projects, id) || if(state.project && state.project.id == id, do: state.project)
+
+  defp resolve_project(_state, %{id: id} = project) when is_binary(id) do
+    if Map.has_key?(project, :encrypted_project_access_token) or Map.has_key?(project, :automation_credential_mode) do
+      project
+    end
+  end
+
+  defp resolve_project(_state, _project_or_id), do: nil
+
+  defp normalize_service_account_attrs(attrs) do
+    attrs = Map.new(attrs || %{})
+
+    %{
+      gitlab_user_id: attrs[:gitlab_user_id] || attrs["gitlab_user_id"],
+      username: attrs[:username] || attrs["username"],
+      name: attrs[:name] || attrs["name"],
+      web_url: attrs[:web_url] || attrs["web_url"],
+      scopes: normalize_scopes(attrs[:scopes] || attrs["scopes"])
+    }
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
+    |> Map.update(:gitlab_user_id, nil, &to_string/1)
+  end
+
+  defp normalize_scopes(scopes) when is_binary(scopes), do: String.split(scopes, ~r/[\s,]+/, trim: true)
+  defp normalize_scopes(scopes) when is_list(scopes), do: Enum.map(scopes, &to_string/1)
+  defp normalize_scopes(_scopes), do: []
 
   defp oauth_scopes(attrs) do
     scope = attrs["scope"] || attrs[:scope] || attrs["scopes"] || attrs[:scopes] || []
@@ -1596,7 +1796,7 @@ defmodule SymphonyElixir.Store.Json do
 
   defp to_snapshot(state) do
     %{
-      project: state.project && public_project(state.project),
+      project: state.project && public_project(state.project, state),
       issues: Enum.map(state.issue_order, &(state.issues |> Map.get(&1) |> maybe_decorate_issue(state))) |> Enum.reject(&is_nil/1),
       cursors: state.cursors,
       runs: Enum.map(state.run_order, &(state.runs |> Map.get(&1) |> maybe_decorate_run(state))) |> Enum.reject(&is_nil/1),

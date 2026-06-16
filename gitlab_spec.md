@@ -43,7 +43,8 @@ A conforming implementation MUST satisfy all of the following goals:
 4. **Support multiple GitLab projects safely**
    - Symphony MAY persist many GitLab project settings for one GitLab instance.
    - A user MAY switch between GitLab projects they can access without signing out.
-   - Per-project data such as Project Access Token status, issue sync state, unsynced issues, and issue cursors MUST NOT leak across projects.
+   - Per-project data such as automation credential mode, Project Access Token status, issue sync state, unsynced issues, and issue cursors MUST NOT leak across projects.
+   - The global Service Account credential MAY be shared by projects on the same configured GitLab API root, but a project MUST opt in by selecting Service Account mode.
    - GitLab issue sync cursors MUST be scoped per `gitlab_project_settings.id`.
 
 5. **Use GitLab REST API as the external issue source**
@@ -52,7 +53,7 @@ A conforming implementation MUST satisfy all of the following goals:
    - Symphony MUST call GitLab REST API under `/api/v4`.
    - Symphony MUST authenticate to GitLab from the server side only.
    - User-initiated GitLab writes MUST use the signed-in user's OAuth access token.
-   - Background sync and Agent GitLab writes MUST use the selected project's Project Access Token.
+   - Background sync and Agent GitLab writes MUST use the selected project's configured automation credential.
 
 6. **Maintain Symphony workflow state internally**
    - Symphony workflow statuses such as `backlog`, `todo`, `in_progress`, `review`, `merging`, `rework`, `done`, and `canceled` MUST be stored in the Symphony database.
@@ -91,7 +92,7 @@ A conforming implementation MUST NOT implement the following in this migration:
 - GitLab issue boards as the workflow source of truth.
 - GitLab labels as the workflow source of truth.
 - Browser-side GitLab API calls.
-- Browser-side raw OAuth token or Project Access Token storage.
+- Browser-side raw OAuth token, Project Access Token, or Service Account token storage.
 - A separate legacy LiveView dashboard as the primary UI.
 
 ---
@@ -147,22 +148,26 @@ Meaning:
 
 Membership checks MAY be cached briefly, but protected API requests MUST refresh stale membership and drop the session if the user no longer has enough GitLab access.
 
-### 3.3 Project Access Tokens
+### 3.3 Automation Credentials
 
-Each selected project needs a GitLab Project Access Token for background and Agent operations.
+Each selected project needs an automation credential for background and Agent operations. The default mode is `project_access_token`.
 
 Required behavior:
 
 - Admin users MAY set the selected project's Project Access Token from `/settings/gitlab`.
+- Admin users MAY set one global Service Account token for the configured GitLab API root from `/settings/gitlab`.
+- Each project MUST store its active automation credential mode as either `project_access_token` or `service_account`.
+- A newly selected project MUST default to `project_access_token`.
+- Saving a Service Account token from one project MUST store it globally for the GitLab API root and warn the admin that other projects on that host may opt in.
 - The backend MUST validate the token before saving it.
-- The token MUST be encrypted at rest.
-- The token MUST be returned to the frontend only as `configured` or `missing`.
-- Background issue/note sync MUST use the Project Access Token.
-- Agent-created GitLab notes, issue note attachments, issue close/reopen, and follow-up issue creation MUST use the Project Access Token.
+- Tokens MUST be encrypted at rest.
+- Tokens MUST be returned to the frontend only as `configured` or `missing`.
+- Background issue/note sync MUST use the selected automation credential.
+- Agent-created GitLab notes, issue note attachments, issue close/reopen, and follow-up issue creation MUST use the selected automation credential.
 - User-initiated issue edits, comments, and comment attachments from the UI MUST use the signed-in user's OAuth token.
-- If a selected project has no Project Access Token, project browsing MAY work from already synced data, but sync and Agent GitLab writes MUST fail clearly with `project_access_token_missing`.
+- If a selected project has no configured credential for its selected mode, project browsing MAY work from already synced data, but sync and Agent GitLab writes MUST fail clearly with `project_access_token_missing` or `service_account_token_missing`.
 
-This boundary is intentional: Project Access Tokens give background sync and Agents a stable project-scoped credential without borrowing one user's OAuth token. Project Access Tokens SHOULD be scoped to the minimum GitLab permissions the project needs.
+This boundary is intentional: automation credentials give background sync and Agents a stable non-user credential without borrowing one user's OAuth token. Project Access Tokens SHOULD be scoped to the minimum GitLab permissions the project needs. Service Account tokens SHOULD be owned by a dedicated GitLab Service Account, limited to only the projects that need Symphony automation, and rotated independently from user OAuth credentials.
 
 ### 3.4 HTTP runtime
 
@@ -228,7 +233,9 @@ Token rules:
 
 - OAuth access/refresh tokens are obtained through GitLab OAuth/OIDC and encrypted in `gitlab_oauth_tokens`.
 - Project Access Tokens are entered per selected project in Settings and encrypted in `gitlab_project_settings`.
-- The browser frontend MUST NOT receive raw OAuth tokens or Project Access Tokens.
+- Service Account tokens are entered once per GitLab API root in Settings and encrypted in `gitlab_service_account_credentials`.
+- Each project stores its selected automation credential mode in `gitlab_project_settings.automation_credential_mode`.
+- The browser frontend MUST NOT receive raw OAuth tokens, Project Access Tokens, or Service Account tokens.
 - Tokens MUST NOT appear in frontend source, frontend build output, browser local storage, browser session storage, IndexedDB, URL query parameters, rendered HTML, logs, Run Monitor DTOs, or error responses.
 - Token DTOs MUST expose only status values such as `configured`, `missing`, or validation errors.
 
@@ -278,8 +285,10 @@ PostgreSQL MUST be the default persistence backend. The JSON store MAY remain av
 The backend MUST expose GitLab settings validation for the selected project:
 
 - `GET /api/settings/gitlab` MUST return selected project metadata and token status.
-- `POST /api/settings/gitlab/test` MUST validate the selected project's Project Access Token.
+- `POST /api/settings/gitlab/test` MUST validate the selected project's active automation credential.
 - `PUT /api/settings/gitlab/project-token` MUST validate, encrypt, and save a new Project Access Token.
+- `PUT /api/settings/gitlab/service-account-token` MUST validate, encrypt, and save a GitLab API root-scoped Service Account token.
+- `PUT /api/settings/gitlab/credential-mode` MUST set the selected project's active automation credential mode.
 - All settings responses MUST redact secrets.
 
 ---
@@ -364,14 +373,14 @@ The sync system MUST support:
 | Title / description | GitLab | Sync into read model; update through GitLab API when edited from Symphony. |
 | Labels / assignees / milestone / due date | GitLab | Sync and display; do not use as workflow truth. |
 | Open / closed state | GitLab | Sync and display; closed issues are not dispatch candidates. |
-| Notes/comments | GitLab | Sync issue notes; user comments use user OAuth, Agent comments use the Project Access Token. |
+| Notes/comments | GitLab | Sync issue notes; user comments use user OAuth, Agent comments use the selected automation credential. |
 | Workflow status | Symphony DB | Store and mutate internally. |
 | Blocker/dependency | Symphony DB | Store and mutate internally. |
 | Agent run state | Symphony DB | Store current and historical runs internally. |
 | Runtime blocked/operator-input state | Symphony DB + runtime process state | Persist enough to survive restart; expose in Run Monitor. |
 | Dashboard rank/order/views | Symphony DB | Store locally. |
 | Sync cursors/errors | Symphony DB | Store locally; issue cursors are per project and exposed in Settings + Run Monitor. |
-| OAuth and Project Access Tokens | Symphony DB encrypted fields | Never expose raw token values to browser DTOs, logs, or monitor APIs. |
+| OAuth and automation tokens | Symphony DB encrypted fields | Never expose raw token values to browser DTOs, logs, or monitor APIs. |
 
 ---
 
@@ -428,7 +437,7 @@ PRIVATE-TOKEN: <redacted>
 Authorization: Bearer <redacted>
 ```
 
-Project Access Token calls MUST use `PRIVATE-TOKEN`. Signed-in user calls MUST use `Authorization: Bearer`.
+Automation credential calls MUST use `PRIVATE-TOKEN`. Signed-in user calls MUST use `Authorization: Bearer`.
 
 The client MUST redact token values from:
 
@@ -513,6 +522,7 @@ visibility text
 last_validated_at utc_datetime_usec
 last_validation_error text
 read_only boolean not null default false
+automation_credential_mode text not null default 'project_access_token'
 encrypted_project_access_token text
 project_access_token_set_by_identity_id uuid
 project_access_token_set_at utc_datetime_usec
@@ -527,7 +537,36 @@ unique(api_root, project_id) where project_id is not null
 unique(api_root, project_ref)
 ```
 
-Project Access Tokens MAY be stored in this table only as encrypted values. API responses MUST expose only `project_access_token_status`.
+Project Access Tokens MAY be stored in this table only as encrypted values. API responses MUST expose only `project_access_token_status`, `service_account_token_status`, `automation_credential_mode`, and `automation_credential_status`.
+
+### 7.1.1 GitLab Service Account credentials
+
+`gitlab_service_account_credentials` stores one encrypted Service Account token per GitLab API root.
+
+```text
+id uuid primary key
+api_root text not null
+encrypted_service_account_token text
+service_account_token_set_by_identity_id uuid
+service_account_token_set_at utc_datetime_usec
+last_validated_at utc_datetime_usec
+last_validation_error text
+gitlab_user_id text
+username text
+name text
+web_url text
+scopes text[] not null default []
+inserted_at utc_datetime_usec
+updated_at utc_datetime_usec
+```
+
+Required constraints:
+
+```text
+unique(api_root)
+```
+
+Service Account tokens MAY be stored in this table only as encrypted values. API responses MUST expose only status and public Service Account identity metadata.
 
 ### 7.2 GitLab auth tables
 
@@ -908,9 +947,9 @@ A block with `resolved_at is null` MUST appear in Run Monitor.
 On startup, the sync process MUST:
 
 1. Load persisted GitLab project settings.
-2. Select projects whose Project Access Token status is `configured`.
-3. For each configured project, decrypt the Project Access Token server-side.
-4. Validate the GitLab API root and project with the Project Access Token.
+2. Select projects whose active automation credential status is `configured`.
+3. For each configured project, decrypt the selected Project Access Token or Service Account token server-side.
+4. Validate the GitLab API root and project with the selected automation credential.
 5. Upsert refreshed `gitlab_project_settings` metadata.
 6. Backfill old issue records that are missing `gitlab_project_setting_id` when the project can be identified.
 7. Fetch project issues with `state=all`.
@@ -921,11 +960,11 @@ On startup, the sync process MUST:
 12. Update that project's `sync_cursors` entry.
 13. Broadcast UI updates through PubSub.
 
-If no project has a configured Project Access Token, sync MUST fail clearly with `project_access_token_missing` and MUST NOT attempt GitLab issue sync with a user OAuth token.
+If no project has a configured active automation credential, sync MUST fail clearly with `project_access_token_missing` or `service_account_token_missing` and MUST NOT attempt GitLab issue sync with a user OAuth token.
 
 ### 8.2 Incremental issue sync
 
-The sync process MUST run at `SYMPHONY_SYNC_INTERVAL_MS` and iterate over all projects with configured Project Access Tokens.
+The sync process MUST run at `SYMPHONY_SYNC_INTERVAL_MS` and iterate over all projects with configured active automation credentials.
 
 Incremental sync MUST use each project's own issue cursor with `updated_after` and cursor overlap:
 
@@ -945,14 +984,14 @@ updated_after=<iso8601 datetime>
 
 The upsert logic MUST be idempotent.
 
-When a project is activated or its Project Access Token is updated, Symphony MUST reset that project's issue cursor to avoid hiding local records whose previous incremental cursor moved past GitLab's `updated_at`.
+When a project is activated, its Project Access Token is updated, its Service Account token is updated, or its credential mode changes, Symphony MUST reset that project's issue cursor to avoid hiding local records whose previous incremental cursor moved past GitLab's `updated_at`.
 
 ### 8.3 Notes sync
 
 Notes sync MUST support these paths:
 
 1. Issue detail sync: when the user opens an issue detail drawer, fetch notes for that issue using the signed-in user's OAuth token.
-2. Agent/tool sync: when an Agent needs current notes, fetch notes for the issue using the selected project's Project Access Token.
+2. Agent/tool sync: when an Agent needs current notes, fetch notes for the issue using the selected project's active automation credential.
 3. Periodic recent sync MAY fetch notes for recently changed issues if implemented.
 
 The implementation MUST use:
@@ -965,7 +1004,7 @@ GET /projects/:id/uploads/:secret/:filename
 DELETE /projects/:id/uploads/:secret/:filename
 ```
 
-User-created comments MUST use the signed-in user's OAuth token. Agent-created comments MUST be posted through `create_issue_note/3` with the selected project's Project Access Token and then inserted into local `gitlab_issue_notes` after GitLab returns the created note.
+User-created comments MUST use the signed-in user's OAuth token. Agent-created comments MUST be posted through `create_issue_note/3` with the selected project's active automation credential and then inserted into local `gitlab_issue_notes` after GitLab returns the created note.
 
 Comment attachments MUST follow GitLab's Markdown upload model:
 
@@ -1407,7 +1446,7 @@ The API MUST enforce selected-project access through the session:
 - User write endpoints MUST require `SYMPHONY_AUTH_WRITE_ACCESS_LEVEL`.
 - Administrative settings, sync refresh, and operational refresh endpoints MUST require `SYMPHONY_AUTH_ADMIN_ACCESS_LEVEL`.
 
-User-initiated GitLab writes from these APIs MUST use the user's OAuth token, not the Project Access Token.
+User-initiated GitLab writes from these APIs MUST use the user's OAuth token, not the automation credential.
 
 ### 11.2 Auth and project APIs
 
@@ -1424,7 +1463,7 @@ POST   /api/projects/:id/activate
 
 `GET /api/projects` MUST list projects visible through the signed-in user's GitLab membership. `POST /api/projects/:id/activate` MUST validate membership, persist the membership, update the session, and reset that project's issue cursor.
 
-`GET /api/auth/session` MUST return auth mode, login/logout URLs, public GitLab user fields, derived permissions, and the active project. Project DTOs MUST include GitLab `id`, `name`, `path_with_namespace`, `web_url`, selection state, `project_setting_id`, and `project_access_token_status`.
+`GET /api/auth/session` MUST return auth mode, login/logout URLs, public GitLab user fields, derived permissions, and the active project. Project DTOs MUST include GitLab `id`, `name`, `path_with_namespace`, `web_url`, selection state, `project_setting_id`, `project_access_token_status`, `service_account_token_status`, `automation_credential_mode`, and `automation_credential_status`.
 
 ### 11.3 Issue APIs
 
@@ -1491,11 +1530,13 @@ Required endpoints:
 GET    /api/settings/gitlab
 POST   /api/settings/gitlab/test
 PUT    /api/settings/gitlab/project-token
+PUT    /api/settings/gitlab/service-account-token
+PUT    /api/settings/gitlab/credential-mode
 GET    /api/settings/workflow
 PATCH  /api/settings/workflow
 ```
 
-Settings APIs MUST redact secrets. Project-token updates MUST validate the token before encrypting and saving it for the selected project.
+Settings APIs MUST redact secrets. Project-token updates MUST validate the token before encrypting and saving it for the selected project. Service Account token updates MUST validate the token against the selected project, encrypt and save it for the GitLab API root, and return only configured/missing status plus public account metadata. Credential-mode updates MUST apply only to the selected project.
 
 ---
 
@@ -1972,7 +2013,7 @@ The frontend MUST support:
 - Add/remove blockers.
 - View notes/comments.
 - Post notes with the signed-in user's OAuth token when the user has GitLab write permission.
-- See Project Access Token missing or validation errors when background/Agent GitLab access is unavailable.
+- See Project Access Token or Service Account missing/validation errors when background/Agent GitLab access is unavailable.
 - Jump from issue to run history.
 - Jump from run history to issue.
 - Jump from blocked Run Monitor row to issue and run detail.
@@ -1990,15 +2031,17 @@ The frontend MUST support:
 - Validated project ID.
 - Project path with namespace.
 - Project web URL.
+- Active automation credential mode and status.
 - Project Access Token status as `configured` or `missing`, never the token value.
+- Service Account token status and public account identity metadata, never the token value.
 - Project Access Token permission mode when detectable, including conservative values such as `read_only_or_read_write`.
 - Last validation time.
 - Last validation error.
 - Test connection button.
 - Manual sync button.
-- Project Access Token input for admin users.
+- Project Access Token and Service Account token inputs for admin users.
 
-The page MAY accept a Project Access Token for the active project from admin users. The raw token MUST be sent only to the backend validation endpoint, encrypted before persistence, and never returned to the frontend after the request completes.
+The page MAY accept a Project Access Token for the active project from admin users. The page MAY accept a Service Account token for the configured GitLab API root and MUST warn before saving that the credential is global to that GitLab API root. Raw tokens MUST be sent only to backend validation endpoints, encrypted before persistence, and never returned to the frontend after the request completes.
 
 OAuth/OIDC client secrets, session secrets, token encryption secrets, and database configuration MUST remain server-side `.env.local` or deployment configuration.
 
@@ -2343,7 +2386,7 @@ Required coverage with fake GitLab server:
 - `GET /projects/:id` validation.
 - `GET /projects/:id/issues` pagination.
 - Project-scoped `updated_after` incremental sync.
-- Cursor reset after project activation and Project Access Token updates.
+- Cursor reset after project activation, Project Access Token updates, Service Account token updates, and credential-mode changes.
 - `GET /projects/:id/issues/:issue_iid/notes`.
 - `POST /projects/:id/issues/:issue_iid/notes`.
 - Auth failure.

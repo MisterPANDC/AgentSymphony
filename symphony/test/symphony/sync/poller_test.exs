@@ -6,6 +6,9 @@ defmodule SymphonyElixir.Sync.PollerTest do
   alias SymphonyElixir.Sync.Poller
 
   setup do
+    {:ok, _started} = Application.ensure_all_started(:symphony_elixir)
+    reset_json_store()
+
     previous_secret = System.get_env("SYMPHONY_TOKEN_ENCRYPTION_SECRET")
     System.put_env("SYMPHONY_TOKEN_ENCRYPTION_SECRET", "poller-test-secret")
     Application.delete_env(:symphony_elixir, :gitlab_req_options)
@@ -14,6 +17,39 @@ defmodule SymphonyElixir.Sync.PollerTest do
       restore_env("SYMPHONY_TOKEN_ENCRYPTION_SECRET", previous_secret)
       Application.delete_env(:symphony_elixir, :gitlab_req_options)
     end)
+
+    :ok
+  end
+
+  defp reset_json_store do
+    if Store.configured_backend() == :json and Process.whereis(SymphonyElixir.Store.Json) do
+      :sys.replace_state(SymphonyElixir.Store.Json, fn state ->
+        %{
+          state
+          | project: nil,
+            projects: %{},
+            identities: %{},
+            oauth_tokens: %{},
+            service_account_credentials: %{},
+            project_memberships: %{},
+            issues: %{},
+            issue_order: [],
+            issue_by_iid: %{},
+            issue_by_gitlab_id: %{},
+            workflow_states: %{},
+            dependencies: %{},
+            relations: %{},
+            notes: %{},
+            merge_requests: %{},
+            events: [],
+            cursors: %{},
+            runs: %{},
+            run_order: [],
+            run_events: %{},
+            runtime_blocks: %{}
+        }
+      end)
+    end
 
     :ok
   end
@@ -103,6 +139,49 @@ defmodule SymphonyElixir.Sync.PollerTest do
     assert Store.cursors()["gitlab:gitlab_issues_updated_after:#{project.id}"].last_success_at
   end
 
+  test "full sync uses the selected service account credential" do
+    project_id = 330_000 + System.unique_integer([:positive])
+    iid = 340_000 + System.unique_integer([:positive])
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: sync_plug("service-token", project_id, iid))
+
+    project =
+      Store.upsert_project(%{
+        api_root: "https://gitlab.example.com/api/v4",
+        project_ref: to_string(project_id),
+        project_id: project_id,
+        path_with_namespace: "group/project",
+        name: "Project",
+        web_url: "https://gitlab.example.com/group/project",
+        visibility: "private"
+      })
+
+    try do
+      assert {:ok, _service_account} = Store.put_service_account_token(project.api_root, "service-token", nil, %{username: "symphony-bot"})
+      assert {:ok, _project} = Store.put_project_automation_credential_mode(project.id, "service_account")
+      assert :ok = Poller.reset_issue_cursor()
+      assert {:ok, %{queued: true}} = Poller.refresh()
+
+      issue =
+        eventually(fn ->
+          Store.get_issue_by_iid(iid)
+        end)
+
+      assert issue.gitlab_project_setting_id == project.id
+
+      cursor =
+        eventually(fn ->
+          case Store.cursors()["gitlab:gitlab_issues_updated_after:#{project.id}"] do
+            %{last_success_at: %DateTime{} = timestamp} -> timestamp
+            _ -> nil
+          end
+        end)
+
+      assert %DateTime{} = cursor
+    after
+      Store.put_project_automation_credential_mode(project.id, "project_access_token")
+    end
+  end
+
   test "external GitLab reopen restores canceled issues to backlog and adds reopened label" do
     project_id = 84_000 + System.unique_integer([:positive])
     iid = 94_000 + System.unique_integer([:positive])
@@ -163,30 +242,34 @@ defmodule SymphonyElixir.Sync.PollerTest do
     assert Enum.any?(Store.list_issues(project_setting_id: project.id), &(&1.id == issue_id))
   end
 
-  defp sync_plug do
+  defp sync_plug(expected_token \\ "test-token", project_id \\ 321, issue_iid \\ 77) do
+    project_path = "/api/v4/projects/#{project_id}"
+    issues_path = "#{project_path}/issues"
+    merge_requests_path = "#{project_path}/merge_requests"
+
     fn conn ->
-      assert Plug.Conn.get_req_header(conn, "private-token") == ["test-token"]
+      assert Plug.Conn.get_req_header(conn, "private-token") == [expected_token]
 
       case {conn.method, conn.request_path} do
-        {"GET", "/api/v4/projects/321"} ->
+        {"GET", ^project_path} ->
           Req.Test.json(conn, %{
-            "id" => 321,
+            "id" => project_id,
             "name" => "Project",
             "path_with_namespace" => "group/project",
             "web_url" => "https://gitlab.example.com/group/project",
             "visibility" => "private"
           })
 
-        {"GET", "/api/v4/projects/321/issues"} ->
+        {"GET", ^issues_path} ->
           conn = Plug.Conn.fetch_query_params(conn)
           refute Map.has_key?(conn.query_params, "updated_after")
 
           Req.Test.json(conn, [
             %{
-              "id" => 90_077,
-              "project_id" => 321,
-              "iid" => 77,
-              "web_url" => "https://gitlab.example.com/group/project/-/issues/77",
+              "id" => 90_000 + issue_iid,
+              "project_id" => project_id,
+              "iid" => issue_iid,
+              "web_url" => "https://gitlab.example.com/group/project/-/issues/#{issue_iid}",
               "title" => "Poller issue",
               "description" => "Body",
               "state" => "opened",
@@ -197,19 +280,19 @@ defmodule SymphonyElixir.Sync.PollerTest do
             }
           ])
 
-        {"GET", "/api/v4/projects/321/merge_requests"} ->
+        {"GET", ^merge_requests_path} ->
           conn = Plug.Conn.fetch_query_params(conn)
           assert conn.query_params["state"] == "all"
           assert conn.query_params["scope"] == "all"
 
           Req.Test.json(conn, [
             %{
-              "id" => 91_007,
-              "project_id" => 321,
+              "id" => 91_000 + issue_iid,
+              "project_id" => project_id,
               "iid" => 7,
               "web_url" => "https://gitlab.example.com/group/project/-/merge_requests/7",
               "title" => "Implement poller MR",
-              "description" => "Sync merge request facts.\n\nCloses #77",
+              "description" => "Sync merge request facts.\n\nCloses ##{issue_iid}",
               "state" => "opened",
               "draft" => false,
               "work_in_progress" => false,
@@ -224,12 +307,12 @@ defmodule SymphonyElixir.Sync.PollerTest do
               "updated_at" => "2026-06-12T19:06:41.042Z"
             },
             %{
-              "id" => 91_008,
-              "project_id" => 321,
+              "id" => 92_000 + issue_iid,
+              "project_id" => project_id,
               "iid" => 8,
               "web_url" => "https://gitlab.example.com/group/project/-/merge_requests/8",
               "title" => "Non closing MR",
-              "description" => "Fixes #77",
+              "description" => "Fixes ##{issue_iid}",
               "state" => "opened",
               "labels" => [],
               "assignees" => [],

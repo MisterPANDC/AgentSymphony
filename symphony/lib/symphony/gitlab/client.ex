@@ -11,6 +11,9 @@ defmodule Symphony.GitLab.Client do
 
   @type auth :: {:private_token, String.t()} | {:bearer, String.t()}
 
+  @spec get_current_user(Config.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def get_current_user(%Config{} = config, opts \\ []), do: request(config, :get, "/user", opts)
+
   @spec get_project(Config.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def get_project(%Config{} = config, opts \\ []), do: request(config, :get, project_path(config), opts)
 

@@ -44,7 +44,7 @@ mix ecto.migrate
 | Elixir / Mix | 后端运行时、任务、escript 构建 |
 | Node.js / npm | React 前端依赖安装和构建 |
 | PostgreSQL | 生产/规范持久化后端 |
-| GitLab OAuth application / Project Access Token | OIDC 登录、按用户 OAuth 拉取 repo；每个 repo 的后台同步和 Agent 写入使用设置页保存的 Project Access Token |
+| GitLab OAuth application / automation credential | OIDC 登录、按用户 OAuth 拉取 repo；每个 repo 默认使用设置页保存的 Project Access Token，也可以切换到全局 Service Account token |
 
 项目提供 `mise.toml` 固定 Erlang/Elixir 版本。Linux 或 CI 环境推荐在镜像/主机初始化层预装依赖，再运行项目 setup。
 
@@ -80,12 +80,13 @@ https://symphony.example.com/auth/gitlab/callback
 
 登录后，Symphony 会通过用户 OAuth 拉取该用户加入的 repo 列表。用户选择 repo 后，Symphony 按该用户在 GitLab 上的 project membership 计算权限：Reporter 及以上可访问只读页面，Developer 及以上可执行用户发起的写操作，Maintainer 及以上可进入运维/设置操作。用户在 Symphony 中发起的 issue 编辑、评论、workflow 完成后关闭 GitLab issue 等操作，全部使用当前登录用户的 OAuth token 调 GitLab；Symphony 不会让用户在界面中执行超过其 GitLab 账号权限的写操作。
 
-云端 OIDC 模式下，每个 repo 还需要在 `Settings -> GitLab` 填写一次 GitLab Project Access Token。这个 token 保存后会加密落库，前端和 API 只显示 `configured` / `missing` 状态，不再回显明文。如果当前项目未设置 Project Access Token，控制台会提示进入设置页填写。后台同步 GitLab 数据以及 Agent 对 GitLab 的写操作全部使用该项目的 Project Access Token，不使用任何一个登录用户的 OAuth token。
+云端 OIDC 模式下，每个 repo 需要在 `Settings -> GitLab` 选择后台/Agent 使用的自动化凭据。默认模式是该 repo 自己的 GitLab Project Access Token；也可以保存一次 GitLab Service Account token，并让当前或其他 repo 切换到这个全局 Service Account。所有 token 保存后都会加密落库，前端和 API 只显示 `configured` / `missing` 状态，不再回显明文。如果当前项目选择的凭据未设置，控制台会提示进入设置页填写 Project Access Token 或使用 Service Account。后台同步 GitLab 数据以及 Agent 对 GitLab 的写操作全部使用当前 repo 选择的自动化凭据，不使用任何一个登录用户的 OAuth token。
 
 需要明确的权限边界：
 
-1. Agent 写 GitLab 时使用 Project Access Token，因此 Agent 可能执行当前登录用户自身没有权限执行的 GitLab 写操作。Project Access Token 的权限应按项目维度最小化配置，并只授予 Symphony/Agent 确实需要的能力。
-2. 罕见情况下，如果 Agent 或后台同步通过 Project Access Token 读取到了某个当前用户没有 GitLab 权限直接读取的数据，该数据可能已经进入 Symphony 数据库，用户可能通过 Symphony 数据库或后续页面间接看到。当前实现主要按 repo membership 做访问控制，绝大多数 issue/note 信息不涉及更细粒度权限；这个细粒度数据可见性风险暂不额外处理。
+1. Agent 写 GitLab 时使用当前 repo 选择的自动化凭据，因此 Agent 可能执行当前登录用户自身没有权限执行的 GitLab 写操作。Project Access Token 应按项目维度最小化配置；Service Account token 应只把这个 service account 加到确实需要 Symphony/Agent 的 repo。
+2. Service Account token 按 GitLab API root 全局保存。任何同一 GitLab host 下的 repo 都可以在设置页切换为使用它，所以保存时 Symphony 会弹窗提醒。
+3. 罕见情况下，如果 Agent 或后台同步通过自动化凭据读取到了某个当前用户没有 GitLab 权限直接读取的数据，该数据可能已经进入 Symphony 数据库，用户可能通过 Symphony 数据库或后续页面间接看到。当前实现主要按 repo membership 做访问控制，绝大多数 issue/note 信息不涉及更细粒度权限；这个细粒度数据可见性风险暂不额外处理。
 
 ## 初始化脚本
 
