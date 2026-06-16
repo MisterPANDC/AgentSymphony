@@ -4,6 +4,7 @@ defmodule SymphonyElixirWeb.SettingsController do
   alias Plug.Conn
   alias Symphony.GitLab.{Client, Error}
   alias Symphony.GitLab.Config, as: GitLabConfig
+  alias SymphonyElixir.LocalRepo
   alias SymphonyElixir.Store
   alias SymphonyElixir.Sync.Poller
   alias SymphonyElixir.Workflow.Transitions
@@ -95,6 +96,51 @@ defmodule SymphonyElixirWeb.SettingsController do
     |> json(%{ok: false, error: %{type: :missing_project_access_token, message: "projectAccessToken is required."}})
   end
 
+  @spec local_repo_candidates(Conn.t(), map()) :: Conn.t()
+  def local_repo_candidates(conn, params) do
+    with %{} = project <- AuthPlug.current_project(conn) do
+      json(conn, %{candidates: LocalRepo.candidates(project, scope: params["scope"])})
+    else
+      nil ->
+        conn
+        |> put_status(422)
+        |> json(%{
+          ok: false,
+          error: %{type: :missing_project, message: "Select a GitLab project before scanning local repositories."}
+        })
+    end
+  end
+
+  @spec update_local_repo(Conn.t(), map()) :: Conn.t()
+  def update_local_repo(conn, %{"localRepoPath" => path}) when is_binary(path) do
+    path = String.trim(path)
+
+    with %{} = project <- AuthPlug.current_project(conn),
+         {:ok, normalized_path} <- normalize_local_repo_path(path, project),
+         {:ok, project} <- Store.put_project_local_repo_path(project.id, normalized_path) do
+      json(conn, %{ok: true, project: project})
+    else
+      nil ->
+        conn
+        |> put_status(422)
+        |> json(%{
+          ok: false,
+          error: %{type: :missing_project, message: "Select a GitLab project before saving a local repository path."}
+        })
+
+      {:error, reason} ->
+        conn
+        |> put_status(local_repo_status(reason))
+        |> json(%{ok: false, error: local_repo_error(reason)})
+    end
+  end
+
+  def update_local_repo(conn, _params) do
+    conn
+    |> put_status(400)
+    |> json(%{ok: false, error: %{type: :missing_local_repo_path, message: "localRepoPath is required."}})
+  end
+
   @spec workflow(Conn.t(), map()) :: Conn.t()
   def workflow(conn, _params) do
     settings = SymphonyElixir.Config.settings!()
@@ -133,6 +179,47 @@ defmodule SymphonyElixirWeb.SettingsController do
       _ -> nil
     end
   end
+
+  defp normalize_local_repo_path("", _project), do: {:ok, nil}
+
+  defp normalize_local_repo_path(path, project) do
+    case LocalRepo.validate_project_path(path, project) do
+      {:ok, %{path: normalized_path}} -> {:ok, normalized_path}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp local_repo_status(:empty_local_repo_path), do: 400
+  defp local_repo_status(:invalid_local_repo_path), do: 400
+  defp local_repo_status(:local_repo_path_not_found), do: 422
+  defp local_repo_status(:not_a_git_repository), do: 422
+  defp local_repo_status(:local_repo_remote_missing), do: 422
+  defp local_repo_status(:local_repo_project_mismatch), do: 422
+  defp local_repo_status(:git_unavailable), do: 422
+  defp local_repo_status(_reason), do: 422
+
+  defp local_repo_error(:empty_local_repo_path),
+    do: %{type: :empty_local_repo_path, message: "Enter a local repository path, or clear the field to leave it unset."}
+
+  defp local_repo_error(:invalid_local_repo_path),
+    do: %{type: :invalid_local_repo_path, message: "The local repository path is not valid."}
+
+  defp local_repo_error(:local_repo_path_not_found),
+    do: %{type: :local_repo_path_not_found, message: "That folder does not exist on this machine."}
+
+  defp local_repo_error(:not_a_git_repository),
+    do: %{type: :not_a_git_repository, message: "Choose a folder that is already a Git repository."}
+
+  defp local_repo_error(:local_repo_remote_missing),
+    do: %{type: :local_repo_remote_missing, message: "That repository has no origin remote to match against this GitLab project."}
+
+  defp local_repo_error(:local_repo_project_mismatch),
+    do: %{type: :local_repo_project_mismatch, message: "That repository's origin does not match the selected GitLab project."}
+
+  defp local_repo_error(:git_unavailable),
+    do: %{type: :git_unavailable, message: "Git is not available to validate that folder."}
+
+  defp local_repo_error(reason), do: %{type: reason, message: inspect(reason)}
 
   defp error_payload(%Error{} = reason), do: %{type: reason.type, status: reason.status, message: reason.message}
   defp error_payload(reason), do: %{type: reason, message: inspect(reason)}

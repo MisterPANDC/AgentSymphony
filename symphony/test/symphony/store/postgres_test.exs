@@ -113,6 +113,28 @@ defmodule SymphonyElixir.Store.PostgresTest do
     assert membership.access_level == 50
   end
 
+  test "stores local repository path on the project setting" do
+    project =
+      Store.upsert_project(%{
+        api_root: "https://gitlab.example.com/api/v4",
+        project_ref: "group/project",
+        project_id: 42,
+        path_with_namespace: "group/project",
+        name: "Project",
+        web_url: "https://gitlab.example.com/group/project",
+        visibility: "private"
+      })
+
+    assert {:ok, updated} = Store.put_project_local_repo_path(project.id, "/tmp/group-project")
+    assert updated.local_repo_path == "/tmp/group-project"
+
+    reloaded = Store.project_by_id(project.id)
+    assert reloaded.local_repo_path == "/tmp/group-project"
+
+    assert {:ok, cleared} = Store.put_project_local_repo_path(project.id, "")
+    assert is_nil(cleared.local_repo_path)
+  end
+
   defp clean_database do
     Repo.delete_all(RuntimeBlock)
     Repo.delete_all(AgentRunEvent)

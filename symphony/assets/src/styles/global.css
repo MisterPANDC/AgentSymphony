@@ -1662,6 +1662,121 @@ textarea {
   line-height: 18px;
 }
 
+.local-repo-path-row {
+  display: grid;
+  gap: 8px;
+}
+
+.local-repo-pending-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.local-repo-search-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.local-repo-search-button {
+  font-weight: 650;
+}
+
+.local-repo-saved {
+  color: #2f6842;
+}
+
+.local-repo-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: #fbfbfc;
+  padding: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.local-repo-wider-search-button {
+  flex: 0 0 auto;
+}
+
+.local-repo-candidates {
+  display: grid;
+  gap: 6px;
+}
+
+.local-repo-candidate {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #ffffff;
+  padding: 9px 10px;
+  color: var(--text);
+  text-align: left;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.local-repo-candidate:hover {
+  border-color: #c9cbd2;
+  background: var(--hover);
+}
+
+.local-repo-candidate:focus-visible {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px rgba(156, 163, 175, 0.18);
+  outline: none;
+}
+
+.local-repo-candidate-icon {
+  display: inline-flex;
+  color: #4b5563;
+}
+
+.local-repo-candidate-main {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.local-repo-candidate-path {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-repo-candidate-reason {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-repo-candidate-action {
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 650;
+}
+
 @media (max-width: 640px) {
   .settings-token-action-row {
     grid-template-columns: 1fr;
@@ -1669,6 +1784,30 @@ textarea {
 
   .settings-token-save-button {
     justify-self: end;
+  }
+
+  .local-repo-pending-actions {
+    justify-content: flex-start;
+  }
+
+  .local-repo-search-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .local-repo-empty {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .local-repo-candidate {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .local-repo-candidate-action {
+    grid-column: 2;
+    justify-self: start;
   }
 }
 

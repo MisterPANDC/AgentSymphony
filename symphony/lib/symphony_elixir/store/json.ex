@@ -101,6 +101,10 @@ defmodule SymphonyElixir.Store.Json do
   @spec project_access_token(map() | String.t()) :: {:ok, String.t()} | {:error, term()}
   def project_access_token(project_or_id), do: call({:project_access_token, project_or_id})
 
+  @spec put_project_local_repo_path(String.t(), String.t() | nil) :: {:ok, map()} | {:error, term()}
+  def put_project_local_repo_path(project_setting_id, local_repo_path),
+    do: call({:put_project_local_repo_path, project_setting_id, local_repo_path})
+
   @spec upsert_issue(map()) :: map()
   def upsert_issue(attrs), do: call({:upsert_issue, attrs})
 
@@ -349,6 +353,24 @@ defmodule SymphonyElixir.Store.Json do
       end
 
     {:reply, reply, state}
+  end
+
+  def handle_call({:put_project_local_repo_path, project_setting_id, local_repo_path}, _from, state) do
+    case Map.get(state.projects, project_setting_id) || (state.project && state.project.id == project_setting_id && state.project) do
+      %{id: ^project_setting_id} = project ->
+        project =
+          project
+          |> Map.put(:local_repo_path, normalize_blank(local_repo_path))
+          |> Map.put(:updated_at, now())
+
+        projects = Map.put(state.projects, project.id, project)
+        current_project = if state.project && state.project.id == project.id, do: project, else: state.project
+        state = persist(%{state | project: current_project, projects: projects})
+        {:reply, {:ok, public_project(project)}, state}
+
+      _ ->
+        {:reply, {:error, :project_not_found}, state}
+    end
   end
 
   def handle_call({:upsert_issue, attrs}, _from, state) do
@@ -943,6 +965,15 @@ defmodule SymphonyElixir.Store.Json do
     |> Map.put(:updated_at, now)
     |> Map.put_new(:inserted_at, now)
   end
+
+  defp normalize_blank(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp normalize_blank(_value), do: nil
 
   defp find_project(projects, attrs) do
     attrs = Map.new(attrs)

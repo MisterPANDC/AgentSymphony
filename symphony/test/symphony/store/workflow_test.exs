@@ -251,6 +251,22 @@ defmodule SymphonyElixir.Store.WorkflowTest do
     end
   end
 
+  test "local repo path stays attached to the matching project" do
+    first = Store.upsert_project(project_attrs(42, "group/project-one", "Project One"))
+    assert {:ok, first_with_path} = Store.put_project_local_repo_path(first.id, "/tmp/project-one")
+    assert first_with_path.local_repo_path == "/tmp/project-one"
+
+    second = Store.upsert_project(project_attrs(43, "group/project-two", "Project Two"))
+    assert is_nil(second[:local_repo_path])
+
+    paths =
+      Store.projects()
+      |> Map.new(&{&1.project_id, &1[:local_repo_path]})
+
+    assert paths[42] == "/tmp/project-one"
+    assert is_nil(paths[43])
+  end
+
   defp seed_issue(iid) do
     Store.upsert_issue(%{
       gitlab_issue_id: 90_000 + iid,

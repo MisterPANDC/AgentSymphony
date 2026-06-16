@@ -180,6 +180,15 @@ defmodule SymphonyElixir.Store.Postgres do
 
   defp normalize_access_level(_level), do: nil
 
+  defp normalize_blank(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp normalize_blank(_value), do: nil
+
   @spec put_project_access_token(String.t(), String.t(), String.t() | nil) :: {:ok, map()} | {:error, term()}
   def put_project_access_token(project_setting_id, token, identity_id \\ nil) do
     with %ProjectSetting{} = project <- Repo.get(ProjectSetting, project_setting_id) || {:error, :project_not_found},
@@ -211,6 +220,18 @@ defmodule SymphonyElixir.Store.Postgres do
   def project_access_token(%ProjectSetting{} = project), do: open_project_access_token(project.encrypted_project_access_token)
   def project_access_token(%{encrypted_project_access_token: encrypted}), do: open_project_access_token(encrypted)
   def project_access_token(_project), do: {:error, :project_access_token_missing}
+
+  @spec put_project_local_repo_path(String.t(), String.t() | nil) :: {:ok, map()} | {:error, term()}
+  def put_project_local_repo_path(project_setting_id, local_repo_path) do
+    with %ProjectSetting{} = project <- Repo.get(ProjectSetting, project_setting_id) || {:error, :project_not_found} do
+      project =
+        project
+        |> ProjectSetting.changeset(%{local_repo_path: normalize_blank(local_repo_path)})
+        |> Repo.update!()
+
+      {:ok, project_public(project)}
+    end
+  end
 
   @spec upsert_issue(map()) :: map()
   def upsert_issue(attrs) do

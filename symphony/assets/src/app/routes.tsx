@@ -1,11 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, RefreshCcw, Save, TestTube2 } from "lucide-react";
-import { getGitLabSettings, getWorkflowSettings, testGitLabSettings, updateProjectAccessToken } from "../api/settings";
+import { CheckCircle2, FolderGit2, KeyRound, RefreshCcw, Save, Search, TestTube2 } from "lucide-react";
+import {
+  getGitLabSettings,
+  getWorkflowSettings,
+  scanLocalRepoCandidates,
+  testGitLabSettings,
+  updateLocalRepoPath,
+  updateProjectAccessToken
+} from "../api/settings";
 import { refreshSync } from "../api/sync";
 import { listRuns } from "../api/runs";
 import { getMonitorState } from "../api/monitor";
+import type { GitLabSettingsDTO } from "../types/gitlab";
 import { AuthGate } from "../components/auth/AuthGate";
 import { AgentControlPanel } from "../components/agents/AgentControlPanel";
 import { RunTimeline } from "../components/agents/RunTimeline";
@@ -78,6 +86,136 @@ function RunsPage() {
   return <RunTimeline runs={data?.runs ?? []} />;
 }
 
+function LocalRepositorySettings({ project, onSaved }: { project: GitLabSettingsDTO["project"]; onSaved: () => void }) {
+  const [repoPath, setRepoPath] = useState("");
+  const [lastSearchScope, setLastSearchScope] = useState<"nearby" | "local">("nearby");
+  const savedPath = project?.local_repo_path ?? "";
+  const repoConfigured = Boolean(savedPath);
+  const saveMutation = useMutation({ mutationFn: updateLocalRepoPath, onSuccess: onSaved });
+  const scanMutation = useMutation({ mutationFn: scanLocalRepoCandidates });
+
+  useEffect(() => {
+    setRepoPath(savedPath);
+  }, [savedPath]);
+
+  const hasChange = repoPath.trim() !== savedPath;
+  const saveButtonLabel = repoPath.trim() || !savedPath ? "Save path" : "Clear path";
+  const candidates = scanMutation.data?.candidates ?? [];
+  const showWiderSearch = scanMutation.isSuccess && lastSearchScope === "nearby" && candidates.length === 0;
+  const emptySearchCopy =
+    lastSearchScope === "local"
+      ? "No matching checkout was found in wider local folders. Paste a path manually."
+      : "No nearby checkout was found.";
+
+  const runSearch = (scope: "nearby" | "local") => {
+    setLastSearchScope(scope);
+    scanMutation.mutate(scope);
+  };
+
+  return (
+    <div className="panel">
+      <div className="panel-header">
+        <h2 className="text-sm font-semibold">Local Repository</h2>
+        <span className={`repo-token-state ${repoConfigured ? "configured" : "missing"}`}>
+          {repoConfigured ? "configured" : "missing"}
+        </span>
+      </div>
+      <div className={`settings-token-summary ${repoConfigured ? "configured" : "missing"}`}>
+        <FolderGit2 size={16} />
+        <div>
+          <strong>{repoConfigured ? "Repository is linked" : "Repository is not linked"}</strong>
+          <p>
+            {repoConfigured
+              ? "Symphony knows which local checkout belongs to this GitLab project. Workspace creation is configured separately."
+              : "Choose the local checkout that belongs to this GitLab project before enabling local agent workspaces."}
+          </p>
+        </div>
+      </div>
+      <div className="settings-form">
+        <div className="settings-field">
+          <label htmlFor="local-repo-path">Path</label>
+          <div className="local-repo-path-row">
+            <input
+              id="local-repo-path"
+              className="field-input"
+              value={repoPath}
+              onChange={(event) => setRepoPath(event.target.value)}
+              placeholder="Choose or paste a local repository path"
+              autoComplete="off"
+            />
+            {hasChange && (
+              <div className="local-repo-pending-actions">
+                <button
+                  className="text-button settings-token-save-button"
+                  type="button"
+                  disabled={!project || saveMutation.isPending}
+                  onClick={() => saveMutation.mutate(repoPath)}
+                >
+                  {saveMutation.isPending ? <RefreshCcw size={14} /> : <Save size={14} />}
+                  {saveButtonLabel}
+                </button>
+                <button className="text-button" type="button" disabled={saveMutation.isPending} onClick={() => setRepoPath(savedPath)}>
+                  Reset
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="local-repo-search-row">
+          <button
+            className="text-button local-repo-search-button"
+            type="button"
+            disabled={!project || scanMutation.isPending}
+            onClick={() => runSearch("nearby")}
+          >
+            {scanMutation.isPending ? <RefreshCcw size={14} /> : <Search size={14} />}
+            Search local repo
+          </button>
+        </div>
+        {saveMutation.isSuccess && !hasChange && repoConfigured && (
+          <p className="settings-hint local-repo-saved">
+            <CheckCircle2 size={13} /> Saved for this GitLab project.
+          </p>
+        )}
+        {saveMutation.isSuccess && !hasChange && !repoConfigured && (
+          <p className="settings-hint local-repo-saved">
+            <CheckCircle2 size={13} /> Local repository path cleared.
+          </p>
+        )}
+        {scanMutation.isError && <div className="repo-error">{scanMutation.error.message}</div>}
+        {saveMutation.isError && <div className="repo-error">{saveMutation.error.message}</div>}
+        {scanMutation.isSuccess && candidates.length === 0 && (
+          <div className="local-repo-empty">
+            <span>{emptySearchCopy}</span>
+            {showWiderSearch && (
+              <button className="text-button local-repo-wider-search-button" type="button" disabled={!project} onClick={() => runSearch("local")}>
+                <Search size={14} />
+                Search wider local folders
+              </button>
+            )}
+          </div>
+        )}
+        {candidates.length > 0 && (
+          <div className="local-repo-candidates" aria-label="Local repository suggestions">
+            {candidates.map((candidate) => (
+              <button className="local-repo-candidate" type="button" key={candidate.path} onClick={() => setRepoPath(candidate.path)}>
+                <span className="local-repo-candidate-icon">
+                  {candidate.path === repoPath ? <CheckCircle2 size={15} /> : <FolderGit2 size={15} />}
+                </span>
+                <span className="local-repo-candidate-main">
+                  <span className="local-repo-candidate-path">{candidate.path}</span>
+                  <span className="local-repo-candidate-reason">{candidate.reason}</span>
+                </span>
+                <span className="local-repo-candidate-action">{candidate.path === repoPath ? "Selected" : "Select"}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function GitLabSettingsPage() {
   const queryClient = useQueryClient();
   const [projectAccessToken, setProjectAccessToken] = useState("");
@@ -124,6 +262,14 @@ function GitLabSettingsPage() {
         </dl>
         {testMutation.data && <pre className="m-4 rounded-lg border border-[#eaebef] bg-[#fbfbfc] p-3 text-xs">{JSON.stringify(testMutation.data, null, 2)}</pre>}
       </div>
+
+      <LocalRepositorySettings
+        project={data?.project ?? null}
+        onSaved={() => {
+          queryClient.invalidateQueries({ queryKey: ["settings", "gitlab"] });
+          queryClient.invalidateQueries({ queryKey: ["auth-session"] });
+        }}
+      />
 
       <div className="panel">
         <div className="panel-header">

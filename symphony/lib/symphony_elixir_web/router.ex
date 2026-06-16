@@ -124,6 +124,8 @@ defmodule SymphonyElixirWeb.Router do
     post("/api/monitor/refresh", MonitorController, :refresh)
     post("/api/sync/refresh", SyncController, :refresh)
     post("/api/settings/gitlab/test", SettingsController, :test_gitlab)
+    get("/api/settings/gitlab/local-repo/candidates", SettingsController, :local_repo_candidates)
+    put("/api/settings/gitlab/local-repo", SettingsController, :update_local_repo)
     put("/api/settings/gitlab/project-token", SettingsController, :update_project_token)
     post("/api/v1/refresh", ObservabilityApiController, :refresh)
   end

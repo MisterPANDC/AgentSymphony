@@ -81,6 +81,10 @@ defmodule SymphonyElixir.Store do
   @spec project_access_token(map() | String.t()) :: {:ok, String.t()} | {:error, term()}
   def project_access_token(project_or_id), do: backend().project_access_token(project_or_id)
 
+  @spec put_project_local_repo_path(String.t(), String.t() | nil) :: {:ok, map()} | {:error, term()}
+  def put_project_local_repo_path(project_setting_id, local_repo_path),
+    do: backend().put_project_local_repo_path(project_setting_id, local_repo_path)
+
   @spec upsert_issue(map()) :: map()
   def upsert_issue(attrs), do: backend().upsert_issue(attrs)
 

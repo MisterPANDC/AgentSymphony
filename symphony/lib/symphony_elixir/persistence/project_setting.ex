@@ -19,6 +19,7 @@ defmodule SymphonyElixir.Persistence.ProjectSetting do
     field(:last_validated_at, :utc_datetime_usec)
     field(:last_validation_error, :string)
     field(:read_only, :boolean, default: false)
+    field(:local_repo_path, :string)
     field(:encrypted_project_access_token, :string)
     field(:project_access_token_set_by_identity_id, :binary_id)
     field(:project_access_token_set_at, :utc_datetime_usec)
@@ -26,7 +27,7 @@ defmodule SymphonyElixir.Persistence.ProjectSetting do
     timestamps(type: :utc_datetime_usec)
   end
 
-  @fields ~w(api_root project_ref project_id path_with_namespace name web_url visibility last_validated_at last_validation_error read_only encrypted_project_access_token project_access_token_set_by_identity_id project_access_token_set_at)a
+  @fields ~w(api_root project_ref project_id path_with_namespace name web_url visibility last_validated_at last_validation_error read_only local_repo_path encrypted_project_access_token project_access_token_set_by_identity_id project_access_token_set_at)a
   @required ~w(api_root project_ref read_only)a
 
   @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
