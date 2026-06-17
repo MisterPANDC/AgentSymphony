@@ -45,6 +45,21 @@ defmodule SymphonyElixir.AgentMcpRegistry do
     end
   end
 
+  @spec put_registry(map()) :: {:ok, map()} | {:error, term()}
+  def put_registry(attrs) when is_map(attrs) do
+    attrs = stringify_keys(attrs)
+
+    with %{} = servers <- Map.get(attrs, "mcpServers") || {:error, :invalid_mcp_registry},
+         {:ok, servers} <- normalize_servers(servers),
+         registry <- %{"mcpServers" => servers},
+         :ok <- write_registry(registry) do
+      {:ok, registry}
+    else
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, :invalid_mcp_registry}
+    end
+  end
+
   @spec dto() :: {:ok, map()} | {:error, term()}
   def dto do
     with {:ok, servers} <- list_servers() do
@@ -79,6 +94,27 @@ defmodule SymphonyElixir.AgentMcpRegistry do
   defp normalize_server(attrs) do
     attrs = stringify_keys(attrs)
     name = attrs["name"]
+
+    with {:ok, server} <- normalize_named_server(name, attrs) do
+      {:ok, name, server}
+    end
+  end
+
+  defp normalize_servers(servers) do
+    Enum.reduce_while(servers, {:ok, %{}}, fn {name, attrs}, {:ok, acc} ->
+      name = to_string(name)
+
+      case normalize_named_server(name, attrs) do
+        {:ok, server} -> {:cont, {:ok, Map.put(acc, name, server)}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  defp normalize_named_server(_name, attrs) when not is_map(attrs), do: {:error, :invalid_mcp_server_definition}
+
+  defp normalize_named_server(name, attrs) do
+    attrs = stringify_keys(attrs)
     command = attrs["command"]
     args = Map.get(attrs, "args", [])
     env = Map.get(attrs, "env", %{})
@@ -109,7 +145,7 @@ defmodule SymphonyElixir.AgentMcpRegistry do
           }
           |> maybe_put("startup_timeout_sec", startup_timeout_sec)
 
-        {:ok, name, server}
+        {:ok, server}
     end
   end
 

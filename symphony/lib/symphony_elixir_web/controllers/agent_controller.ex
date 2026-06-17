@@ -15,13 +15,27 @@ defmodule SymphonyElixirWeb.AgentController do
       modes: ["subscription", "api", "auth_json"]
     }
   ]
+  @codex_mcp_list_timeout_ms 750
+  @codex_mcp_list_max_concurrency 8
 
   @spec index(Conn.t(), map()) :: Conn.t()
   def index(conn, _params) do
-    rate_limits = runtime_rate_limits()
+    registered_agents = Store.list_registered_agents()
+    rate_limits = runtime_rate_limits_for_agents(registered_agents)
     mcp = mcp_registry_dto()
     registered_mcp_servers = Map.get(mcp, :mcpServers, %{})
-    agents = Store.list_registered_agents() |> Enum.map(&agent_dto(&1, rate_limits, registered_mcp_servers))
+    installed_mcp_servers_by_agent_id = installed_mcp_servers_by_agent_id(registered_agents, registered_mcp_servers)
+
+    agents =
+      Enum.map(registered_agents, fn agent ->
+        agent_dto(
+          agent,
+          rate_limits,
+          registered_mcp_servers,
+          Map.get(installed_mcp_servers_by_agent_id, agent.id, [])
+        )
+      end)
+
     json(conn, %{agents: agents, availableAgents: @available_agents, mcp: mcp})
   end
 
@@ -31,6 +45,17 @@ defmodule SymphonyElixirWeb.AgentController do
   end
 
   @spec create_mcp(Conn.t(), map()) :: Conn.t()
+  def create_mcp(conn, %{"mcpServers" => _servers} = params) do
+    with {:ok, _registry} <- AgentMcpRegistry.put_registry(params) do
+      json(conn, %{mcp: mcp_registry_dto()})
+    else
+      {:error, reason} ->
+        conn
+        |> put_status(error_status(reason))
+        |> json(%{ok: false, error: error_payload(reason)})
+    end
+  end
+
   def create_mcp(conn, params) do
     with {:ok, _registry} <- AgentMcpRegistry.put_server(params) do
       json(conn, %{mcp: mcp_registry_dto()})
@@ -420,7 +445,7 @@ defmodule SymphonyElixirWeb.AgentController do
 
   defp normalize_auth_json(_auth_json), do: {:error, :invalid_auth_json}
 
-  defp agent_dto(agent, runtime_rate_limits \\ nil, registered_mcp_servers \\ %{}) do
+  defp agent_dto(agent, runtime_rate_limits \\ nil, registered_mcp_servers \\ %{}, installed_mcp_server_dtos \\ nil) do
     %{
       id: agent.id,
       provider: agent.provider,
@@ -437,11 +462,30 @@ defmodule SymphonyElixirWeb.AgentController do
       mcpInstallExitStatus: Map.get(agent, :mcp_install_exit_status),
       mcpInstallMessage: Map.get(agent, :mcp_install_message),
       mcpServerNames: Map.get(agent, :mcp_server_names) || [],
-      mcpInstalledServers: installed_mcp_servers(agent, registered_mcp_servers),
+      mcpInstalledServers: installed_mcp_server_dtos || installed_mcp_servers(agent, registered_mcp_servers),
       usage: usage_dto(agent, runtime_rate_limits),
       insertedAt: iso(agent.inserted_at),
       updatedAt: iso(agent.updated_at)
     }
+  end
+
+  defp installed_mcp_servers_by_agent_id([], _registered_mcp_servers), do: %{}
+
+  defp installed_mcp_servers_by_agent_id(agents, registered_mcp_servers) do
+    max_concurrency = min(max(length(agents), 1), @codex_mcp_list_max_concurrency)
+
+    agents
+    |> Task.async_stream(
+      fn agent -> {agent.id, installed_mcp_servers(agent, registered_mcp_servers)} end,
+      max_concurrency: max_concurrency,
+      on_timeout: :kill_task,
+      ordered: false,
+      timeout: @codex_mcp_list_timeout_ms
+    )
+    |> Enum.reduce(%{}, fn
+      {:ok, {agent_id, servers}}, acc -> Map.put(acc, agent_id, servers)
+      {:exit, _reason}, acc -> acc
+    end)
   end
 
   defp installed_mcp_servers(agent, registered_mcp_servers) do
@@ -530,6 +574,8 @@ defmodule SymphonyElixirWeb.AgentController do
   defp error_status(:api_key_required), do: 400
   defp error_status(:auth_json_required), do: 400
   defp error_status(:invalid_auth_json), do: 400
+  defp error_status(:invalid_mcp_registry), do: 400
+  defp error_status(:invalid_mcp_server_definition), do: 400
   defp error_status(:invalid_mcp_server_name), do: 400
   defp error_status(:invalid_mcp_server_command), do: 400
   defp error_status(:invalid_mcp_server_args), do: 400
@@ -556,6 +602,12 @@ defmodule SymphonyElixirWeb.AgentController do
 
   defp error_payload(:agent_not_found),
     do: %{type: :agent_not_found, message: "Agent registration was not found."}
+
+  defp error_payload(:invalid_mcp_registry),
+    do: %{type: :invalid_mcp_registry, message: "MCP JSON must contain a top-level mcpServers object."}
+
+  defp error_payload(:invalid_mcp_server_definition),
+    do: %{type: :invalid_mcp_server_definition, message: "Each MCP server definition must be a JSON object."}
 
   defp error_payload(:invalid_mcp_server_name),
     do: %{type: :invalid_mcp_server_name, message: "MCP server name must use letters, numbers, dots, dashes, or underscores."}
@@ -614,6 +666,15 @@ defmodule SymphonyElixirWeb.AgentController do
       _ -> nil
     end
   end
+
+  defp runtime_rate_limits_for_agents(agents) do
+    if Enum.any?(agents, &needs_runtime_rate_limits?/1), do: runtime_rate_limits(), else: nil
+  end
+
+  defp needs_runtime_rate_limits?(%{auth_mode: "subscription"} = agent),
+    do: not is_map(Map.get(agent, :usage_snapshot))
+
+  defp needs_runtime_rate_limits?(_agent), do: false
 
   defp now, do: DateTime.utc_now() |> DateTime.truncate(:second)
 

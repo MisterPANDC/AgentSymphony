@@ -1,5 +1,5 @@
 import { api } from "./client";
-import type { AgentAuthMode, AgentMcpRegistryDTO, AvailableAgentDTO, RegisteredAgentDTO } from "../types/agent";
+import type { AgentAuthMode, AgentMcpRegistryDTO, AgentMcpServerDTO, AvailableAgentDTO, RegisteredAgentDTO } from "../types/agent";
 
 export const dispatchAgents = () => api<{ dispatch: unknown }>(`/api/agents/dispatch`, { method: "POST" });
 
@@ -13,7 +13,7 @@ export const registerAgent = (input: { provider: "codex"; name?: string; authMod
 
 export const listAgentMcp = () => api<{ mcp: AgentMcpRegistryDTO }>(`/api/agents/mcp`);
 
-export const createAgentMcpServer = (input: { name: string; command: string; args?: string[]; env?: Record<string, string>; startupTimeoutSec?: number }) =>
+export const saveAgentMcpRegistry = (input: { mcpServers: Record<string, AgentMcpServerDTO> }) =>
   api<{ mcp: AgentMcpRegistryDTO }>(`/api/agents/mcp`, {
     method: "POST",
     body: JSON.stringify(input)

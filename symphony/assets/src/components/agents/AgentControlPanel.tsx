@@ -1,9 +1,9 @@
-import { ChangeEvent, FormEvent, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, CheckCircle2, FileText, KeyRound, Plus, RefreshCcw, Search, Server, Terminal, Upload, X } from "lucide-react";
-import { createAgentMcpServer, listAgents, refreshAgentUsage, registerAgent } from "../../api/agents";
-import type { AgentAuthMode, AgentMcpRegistryDTO, AvailableAgentDTO, CodexRateLimitBucketDTO, RegisteredAgentDTO } from "../../types/agent";
+import { listAgents, refreshAgentUsage, registerAgent, saveAgentMcpRegistry } from "../../api/agents";
+import type { AgentAuthMode, AgentMcpRegistryDTO, AgentMcpServerDTO, AvailableAgentDTO, CodexRateLimitBucketDTO, RegisteredAgentDTO } from "../../types/agent";
 
 const fallbackAgents: AvailableAgentDTO[] = [
   {
@@ -14,9 +14,20 @@ const fallbackAgents: AvailableAgentDTO[] = [
   }
 ];
 
+const MCP_JSON_PLACEHOLDER = `{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"],
+      "env": {},
+      "startup_timeout_sec": 15
+    }
+  }
+}`;
+
 export function AgentControlPanel() {
   const queryClient = useQueryClient();
-  const agents = useQuery({ queryKey: ["agents"], queryFn: listAgents });
+  const agents = useQuery({ queryKey: ["agents"], queryFn: listAgents, retry: false });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -96,7 +107,7 @@ export function AgentControlPanel() {
               </Dialog.Trigger>
             <Dialog.Portal>
               <Dialog.Overlay className="fixed inset-0 z-30 bg-black/10" />
-              <Dialog.Content className="fixed left-1/2 top-16 z-40 w-[min(720px,calc(100vw-32px))] -translate-x-1/2 overflow-hidden rounded-lg border border-[#dedfe4] bg-[#ffffff] shadow-2xl">
+              <Dialog.Content className="fixed left-1/2 top-16 z-40 w-[min(720px,calc(100vw-32px))] -translate-x-1/2 overflow-hidden rounded-lg border border-[#dedfe4] bg-[#ffffff] shadow-2xl outline-none">
                 <Dialog.Title className="sr-only">Register agent</Dialog.Title>
                 <form onSubmit={submitRegistration}>
                   <div className="flex items-center gap-2 border-b border-[#eaebef] px-3 py-2">
@@ -205,25 +216,35 @@ export function AgentControlPanel() {
                       </div>
                     )}
 
-                    <div className="grid gap-2 rounded-md border border-[#eaebef] bg-[#fbfbfc] p-3">
+                    <div className="grid gap-3 rounded-md border border-[#eaebef] bg-[#fbfbfc] p-3">
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <div className="text-xs font-semibold text-[#1d1d1f]">MCP</div>
-                          <div className="mt-0.5 text-[11px] text-[#686b73]">{mcpRegistry.path || "agent-mcp.json"}</div>
+                          <div className="flex items-center gap-1.5 text-xs font-semibold text-[#1d1d1f]">
+                            <Server size={13} />
+                            MCP servers
+                          </div>
+                          <div className="mono mt-0.5 text-[11px] text-[#686b73]">{mcpRegistry.path || "agent-mcp.json"}</div>
                         </div>
                         <button className="text-button" type="button" onClick={() => setMcpDialogOpen(true)}>
-                          <Plus size={14} /> Add MCP
+                          <Plus size={14} /> Define server
                         </button>
                       </div>
                       {mcpServerNames.length > 0 ? (
                         <div className="grid gap-1">
                           {mcpServerNames.map((name) => (
-                            <label key={name} className="flex items-center justify-between gap-3 rounded-md border border-[#eaebef] bg-white px-3 py-2 text-xs">
-                              <span className="min-w-0">
-                                <span className="block truncate font-medium text-[#555d68]">{name}</span>
-                                <span className="mono block truncate text-[11px] text-[#8a8d96]">{mcpRegistry.mcpServers[name]?.command}</span>
+                            <label key={name} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-md border border-[#eaebef] bg-white px-3 py-2.5 text-xs">
+                              <span className="grid min-w-0 gap-1">
+                                <span className="flex min-w-0 items-center gap-2">
+                                  <span className="truncate font-medium text-[#555d68]">{name}</span>
+                                  <span className="shrink-0 rounded border border-[#e4e6eb] bg-[#fbfbfc] px-1.5 py-0.5 text-[10px] uppercase text-[#8a8d96]">
+                                    Codex MCP
+                                  </span>
+                                </span>
+                                <span className="mono block truncate text-[11px] text-[#686b73]">{mcpCommandPreview(mcpRegistry.mcpServers[name])}</span>
+                                <span className="block truncate text-[11px] text-[#8a8d96]">{mcpMetadataSummary(mcpRegistry.mcpServers[name])}</span>
                               </span>
                               <input
+                                className="mt-1"
                                 type="checkbox"
                                 checked={selectedMcpServerNames.includes(name)}
                                 onChange={(event) => {
@@ -236,8 +257,8 @@ export function AgentControlPanel() {
                           ))}
                         </div>
                       ) : (
-                        <div className="rounded-md border border-dashed border-[#dedfe4] bg-white px-3 py-3 text-xs text-[#686b73]">
-                          No MCP servers configured
+                        <div className="rounded-md border border-dashed border-[#dedfe4] bg-white px-3 py-4 text-xs text-[#686b73]">
+                          No shared MCP server definitions yet. Define a server first, then select it for this agent.
                         </div>
                       )}
                     </div>
@@ -259,6 +280,7 @@ export function AgentControlPanel() {
         </div>
         <AgentList
           agents={agents.data?.agents ?? []}
+          error={agents.isError ? agents.error.message : null}
           loading={agents.isLoading}
           onRefreshUsage={(id) => refreshUsage.mutate(id)}
           refreshingAgentId={refreshUsage.isPending ? refreshUsage.variables : undefined}
@@ -285,121 +307,118 @@ function McpManagerDialog({
   registry: AgentMcpRegistryDTO;
   onChanged: () => void;
 }) {
-  const [name, setName] = useState("");
-  const [command, setCommand] = useState("");
-  const [args, setArgs] = useState("[]");
-  const [env, setEnv] = useState("{}");
+  const [mcpJson, setMcpJson] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const createMcp = useMutation({
-    mutationFn: createAgentMcpServer,
-    onSuccess: () => {
-      setName("");
-      setCommand("");
-      setArgs("[]");
-      setEnv("{}");
+  const wasOpen = useRef(open);
+  const formattedRegistry = useMemo(() => formatMcpRegistry(registry), [registry]);
+  const parsedRegistry = useMemo(() => parseMcpRegistryJson(mcpJson), [mcpJson]);
+  const saveMcp = useMutation({
+    mutationFn: saveAgentMcpRegistry,
+    onSuccess: (data) => {
+      setMcpJson(formatMcpRegistry(data.mcp));
       setError(null);
       onChanged();
     },
     onError: (error) => setError(error.message)
   });
   const serverNames = Object.keys(registry.mcpServers).sort();
+  const inlineParseError = mcpJson.trim() && !parsedRegistry.ok ? parsedRegistry.error : null;
+  const submitDisabled = saveMcp.isPending || !mcpJson.trim() || !parsedRegistry.ok;
+
+  useEffect(() => {
+    if (open && !wasOpen.current) {
+      setMcpJson(serverNames.length > 0 ? formattedRegistry : "");
+      setError(null);
+    }
+    wasOpen.current = open;
+  }, [formattedRegistry, open, serverNames.length]);
 
   function submit(event: FormEvent) {
     event.preventDefault();
     setError(null);
 
-    let parsedArgs: string[];
-    let parsedEnv: Record<string, string>;
-    try {
-      parsedArgs = JSON.parse(args || "[]");
-      parsedEnv = JSON.parse(env || "{}");
-    } catch {
-      setError("Args and env must be valid JSON");
+    const registryResult = parseMcpRegistryJson(mcpJson);
+    if (!registryResult.ok) {
+      setError(registryResult.error);
       return;
     }
 
-    if (!Array.isArray(parsedArgs) || !parsedArgs.every((item) => typeof item === "string")) {
-      setError("Args must be a JSON string array");
-      return;
-    }
-
-    if (!parsedEnv || Array.isArray(parsedEnv) || typeof parsedEnv !== "object") {
-      setError("Env must be a JSON object");
-      return;
-    }
-
-    createMcp.mutate({
-      name,
-      command,
-      args: parsedArgs,
-      env: parsedEnv
-    });
+    saveMcp.mutate(registryResult.value);
   }
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/10" />
-        <Dialog.Content className="fixed left-1/2 top-16 z-50 w-[min(760px,calc(100vw-32px))] -translate-x-1/2 overflow-hidden rounded-lg border border-[#dedfe4] bg-[#ffffff] shadow-2xl">
+        <Dialog.Content className="fixed left-1/2 top-8 z-50 w-[min(920px,calc(100vw-32px))] -translate-x-1/2 overflow-hidden rounded-lg border border-[#dedfe4] bg-[#ffffff] shadow-2xl outline-none">
           <Dialog.Title className="sr-only">MCP servers</Dialog.Title>
-          <div className="flex items-center justify-between gap-3 border-b border-[#eaebef] px-3 py-2">
-            <div className="min-w-0">
-              <div className="text-sm font-semibold">MCP servers</div>
-              <div className="mono mt-0.5 truncate text-[11px] text-[#8a8d96]">{registry.path || "agent-mcp.json"}</div>
+          <div className="flex items-center justify-between gap-3 border-b border-[#eaebef] px-4 py-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-[#dedfe4] bg-[#fbfbfc] text-[#555d68]">
+                <Server size={16} />
+              </span>
+              <div className="min-w-0">
+                <div className="text-sm font-semibold">MCP servers</div>
+                <div className="mono mt-0.5 truncate text-[11px] text-[#8a8d96]">{registry.path || "agent-mcp.json"}</div>
+              </div>
             </div>
             <Dialog.Close className="dialog-close-button" title="Close MCP servers">
               <X size={15} />
             </Dialog.Close>
           </div>
-          <div className="grid max-h-[calc(100vh-160px)] gap-3 overflow-auto p-3">
+          <div className="grid max-h-[calc(100vh-96px)] gap-3 overflow-auto p-3">
+            {registry.error && (
+              <div className="rounded-md border border-[#efcaca] bg-[#fff8f8] px-3 py-2 text-xs text-[#9b1c1c]">{registry.error}</div>
+            )}
+
             <div className="grid gap-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-semibold text-[#1d1d1f]">Configured definitions</div>
+                  <div className="mt-0.5 text-[11px] text-[#686b73]">Available to select when registering Codex agents.</div>
+                </div>
+                <span className="rounded-full border border-[#dedfe4] bg-[#fbfbfc] px-2 py-0.5 text-xs text-[#686b73]">{serverNames.length}</span>
+              </div>
               {serverNames.length > 0 ? (
-                serverNames.map((serverName) => (
-                  <div key={serverName} className="rounded-md border border-[#eaebef] bg-[#fbfbfc] px-3 py-2">
-                    <div className="text-sm font-medium">{serverName}</div>
-                    <div className="mono mt-1 truncate text-xs text-[#686b73]">{registry.mcpServers[serverName]?.command}</div>
-                  </div>
-                ))
+                <div className="grid gap-2">
+                  {serverNames.map((serverName) => (
+                    <McpDefinitionCard key={serverName} name={serverName} server={registry.mcpServers[serverName]} />
+                  ))}
+                </div>
               ) : (
                 <div className="rounded-md border border-dashed border-[#dedfe4] bg-[#fbfbfc] px-3 py-4 text-center text-sm text-[#686b73]">
-                  No MCP servers configured
+                  No MCP server definitions yet.
                 </div>
               )}
             </div>
 
-            <form className="grid gap-2 border-t border-[#eaebef] pt-3" onSubmit={submit}>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <input
-                  className="h-9 rounded-md border border-[#dedfe4] bg-white px-3 text-sm outline-none focus:border-[#9ca3af]"
-                  placeholder="name"
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                />
-                <input
-                  className="h-9 rounded-md border border-[#dedfe4] bg-white px-3 text-sm outline-none focus:border-[#9ca3af]"
-                  placeholder="command"
-                  value={command}
-                  onChange={(event) => setCommand(event.target.value)}
-                />
+            <form className="grid gap-3 border-t border-[#eaebef] pt-3" onSubmit={submit}>
+              <div>
+                <div className="text-xs font-semibold text-[#1d1d1f]">MCP JSON</div>
+                <div className="mt-0.5 text-[11px] text-[#686b73]">Saved as agent-mcp.json. Saving replaces the shared MCP registry.</div>
               </div>
-              <input
-                className="h-9 rounded-md border border-[#dedfe4] bg-white px-3 text-sm outline-none focus:border-[#9ca3af]"
-                placeholder='args JSON, e.g. ["--stdio"]'
-                value={args}
-                onChange={(event) => setArgs(event.target.value)}
-              />
+
               <textarea
-                className="min-h-20 resize-y rounded-md border border-[#dedfe4] bg-white px-3 py-2 text-xs outline-none focus:border-[#9ca3af]"
-                placeholder='{"TOKEN":"..."}'
-                value={env}
-                onChange={(event) => setEnv(event.target.value)}
+                className={`mono min-h-[280px] resize-y rounded-md border bg-white px-3 py-2 text-xs leading-5 outline-none placeholder:text-[#9ca3af] focus:border-[#9ca3af] ${
+                  inlineParseError ? "border-[#e5b7b7]" : "border-[#dedfe4]"
+                }`}
+                placeholder={MCP_JSON_PLACEHOLDER}
+                spellCheck={false}
+                value={mcpJson}
+                onChange={(event) => {
+                  setMcpJson(event.target.value);
+                  setError(null);
+                }}
               />
-              {(error || createMcp.isError) && (
-                <div className="rounded-md border border-[#efcaca] bg-[#fff8f8] px-3 py-2 text-xs text-[#9b1c1c]">{error || createMcp.error?.message}</div>
+
+              {(inlineParseError || error || saveMcp.isError) && (
+                <div className="rounded-md border border-[#efcaca] bg-[#fff8f8] px-3 py-2 text-xs text-[#9b1c1c]">
+                  {inlineParseError || error || saveMcp.error?.message}
+                </div>
               )}
-              <div className="flex justify-end">
-                <button className="text-button" type="submit" disabled={createMcp.isPending || !name.trim() || !command.trim()}>
-                  <Plus size={14} /> Add MCP
+              <div className="flex justify-end border-t border-[#eaebef] pt-2">
+                <button className="text-button" type="submit" disabled={submitDisabled}>
+                  <FileText size={14} /> Save
                 </button>
               </div>
             </form>
@@ -410,37 +429,195 @@ function McpManagerDialog({
   );
 }
 
+function McpDefinitionCard({ name, server }: { name: string; server?: AgentMcpRegistryDTO["mcpServers"][string] }) {
+  return (
+    <div className="grid gap-2 rounded-md border border-[#eaebef] bg-[#fbfbfc] px-3 py-2.5">
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium text-[#1d1d1f]">{name}</div>
+          <div className="mt-0.5 truncate text-[11px] text-[#8a8d96]">{mcpMetadataSummary(server)}</div>
+        </div>
+        <span className="rounded border border-[#dedfe4] bg-white px-1.5 py-0.5 text-[11px] text-[#686b73]">definition</span>
+      </div>
+      <div className="mono min-w-0 truncate rounded border border-[#eaebef] bg-white px-2 py-1.5 text-xs text-[#555d68]">{mcpCommandPreview(server)}</div>
+    </div>
+  );
+}
+
+type ParsedMcpValue<T> = { ok: true; value: T } | { ok: false; error: string };
+
+function validMcpServerName(name: string) {
+  return /^[A-Za-z0-9_.-]+$/.test(name);
+}
+
+function formatMcpRegistry(registry: AgentMcpRegistryDTO) {
+  const mcpServers = Object.keys(registry.mcpServers)
+    .sort()
+    .reduce<Record<string, AgentMcpServerDTO>>((acc, name) => {
+      acc[name] = normalizeMcpServerForJson(registry.mcpServers[name]);
+      return acc;
+    }, {});
+
+  return JSON.stringify({ mcpServers }, null, 2);
+}
+
+function normalizeMcpServerForJson(server: AgentMcpServerDTO) {
+  const normalized: AgentMcpServerDTO = {
+    command: server.command,
+    args: server.args ?? [],
+    env: server.env ?? {}
+  };
+  const timeout = server.startup_timeout_sec ?? server.startupTimeoutSec;
+  if (timeout != null) normalized.startup_timeout_sec = timeout;
+  return normalized;
+}
+
+function parseMcpRegistryJson(value: string): ParsedMcpValue<{ mcpServers: Record<string, AgentMcpServerDTO> }> {
+  const trimmed = value.trim();
+  if (!trimmed) return { ok: false, error: "MCP JSON is required." };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return { ok: false, error: "MCP JSON must be valid JSON." };
+  }
+
+  if (!isPlainRecord(parsed)) {
+    return { ok: false, error: "MCP JSON must be an object." };
+  }
+
+  const mcpServers = parsed.mcpServers;
+  if (!isPlainRecord(mcpServers)) {
+    return { ok: false, error: "MCP JSON must contain a top-level mcpServers object." };
+  }
+
+  const servers: Record<string, AgentMcpServerDTO> = {};
+  for (const [name, server] of Object.entries(mcpServers)) {
+    const result = normalizeMcpServerInput(name, server);
+    if (!result.ok) {
+      return { ok: false, error: result.error };
+    }
+    servers[name] = result.value;
+  }
+
+  return { ok: true, value: { mcpServers: servers } };
+}
+
+function normalizeMcpServerInput(name: string, server: unknown): ParsedMcpValue<AgentMcpServerDTO> {
+  if (!validMcpServerName(name)) {
+    return { ok: false, error: `MCP server "${name}" must use letters, numbers, dots, dashes, or underscores.` };
+  }
+
+  if (!isPlainRecord(server)) {
+    return { ok: false, error: `MCP server "${name}" must be a JSON object.` };
+  }
+
+  const command = server.command;
+  if (typeof command !== "string" || !command.trim()) {
+    return { ok: false, error: `MCP server "${name}" requires a command string.` };
+  }
+
+  const args = server.args ?? [];
+  if (!Array.isArray(args) || !args.every((item) => typeof item === "string")) {
+    return { ok: false, error: `MCP server "${name}" args must be a string array.` };
+  }
+
+  const env = server.env ?? {};
+  if (!isPlainRecord(env) || !Object.values(env).every((value) => typeof value === "string")) {
+    return { ok: false, error: `MCP server "${name}" env must be an object with string values.` };
+  }
+
+  const startupTimeout = server.startup_timeout_sec ?? server.startupTimeoutSec;
+  if (startupTimeout != null && (typeof startupTimeout !== "number" || !Number.isInteger(startupTimeout) || startupTimeout <= 0)) {
+    return { ok: false, error: `MCP server "${name}" startup_timeout_sec must be a positive integer.` };
+  }
+
+  const normalized: AgentMcpServerDTO = {
+    command: command.trim(),
+    args,
+    env: Object.entries(env).reduce<Record<string, string>>((acc, [key, value]) => {
+      acc[key] = value as string;
+      return acc;
+    }, {})
+  };
+
+  if (startupTimeout != null) normalized.startup_timeout_sec = startupTimeout;
+  return { ok: true, value: normalized };
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function mcpCommandPreview(server?: AgentMcpRegistryDTO["mcpServers"][string]) {
+  if (!server?.command) return "No command";
+  return shellCommandPreview(server.command, server.args ?? []);
+}
+
+function shellCommandPreview(command: string, args: string[]) {
+  return [command, ...args].map(shellToken).join(" ");
+}
+
+function shellToken(value: string) {
+  if (/^[A-Za-z0-9_./:=@%+-]+$/.test(value)) return value;
+  return JSON.stringify(value);
+}
+
+function mcpMetadataSummary(server?: AgentMcpRegistryDTO["mcpServers"][string]) {
+  if (!server) return "No server details";
+  const args = server.args ?? [];
+  const env = server.env ?? {};
+  const timeout = server.startupTimeoutSec ?? server.startup_timeout_sec;
+  const parts = [
+    `${args.length} ${args.length === 1 ? "arg" : "args"}`,
+    mcpEnvSummary(env),
+    timeout ? `${timeout}s startup timeout` : "default startup timeout"
+  ];
+  return parts.join(" | ");
+}
+
+function mcpEnvSummary(env: Record<string, string>) {
+  const keys = Object.keys(env).sort();
+  if (keys.length === 0) return "No env";
+  return `${keys.length} ${keys.length === 1 ? "env key" : "env keys"}: ${keys.join(", ")}`;
+}
+
 function OpenAILogo({ size = 16 }: { size?: number }) {
   return (
     <svg
       aria-hidden="true"
-      fill="none"
+      fill="currentColor"
+      fillRule="evenodd"
       height={size}
       viewBox="0 0 24 24"
       width={size}
       xmlns="http://www.w3.org/2000/svg"
     >
-      <path
-        d="M17.9 10.9V6.7a5.1 5.1 0 0 0-8.5-3.8A5.1 5.1 0 0 0 3.3 9a5.1 5.1 0 0 0 .8 8.2v.1a5.1 5.1 0 0 0 8.5 3.8 5.1 5.1 0 0 0 6.1-6.1 5.1 5.1 0 0 0-.8-4.1Zm-5.3 8.8a3.8 3.8 0 0 1-6.2-2.9v-.3l3.9 2.2a.7.7 0 0 0 .7 0l1.6-.9v1.9Zm4.8-4.2a3.8 3.8 0 0 1-3.4 4.1v-4.5a.7.7 0 0 0-.4-.6L12 13.6l1.7-1 3.7 2.1v.8ZM5 16.1a3.8 3.8 0 0 1-.6-6.8l3.9 2.2a.7.7 0 0 0 .7 0l1.6-.9v2l-3.7 2.1a.7.7 0 0 0-.4.6v1.8L5 16.1Zm1.6-11.7a3.8 3.8 0 0 1 2.1-.1v4.5a.7.7 0 0 0 .4.6l1.6.9-1.7 1-3.7-2.1A3.8 3.8 0 0 1 6.6 4.4Zm10.8 6.3-3.8-2.2a.7.7 0 0 0-.7 0l-1.6.9v-2l3.7-2.1a.7.7 0 0 0 .4-.6V3a3.8 3.8 0 0 1 1.9 7.7Zm-8.1 3 2.7-1.6 2.7 1.6v3.1L12 18.4l-2.7-1.6v-3.1Zm2.7-3.2-2.7-1.6V5.8L12 4.2l2.7 1.6v3.1L12 10.5Z"
-        fill="currentColor"
-      />
+      <path d="M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z" />
     </svg>
   );
 }
 
 function AgentList({
   agents,
+  error,
   loading,
   onRefreshUsage,
   refreshingAgentId
 }: {
   agents: RegisteredAgentDTO[];
+  error?: string | null;
   loading: boolean;
   onRefreshUsage: (id: string) => void;
   refreshingAgentId?: string;
 }) {
   if (loading) {
     return <div className="px-4 py-8 text-center text-sm text-[#686b73]">Loading agents</div>;
+  }
+
+  if (error) {
+    return <div className="px-4 py-8 text-center text-sm text-[#9b1c1c]">Agents could not load: {error}</div>;
   }
 
   if (agents.length === 0) {
