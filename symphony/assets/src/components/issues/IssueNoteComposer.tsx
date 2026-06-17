@@ -313,10 +313,6 @@ export function IssueNoteComposer({
               Cancel
             </button>
           )}
-          <button className="text-button" type="submit" disabled={!canSubmit}>
-            {mutation.isPending ? <LoaderCircle className="animate-spin" size={14} /> : mode === "edit" ? <Check size={14} /> : <SendHorizontal size={14} />}
-            {mutation.isPending ? pendingLabel : submitLabel}
-          </button>
           {visibleQuickActionButtons.map((action) => (
             <button
               key={action.command}
@@ -328,6 +324,10 @@ export function IssueNoteComposer({
               {quickActionButtonLabel(action)}
             </button>
           ))}
+          <button className="text-button" type="submit" disabled={!canSubmit}>
+            {mutation.isPending ? <LoaderCircle className="animate-spin" size={14} /> : mode === "edit" ? <Check size={14} /> : <SendHorizontal size={14} />}
+            {mutation.isPending ? pendingLabel : submitLabel}
+          </button>
         </div>
       </div>
     </form>

@@ -4,10 +4,10 @@ import {
   Bot,
   ArrowUp,
   Check,
+  ChevronDown,
   Code2,
   Copy,
   GitBranch,
-  MessageCircle,
   MessageSquare,
   PanelLeft,
   Pencil,
@@ -20,8 +20,11 @@ import {
   X,
   type LucideIcon
 } from "lucide-react";
+import { listAgents } from "../../api/agents";
 import { getAiChat, resetAiChat, resolveAiChatApproval, sendAiChatMessage, type AiChatEventDTO } from "../../api/aiChat";
 import { reduceCodexEvents, type ApprovalDecision, type CodexRenderPart } from "../../codex";
+import { OpenAILogo } from "../agents/AgentProviderLogo";
+import type { RegisteredAgentDTO } from "../../types/agent";
 import { CodexMessageRenderer } from "./CodexMessageRenderer";
 
 type ChatMessage =
@@ -58,7 +61,7 @@ const errorEventToCodex = (event: AiChatEventDTO) => {
   const message =
     payload && typeof payload === "object" && "message" in payload && typeof payload.message === "string"
       ? payload.message
-      : "Codex chat failed.";
+      : "Agent chat failed.";
   return { method: "error", params: { message }, id: event.id };
 };
 
@@ -87,7 +90,7 @@ const partsToCopyText = (parts: readonly CodexRenderPart[]) =>
         case "approval":
           return `Approval required: ${part.requestId}`;
         case "unknown":
-          return `Unknown Codex event: ${part.method ?? part.id}`;
+          return `Unknown Agent event: ${part.method ?? part.id}`;
       }
     })
     .filter(Boolean)
@@ -113,6 +116,7 @@ interface TrashPreviewEntry {
 
 const suggestionStorageKey = "symphony.aiChat.suggestions";
 const legacySuggestionStorageKey = "symphony.aiChat.customSuggestions";
+const selectedAgentStorageKey = "symphony.aiChat.selectedAgentId";
 const suggestionIconIds: SuggestionIconId[] = ["sparkles", "code", "branch", "wand", "message", "bot"];
 
 const suggestionIcons: Record<SuggestionIconId, LucideIcon> = {
@@ -139,6 +143,38 @@ const seededSuggestionPrompts: SuggestionPrompt[] = [
   { id: "next-change", label: "Plan next change", icon: "branch", prompt: "Help me plan the next implementation step for this project." },
   { id: "improve-ux", label: "Improve UX", icon: "wand", prompt: "Suggest focused UI/UX improvements that fit Symphony's current design language." }
 ];
+
+function AiChatFabMark() {
+  return (
+    <svg className="ai-chat-fab-mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M5.6 5.15h12.8c1.21 0 2.2.99 2.2 2.2v7.05c0 1.21-.99 2.2-2.2 2.2h-6.1l-4.65 3.75c-.42.34-1.05.04-1.05-.5V16.6h-1c-1.21 0-2.2-.99-2.2-2.2V7.35c0-1.21.99-2.2 2.2-2.2Z" />
+      <path className="ai-chat-fab-mark-line" d="M8.25 9.35h8.35" />
+      <path className="ai-chat-fab-mark-line" d="M8.25 12.75h5.45" />
+    </svg>
+  );
+}
+
+const isApplePlatform = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+const aiChatShortcutParts = isApplePlatform ? ["⌘", "I"] : ["Ctrl", "+", "I"];
+
+const isEditableShortcutTarget = (target: EventTarget | null) => {
+  if (!(target instanceof HTMLElement)) return false;
+  const tagName = target.tagName.toLowerCase();
+  return tagName === "input" || tagName === "textarea" || tagName === "select" || target.isContentEditable;
+};
+
+function AgentProviderMark({ agent, size = 16 }: { agent?: Pick<RegisteredAgentDTO, "provider"> | null; size?: number }) {
+  if (agent?.provider === "codex") return <OpenAILogo size={size} />;
+  return <Bot size={size} />;
+}
+
+function readSelectedAgentId() {
+  try {
+    return window.localStorage.getItem(selectedAgentStorageKey);
+  } catch {
+    return null;
+  }
+}
 
 const isSuggestionIconId = (value: unknown): value is SuggestionIconId =>
   typeof value === "string" && suggestionIconIds.includes(value as SuggestionIconId);
@@ -233,6 +269,8 @@ export function AiChatFloatingPanel() {
   const [selectedTrashPreviewId, setSelectedTrashPreviewId] = useState<string | null>(null);
   const [suggestionEditorOpen, setSuggestionEditorOpen] = useState(false);
   const [editingSuggestionId, setEditingSuggestionId] = useState<string | null>(null);
+  const [agentMenuOpen, setAgentMenuOpen] = useState(false);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(readSelectedAgentId);
   const [suggestionDraft, setSuggestionDraft] = useState<{ label: string; prompt: string; icon: SuggestionIconId }>({
     label: "",
     prompt: "",
@@ -240,6 +278,7 @@ export function AiChatFloatingPanel() {
   });
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const agentSelectorRef = useRef<HTMLDivElement | null>(null);
   const queryClient = useQueryClient();
   const chat = useQuery({
     queryKey: ["ai-chat"],
@@ -247,6 +286,7 @@ export function AiChatFloatingPanel() {
     enabled: open,
     refetchInterval: (query) => (query.state.data?.chat.status === "running" ? 1_500 : 5_000)
   });
+  const agents = useQuery({ queryKey: ["agents"], queryFn: listAgents, enabled: open, retry: false });
 
   const sendMutation = useMutation({
     mutationFn: sendAiChatMessage,
@@ -270,6 +310,9 @@ export function AiChatFloatingPanel() {
   });
 
   const chatData = chat.data?.chat;
+  const registeredAgents = useMemo(() => agents.data?.agents ?? [], [agents.data?.agents]);
+  const selectedAgent = registeredAgents.find((agent) => agent.id === selectedAgentId) ?? registeredAgents[0] ?? null;
+  const canUseChat = Boolean(selectedAgent);
   const messages = useMemo(() => buildMessages(chatData?.events ?? [], chatData?.status ?? "idle"), [chatData?.events, chatData?.status]);
   const isRunning = chatData?.status === "running";
   const statusLabel = isRunning ? "running" : chatData?.status === "failed" ? "failed" : null;
@@ -323,6 +366,35 @@ export function AiChatFloatingPanel() {
   }, [suggestions]);
 
   useEffect(() => {
+    if (selectedAgentId && registeredAgents.some((agent) => agent.id === selectedAgentId)) return;
+    setSelectedAgentId(registeredAgents[0]?.id ?? null);
+  }, [registeredAgents, selectedAgentId]);
+
+  useEffect(() => {
+    try {
+      if (selectedAgentId) {
+        window.localStorage.setItem(selectedAgentStorageKey, selectedAgentId);
+      } else {
+        window.localStorage.removeItem(selectedAgentStorageKey);
+      }
+    } catch {
+      // localStorage can be unavailable in restricted browser modes; keep the in-memory state working.
+    }
+  }, [selectedAgentId]);
+
+  useEffect(() => {
+    if (!agentMenuOpen) return;
+
+    function onPointerDown(event: PointerEvent) {
+      if (event.target instanceof Node && agentSelectorRef.current?.contains(event.target)) return;
+      setAgentMenuOpen(false);
+    }
+
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [agentMenuOpen]);
+
+  useEffect(() => {
     if (!trashOpen) return;
 
     const selectedStillExists = selectedTrashPreviewId && trashPreviewEntries.some((entry) => entry.id === selectedTrashPreviewId);
@@ -330,6 +402,38 @@ export function AiChatFloatingPanel() {
       setSelectedTrashPreviewId(trashPreviewEntries[0]?.id ?? null);
     }
   }, [selectedTrashPreviewId, trashOpen, trashPreviewEntries]);
+
+  useEffect(() => {
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key.toLowerCase() !== "i" || event.altKey || event.shiftKey || (!event.metaKey && !event.ctrlKey)) return;
+      if (isEditableShortcutTarget(event.target)) return;
+
+      event.preventDefault();
+      setOpen(true);
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (!open || trashOpen || suggestionEditorOpen) return;
+
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Escape") return;
+
+      event.preventDefault();
+      if (agentMenuOpen) {
+        setAgentMenuOpen(false);
+        return;
+      }
+
+      setOpen(false);
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [agentMenuOpen, open, suggestionEditorOpen, trashOpen]);
 
   useEffect(() => {
     if (!open || chat.isLoading || chat.isError || sendMutation.isPending || isRunning) return;
@@ -343,7 +447,7 @@ export function AiChatFloatingPanel() {
 
   const sendText = (text: string) => {
     const message = text.trim();
-    if (!message || sendMutation.isPending || isRunning) return;
+    if (!message || !canUseChat || sendMutation.isPending || isRunning) return;
     sendMutation.mutate(message);
   };
 
@@ -357,6 +461,12 @@ export function AiChatFloatingPanel() {
       event.preventDefault();
       event.currentTarget.form?.requestSubmit();
     }
+  };
+
+  const chooseAgent = (agentId: string) => {
+    setSelectedAgentId(agentId);
+    setAgentMenuOpen(false);
+    window.requestAnimationFrame(() => composerInputRef.current?.focus({ preventScroll: true }));
   };
 
   const fillSuggestionPrompt = (prompt: string) => {
@@ -430,7 +540,7 @@ export function AiChatFloatingPanel() {
       .map((message) => {
         if (message.role === "user") return `User:\n${message.text}`;
         const assistantText = partsToCopyText(message.parts);
-        return `Codex:\n${assistantText || message.status}`;
+        return `Agent:\n${assistantText || message.status}`;
       })
       .join("\n\n");
 
@@ -449,17 +559,48 @@ export function AiChatFloatingPanel() {
         ref={composerInputRef}
         value={draft}
         rows={variant === "hero" ? 3 : 2}
-        placeholder={isRunning ? "Codex is responding..." : "Message Codex..."}
-        disabled={sendMutation.isPending || isRunning}
+        placeholder={!canUseChat ? "Register an agent in Agents to start chatting." : isRunning ? "Agent is responding..." : "Message Agent..."}
+        disabled={!canUseChat || sendMutation.isPending || isRunning}
         onChange={(event) => setDraft(event.target.value)}
         onKeyDown={handleComposerKeyDown}
       />
       <div className="ai-chat-composer-footer">
-        <div className="ai-chat-model-pill">
-          <Bot size={14} />
-          <span>Codex</span>
+        <div className="ai-chat-agent-selector" ref={agentSelectorRef}>
+          <button
+            className={`ai-chat-agent-trigger${agentMenuOpen ? " open" : ""}`}
+            type="button"
+            aria-expanded={agentMenuOpen}
+            aria-haspopup="listbox"
+            disabled={registeredAgents.length === 0 || sendMutation.isPending || isRunning}
+            onClick={() => setAgentMenuOpen((value) => !value)}
+          >
+            {selectedAgent ? <AgentProviderMark agent={selectedAgent} size={16} /> : null}
+            <span>{selectedAgent?.name ?? (agents.isLoading ? "Loading agents" : "No agent")}</span>
+            {registeredAgents.length > 0 ? <ChevronDown size={15} /> : null}
+          </button>
+          {agentMenuOpen && registeredAgents.length > 0 ? (
+            <div className="ai-chat-agent-menu" role="listbox" aria-label="Choose agent">
+              {registeredAgents.map((agent) => {
+                const selected = agent.id === selectedAgent?.id;
+                return (
+                  <button
+                    key={agent.id}
+                    className={`ai-chat-agent-option${selected ? " selected" : ""}`}
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    onClick={() => chooseAgent(agent.id)}
+                  >
+                    <AgentProviderMark agent={agent} size={17} />
+                    <span>{agent.name}</span>
+                    {selected ? <Check size={17} /> : null}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
         </div>
-        <button type="submit" disabled={!draft.trim() || sendMutation.isPending || isRunning} aria-label="Send message">
+        <button type="submit" disabled={!draft.trim() || !canUseChat || sendMutation.isPending || isRunning} aria-label="Send message">
           {sendMutation.isPending ? <RefreshCcw size={16} /> : <ArrowUp size={17} />}
         </button>
       </div>
@@ -469,7 +610,19 @@ export function AiChatFloatingPanel() {
   if (!open) {
     return (
       <button className="ai-chat-fab" type="button" aria-label="Open AI chat" onClick={() => setOpen(true)}>
-        <MessageCircle size={22} />
+        <AiChatFabMark />
+        <span className="ai-chat-fab-tooltip" role="tooltip">
+          <span>Open AI chat</span>
+          <span className="ai-chat-fab-shortcut" aria-label={isApplePlatform ? "Command I" : "Control plus I"}>
+            {aiChatShortcutParts.map((part, index) =>
+              part === "+" ? (
+                <span key={`${part}-${index}`} className="ai-chat-fab-shortcut-plus" aria-hidden="true">+</span>
+              ) : (
+                <kbd key={`${part}-${index}`}>{part}</kbd>
+              )
+            )}
+          </span>
+        </span>
       </button>
     );
   }
@@ -585,10 +738,10 @@ export function AiChatFloatingPanel() {
             <div className="ai-chat-start" ref={viewportRef}>
               <div className="ai-chat-start-inner">
                 <div className="ai-chat-start-mark">
-                  <Bot size={22} />
+                  <Bot size={42} strokeWidth={1.9} />
                 </div>
                 <h2>How can I help with Symphony?</h2>
-                <p>Ask Codex to inspect the project, explain behavior, plan changes, or review implementation details.</p>
+                <p>Ask Agent to inspect the project, explain behavior, plan changes, or review implementation details.</p>
                 {composer("hero")}
                 <div className="ai-chat-suggestion-area">
                   <div className="ai-chat-suggestions">
@@ -761,7 +914,7 @@ export function AiChatFloatingPanel() {
                           const messageText = message.role === "user" ? message.text : partsToCopyText(message.parts) || message.status;
                           return (
                             <article className={`ai-chat-trash-message ${message.role}`} key={message.id}>
-                              <span>{message.role === "user" ? "You" : "Codex"}</span>
+                              <span>{message.role === "user" ? "You" : "Agent"}</span>
                               <p>{messageText}</p>
                             </article>
                           );

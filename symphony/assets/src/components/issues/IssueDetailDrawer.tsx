@@ -1603,11 +1603,6 @@ function CommentActions({
     };
   }, [menuOpen, note.id]);
 
-  function beginEdit() {
-    setMenuOpen(false);
-    onStartEdit();
-  }
-
   async function copyCommentLink() {
     try {
       await copyText(commentUrl);
@@ -1635,10 +1630,6 @@ function CommentActions({
           <button type="button" role="menuitem" onClick={copyCommentLink}>
             <Link2 size={14} />
             Copy link to comment
-          </button>
-          <button type="button" role="menuitem" onClick={beginEdit}>
-            <Pencil size={14} />
-            Edit comment
           </button>
           <button className="is-danger" type="button" role="menuitem" disabled={deleteMutation.isPending} onClick={deleteComment}>
             <Trash2 size={14} />

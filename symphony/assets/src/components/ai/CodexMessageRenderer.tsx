@@ -11,7 +11,7 @@ const isRunning = (status: CodexTurnStatus | undefined) => status === "inProgres
 
 export function CodexMessageRenderer({ parts, status, onResolveApproval }: CodexMessageRendererProps) {
   if (!parts.length) {
-    return isRunning(status) ? <div className="ai-chat-working">Codex is working...</div> : null;
+    return isRunning(status) ? <div className="ai-chat-working">Agent is working...</div> : null;
   }
 
   return (
