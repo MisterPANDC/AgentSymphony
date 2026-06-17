@@ -60,23 +60,36 @@ export function RepoPicker() {
           {projects.isLoading && <div className="empty-state">Loading repositories...</div>}
           {projects.isError && <div className="empty-state">Unable to load repositories.</div>}
           {!projects.isLoading && filtered.length === 0 && <div className="empty-state">No repositories found.</div>}
-          {filtered.map((project) => (
-            <button
-              key={project.id}
-              className="repo-row"
-              onClick={() => activate.mutate(project.id)}
-              disabled={activate.isPending}
-            >
-              <GitBranch size={15} />
-              <span className="repo-row-main">
-                <span className="repo-row-name">{project.name}</span>
-                <span className="repo-row-path">{project.path_with_namespace}</span>
-              </span>
-              <span className={`repo-token-state ${project.project_access_token_status}`}>
-                {project.project_access_token_status === "configured" ? "PAT set" : "PAT missing"}
-              </span>
-            </button>
-          ))}
+          {filtered.map((project) => {
+            const credentialStatus = project.automation_credential_status ?? project.project_access_token_status;
+            const credentialMode = project.automation_credential_mode ?? "project_access_token";
+            const credentialLabel =
+              credentialStatus === "configured"
+                ? credentialMode === "service_account"
+                  ? "SA set"
+                  : "PAT set"
+                : credentialMode === "service_account"
+                  ? "SA missing"
+                  : "PAT missing";
+
+            return (
+              <button
+                key={project.id}
+                className="repo-row"
+                onClick={() => activate.mutate(project.id)}
+                disabled={activate.isPending}
+              >
+                <GitBranch size={15} />
+                <span className="repo-row-main">
+                  <span className="repo-row-name">{project.name}</span>
+                  <span className="repo-row-path">{project.path_with_namespace}</span>
+                </span>
+                <span className={`repo-token-state ${credentialStatus}`}>
+                  {credentialLabel}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         {activate.isError && <div className="repo-error">{activate.error.message}</div>}

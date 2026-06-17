@@ -15,6 +15,7 @@ defmodule SymphonyElixir.Store.PostgresTest do
   alias SymphonyElixir.Persistence.IssueRelation
   alias SymphonyElixir.Persistence.ProjectSetting
   alias SymphonyElixir.Persistence.RuntimeBlock
+  alias SymphonyElixir.Persistence.ServiceAccountCredential
   alias SymphonyElixir.Persistence.SyncCursor
   alias SymphonyElixir.Persistence.WorkflowState
   alias SymphonyElixir.{Repo, Store}
@@ -146,6 +147,7 @@ defmodule SymphonyElixir.Store.PostgresTest do
     Repo.delete_all(WorkflowState)
     Repo.delete_all(Issue)
     Repo.delete_all(SyncCursor)
+    Repo.delete_all(ServiceAccountCredential)
     Repo.delete_all(ProjectSetting)
     Repo.delete_all(GitLabOAuthToken)
     Repo.delete_all(GitLabProjectMembership)

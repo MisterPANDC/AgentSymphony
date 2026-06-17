@@ -97,7 +97,9 @@ defmodule SymphonyElixirWeb.Router do
 
     post("/api/issues", IssueController, :create)
     post("/api/issues/:id/notes", IssueController, :create_note)
+    post("/api/issues/:id/discussions/:discussion_id/notes", IssueController, :create_note_reply)
     post("/api/issues/:id/merge_requests/:merge_request_iid/notes", IssueController, :create_merge_request_note)
+    post("/api/issues/:id/merge_requests/:merge_request_iid/discussions/:discussion_id/notes", IssueController, :create_merge_request_note_reply)
     put("/api/issues/:id/notes/:note_id", IssueController, :update_note)
     put("/api/issues/:id/merge_requests/:merge_request_iid/notes/:note_id", IssueController, :update_merge_request_note)
     delete("/api/issues/:id/notes/:note_id", IssueController, :delete_note)
@@ -124,9 +126,11 @@ defmodule SymphonyElixirWeb.Router do
     post("/api/monitor/refresh", MonitorController, :refresh)
     post("/api/sync/refresh", SyncController, :refresh)
     post("/api/settings/gitlab/test", SettingsController, :test_gitlab)
+    put("/api/settings/gitlab/credential-mode", SettingsController, :update_credential_mode)
     get("/api/settings/gitlab/local-repo/candidates", SettingsController, :local_repo_candidates)
     put("/api/settings/gitlab/local-repo", SettingsController, :update_local_repo)
     put("/api/settings/gitlab/project-token", SettingsController, :update_project_token)
+    put("/api/settings/gitlab/service-account-token", SettingsController, :update_service_account_token)
     post("/api/v1/refresh", ObservabilityApiController, :refresh)
   end
 

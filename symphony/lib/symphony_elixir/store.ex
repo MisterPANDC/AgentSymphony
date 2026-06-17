@@ -81,6 +81,23 @@ defmodule SymphonyElixir.Store do
   @spec project_access_token(map() | String.t()) :: {:ok, String.t()} | {:error, term()}
   def project_access_token(project_or_id), do: backend().project_access_token(project_or_id)
 
+  @spec put_project_automation_credential_mode(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def put_project_automation_credential_mode(project_setting_id, mode),
+    do: backend().put_project_automation_credential_mode(project_setting_id, mode)
+
+  @spec put_service_account_token(String.t(), String.t(), String.t() | nil, map()) :: {:ok, map()} | {:error, term()}
+  def put_service_account_token(api_root, token, identity_id \\ nil, attrs \\ %{}),
+    do: backend().put_service_account_token(api_root, token, identity_id, attrs)
+
+  @spec service_account_credential(String.t()) :: map() | nil
+  def service_account_credential(api_root), do: backend().service_account_credential(api_root)
+
+  @spec service_account_token(String.t()) :: {:ok, String.t()} | {:error, term()}
+  def service_account_token(api_root), do: backend().service_account_token(api_root)
+
+  @spec automation_credential(map() | String.t()) :: {:ok, map()} | {:error, term()}
+  def automation_credential(project_or_id), do: backend().automation_credential(project_or_id)
+
   @spec put_project_local_repo_path(String.t(), String.t() | nil) :: {:ok, map()} | {:error, term()}
   def put_project_local_repo_path(project_setting_id, local_repo_path),
     do: backend().put_project_local_repo_path(project_setting_id, local_repo_path)

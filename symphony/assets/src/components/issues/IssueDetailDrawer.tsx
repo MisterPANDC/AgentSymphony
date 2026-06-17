@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Check, CornerUpLeft, ExternalLink, Link2, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, Pencil, Plus, Tag, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, CornerUpLeft, ExternalLink, Link2, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, Pencil, Plus, Tag, Trash2, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
+  createIssueNoteReply,
+  createMergeRequestNoteReply,
   createMergeRequestNote,
   deleteIssueNote,
   deleteMergeRequestNote,
@@ -30,9 +32,12 @@ type NoteThreadTarget = {
   queryKey?: readonly unknown[];
   webUrl?: string;
   createNote?: (body: string, files: File[]) => NoteMutationResult;
+  createReply?: (discussionId: string, body: string, files: File[]) => NoteMutationResult;
   updateNote?: (noteId: number | string, body: string, files: File[]) => NoteMutationResult;
   deleteNote?: (noteId: number | string) => NoteMutationResult;
 };
+
+type NoteThread = { root: NoteDTO; replies: NoteDTO[] };
 
 const MERGE_REQUEST_QUICK_ACTIONS: NoteQuickAction[] = [
   { command: "/ready", description: "Marks this merge request as ready." },
@@ -62,6 +67,7 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
     staleTime: 30_000
   });
   const notes = data?.notes ?? [];
+  const noteThreads = groupNoteThreads(notes);
   const userCommentCount = notes.filter((note) => !note.system).length;
   const mergeRequests = mergeRequestQuery.data?.mergeRequests ?? [];
   const selectedMergeRequest = mergeRequests.find((mergeRequest) => mergeRequest.id === selectedMergeRequestId) ?? null;
@@ -289,15 +295,15 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
                       </span>
                     </div>
                     <div className="issue-activity-list" aria-label="Issue activity">
-                      {notes.length > 0 ? (
-                        notes.map((note) => (
+                      {noteThreads.length > 0 ? (
+                        noteThreads.map((thread) => (
                           <ActivityNote
-                            key={note.id}
-                            note={note}
+                            key={thread.root.id}
+                            thread={thread}
                             issue={issue}
-                            activeComposer={inlineComposer?.noteId === note.id ? inlineComposer.mode : null}
-                            onStartReply={() => startInlineComposer(note.id, "reply")}
-                            onStartEdit={() => startInlineComposer(note.id, "edit")}
+                            activeComposer={inlineComposer}
+                            onStartReply={(noteId) => startInlineComposer(noteId, "reply")}
+                            onStartEdit={(noteId) => startInlineComposer(noteId, "edit")}
                             onCancelInline={cancelInlineComposer}
                           />
                         ))
@@ -326,6 +332,7 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
                           queryKey: mergeRequestNotesQueryKey,
                           webUrl: selectedMergeRequest.webUrl,
                           createNote: (body, files) => createMergeRequestNote(issue.id, selectedMergeRequest.iid, body, files),
+                          createReply: (discussionId, body, files) => createMergeRequestNoteReply(issue.id, selectedMergeRequest.iid, discussionId, body, files),
                           updateNote: (noteId, body, files) => updateMergeRequestNote(issue.id, selectedMergeRequest.iid, noteId, body, files),
                           deleteNote: (noteId) => deleteMergeRequestNote(issue.id, selectedMergeRequest.iid, noteId)
                         }
@@ -478,6 +485,7 @@ function MergeRequestDetailPanel({
 }) {
   const queryClient = useQueryClient();
   const notesLoaded = !notesLoading && !notesError;
+  const noteThreads = groupNoteThreads(notes);
   const userCommentCount = notesLoaded ? notes.filter((note) => !note.system).length : mergeRequest?.userNotesCount ?? 0;
 
   async function applyMergeRequestQuickAction(action: NoteQuickAction) {
@@ -551,16 +559,16 @@ function MergeRequestDetailPanel({
             <div className="issue-activity-list" aria-label="Merge request activity">
               {notesError ? (
                 <div className="issue-activity-empty is-error">{notesError}</div>
-              ) : notes.length > 0 ? (
-                notes.map((note) => (
+              ) : noteThreads.length > 0 ? (
+                noteThreads.map((thread) => (
                   <ActivityNote
-                    key={note.id}
-                    note={note}
+                    key={thread.root.id}
+                    thread={thread}
                     issue={issue}
                     noteTarget={noteTarget}
-                    activeComposer={activeComposer?.noteId === note.id ? activeComposer.mode : null}
-                    onStartReply={() => onStartReply(note.id)}
-                    onStartEdit={() => onStartEdit(note.id)}
+                    activeComposer={activeComposer}
+                    onStartReply={(noteId) => onStartReply(noteId)}
+                    onStartEdit={(noteId) => onStartEdit(noteId)}
                     onCancelInline={onCancelInline}
                   />
                 ))
@@ -1138,8 +1146,39 @@ function humanizeStatus(value: string) {
     .replace(/^\w/, (letter) => letter.toUpperCase());
 }
 
+function groupNoteThreads(notes: NoteDTO[]): NoteThread[] {
+  const threads: NoteThread[] = [];
+  const threadByDiscussion = new Map<string, NoteThread>();
+
+  for (const note of notes) {
+    const discussionId = note.discussion_id;
+    const isReply = note.discussion_reply === true;
+
+    if (!discussionId || note.system || !isReply) {
+      const thread = { root: note, replies: [] };
+      threads.push(thread);
+
+      if (discussionId && !note.system) {
+        threadByDiscussion.set(discussionId, thread);
+      }
+
+      continue;
+    }
+
+    const existingThread = threadByDiscussion.get(discussionId);
+
+    if (existingThread) {
+      existingThread.replies.push(note);
+    } else {
+      threads.push({ root: note, replies: [] });
+    }
+  }
+
+  return threads;
+}
+
 function ActivityNote({
-  note,
+  thread,
   issue,
   noteTarget,
   activeComposer,
@@ -1147,14 +1186,15 @@ function ActivityNote({
   onStartEdit,
   onCancelInline
 }: {
-  note: NoteDTO;
+  thread: NoteThread;
   issue: IssueDTO;
   noteTarget?: NoteThreadTarget;
-  activeComposer: "reply" | "edit" | null;
-  onStartReply: () => void;
-  onStartEdit: () => void;
+  activeComposer: InlineComposerState;
+  onStartReply: (noteId: string) => void;
+  onStartEdit: (noteId: string) => void;
   onCancelInline: () => void;
 }) {
+  const { root: note, replies } = thread;
   const authorName = note.author?.name || note.author?.username || "GitLab";
   const authorUsername = note.author?.username ? `@${note.author.username}` : null;
   const avatarUrl = authorAvatarUrl(note.author);
@@ -1162,6 +1202,14 @@ function ActivityNote({
   const createdAt = note.gitlab_created_at;
   const updatedAt = note.gitlab_updated_at;
   const edited = Boolean(createdAt && updatedAt && new Date(updatedAt).getTime() - new Date(createdAt).getTime() > 1000);
+  const [expanded, setExpanded] = useState(false);
+  const rootActiveComposer = activeComposer?.noteId === note.id ? activeComposer.mode : null;
+  const activeReplyComposer = replies.some((reply) => activeComposer?.noteId === reply.id);
+  const showReplies = replies.length > 0 && (expanded || activeReplyComposer || rootActiveComposer === "reply");
+  const replyCreateNote =
+    note.discussion_id && (noteTarget?.createReply || !noteTarget)
+      ? (body: string, files: File[]) => (noteTarget?.createReply ? noteTarget.createReply(note.discussion_id!, body, files) : createIssueNoteReply(issue.id, note.discussion_id!, body, files))
+      : undefined;
 
   if (note.system) {
     return (
@@ -1193,7 +1241,7 @@ function ActivityNote({
   }
 
   return (
-    <article className={`issue-activity-item is-comment${activeComposer ? " has-inline-composer" : ""}`} id={note.note_id ? `note_${note.note_id}` : note.id}>
+    <article className={`issue-activity-item is-comment${rootActiveComposer || activeReplyComposer ? " has-inline-composer" : ""}`} id={note.note_id ? `note_${note.note_id}` : note.id}>
       <div className="issue-activity-avatar" aria-hidden="true">
         {avatarUrl ? <img src={avatarUrl} alt="" /> : <span>{authorInitials(authorName)}</span>}
       </div>
@@ -1233,14 +1281,157 @@ function ActivityNote({
             )}
             {edited && <span className="issue-activity-action">edited</span>}
           </div>
-          <div className={`issue-activity-note-tags${activeComposer ? " is-placeholder" : ""}`}>
+          <div className={`issue-activity-note-tags${rootActiveComposer ? " is-placeholder" : ""}`}>
             {note.internal && <span className="issue-activity-pill">internal</span>}
-            {activeComposer ? (
+            {rootActiveComposer ? (
               <span className="issue-comment-actions-placeholder" aria-hidden="true" />
             ) : (
-              <CommentActions note={note} issue={issue} noteTarget={noteTarget} onStartReply={onStartReply} onStartEdit={onStartEdit} onCancelInline={onCancelInline} />
+              <CommentActions
+                note={note}
+                issue={issue}
+                noteTarget={noteTarget}
+                canReply={Boolean(replyCreateNote)}
+                onStartReply={() => onStartReply(note.id)}
+                onStartEdit={() => onStartEdit(note.id)}
+                onCancelInline={onCancelInline}
+              />
             )}
           </div>
+        </div>
+        {rootActiveComposer === "edit" ? (
+          <div className="issue-activity-inline-composer is-edit">
+            <IssueNoteComposer
+              issueId={issue.id}
+              mode="edit"
+              noteId={note.note_id}
+              initialBody={note.body}
+              autoFocus
+              queryKey={noteTarget?.queryKey}
+              updateNote={noteTarget?.updateNote}
+              createNote={noteTarget?.createNote}
+              onCancel={onCancelInline}
+              onSuccess={onCancelInline}
+            />
+          </div>
+        ) : (
+          <NoteBody body={note.body} issue={issue} />
+        )}
+        {replies.length > 0 && !showReplies && (
+          <ReplySummary replies={replies} onToggle={() => setExpanded(true)} />
+        )}
+        {showReplies && (
+          <div className="issue-activity-replies">
+            <button className="issue-activity-replies-toggle" type="button" onClick={() => setExpanded(false)}>
+              <ChevronDown size={14} />
+              <span>Collapse replies</span>
+            </button>
+            {replies.map((reply) => (
+              <ActivityReply
+                key={reply.id}
+                note={reply}
+                issue={issue}
+                noteTarget={noteTarget}
+                activeComposer={activeComposer?.noteId === reply.id ? activeComposer.mode : null}
+                onStartReply={() => onStartReply(note.id)}
+                onStartEdit={() => onStartEdit(reply.id)}
+                onCancelInline={onCancelInline}
+              />
+            ))}
+          </div>
+        )}
+        {rootActiveComposer === "reply" && replyCreateNote && (
+          <div className="issue-activity-inline-composer is-reply">
+            <IssueNoteComposer
+              issueId={issue.id}
+              mode="reply"
+              autoFocus
+              queryKey={noteTarget?.queryKey}
+              createNote={replyCreateNote}
+              updateNote={noteTarget?.updateNote}
+              onCancel={onCancelInline}
+              onSuccess={onCancelInline}
+            />
+          </div>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function ReplySummary({ replies, onToggle }: { replies: NoteDTO[]; onToggle: () => void }) {
+  const lastReply = replies[replies.length - 1];
+  const authorName = lastReply?.author?.name || lastReply?.author?.username || "GitLab";
+  const avatarUrl = authorAvatarUrl(lastReply?.author ?? null);
+
+  return (
+    <button className="issue-activity-reply-summary" type="button" onClick={onToggle}>
+      <ChevronRight size={14} />
+      {avatarUrl && <img src={avatarUrl} alt="" />}
+      <span className="issue-activity-reply-summary-count">
+        {replies.length} {replies.length === 1 ? "reply" : "replies"}
+      </span>
+      {lastReply && (
+        <span className="issue-activity-reply-summary-meta">
+          Last reply by {authorName}
+          {lastReply.gitlab_created_at ? ` ${formatRelativeDate(lastReply.gitlab_created_at)}` : ""}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function ActivityReply({
+  note,
+  issue,
+  noteTarget,
+  activeComposer,
+  onStartReply,
+  onStartEdit,
+  onCancelInline
+}: {
+  note: NoteDTO;
+  issue: IssueDTO;
+  noteTarget?: NoteThreadTarget;
+  activeComposer: "reply" | "edit" | null;
+  onStartReply: () => void;
+  onStartEdit: () => void;
+  onCancelInline: () => void;
+}) {
+  const authorName = note.author?.name || note.author?.username || "GitLab";
+  const avatarUrl = authorAvatarUrl(note.author);
+  const createdAt = note.gitlab_created_at;
+  const updatedAt = note.gitlab_updated_at;
+  const edited = Boolean(createdAt && updatedAt && new Date(updatedAt).getTime() - new Date(createdAt).getTime() > 1000);
+
+  return (
+    <div className={`issue-activity-reply${activeComposer ? " has-inline-composer" : ""}`} id={note.note_id ? `note_${note.note_id}` : note.id}>
+      <div className="issue-activity-reply-avatar" aria-hidden="true">
+        {avatarUrl ? <img src={avatarUrl} alt="" /> : <span>{authorInitials(authorName)}</span>}
+      </div>
+      <div className="issue-activity-reply-content">
+        <div className="issue-activity-reply-header">
+          <div className="issue-activity-note-meta">
+            <span className="issue-activity-author">{authorName}</span>
+            {createdAt && (
+              <time className="issue-activity-time" dateTime={createdAt} title={formatExactDate(createdAt)}>
+                {formatRelativeDate(createdAt)}
+              </time>
+            )}
+            {edited && <span className="issue-activity-action">edited</span>}
+          </div>
+          {activeComposer ? (
+            <span className="issue-comment-actions-placeholder" aria-hidden="true" />
+          ) : (
+            <CommentActions
+              note={note}
+              issue={issue}
+              noteTarget={noteTarget}
+              showReply={false}
+              onStartReply={onStartReply}
+              onStartEdit={onStartEdit}
+              onCancelInline={onCancelInline}
+            />
+          )}
         </div>
         {activeComposer === "edit" ? (
           <div className="issue-activity-inline-composer is-edit">
@@ -1260,22 +1451,8 @@ function ActivityNote({
         ) : (
           <NoteBody body={note.body} issue={issue} />
         )}
-        {activeComposer === "reply" && (
-          <div className="issue-activity-inline-composer is-reply">
-            <IssueNoteComposer
-              issueId={issue.id}
-              mode="reply"
-              autoFocus
-              queryKey={noteTarget?.queryKey}
-              createNote={noteTarget?.createNote}
-              updateNote={noteTarget?.updateNote}
-              onCancel={onCancelInline}
-              onSuccess={onCancelInline}
-            />
-          </div>
-        )}
       </div>
-    </article>
+    </div>
   );
 }
 
@@ -1283,6 +1460,8 @@ function CommentActions({
   note,
   issue,
   noteTarget,
+  showReply = true,
+  canReply = true,
   onStartReply,
   onStartEdit,
   onCancelInline
@@ -1290,6 +1469,8 @@ function CommentActions({
   note: NoteDTO;
   issue: IssueDTO;
   noteTarget?: NoteThreadTarget;
+  showReply?: boolean;
+  canReply?: boolean;
   onStartReply: () => void;
   onStartEdit: () => void;
   onCancelInline: () => void;
@@ -1298,6 +1479,7 @@ function CommentActions({
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const notesQueryKey = noteTarget?.queryKey ?? ["issue-notes", issue.id];
   const commentUrl = `${noteTarget?.webUrl ?? issue.webUrl}#note_${note.note_id}`;
@@ -1308,6 +1490,7 @@ function CommentActions({
       queryClient.invalidateQueries({ queryKey: ["monitor-state"] });
       onCancelInline();
       setMenuOpen(false);
+      setDeleteDialogOpen(false);
     }
   });
 
@@ -1360,7 +1543,10 @@ function CommentActions({
 
   function deleteComment() {
     setMenuOpen(false);
-    if (!window.confirm("Delete this comment?")) return;
+    setDeleteDialogOpen(true);
+  }
+
+  function confirmDeleteComment() {
     deleteMutation.mutate();
   }
 
@@ -1382,6 +1568,12 @@ function CommentActions({
           </button>
         </div>
       )}
+      <DeleteCommentDialog
+        open={deleteDialogOpen}
+        pending={deleteMutation.isPending}
+        onCancel={() => setDeleteDialogOpen(false)}
+        onConfirm={confirmDeleteComment}
+      />
       {copyState !== "idle" && (
         <span className={`issue-comment-copy-state ${copyState}`} data-comment-menu={note.id} style={menuPosition ? { top: menuPosition.top, left: menuPosition.left } : undefined}>
           {copyState === "copied" ? "Copied" : "Copy failed"}
@@ -1397,9 +1589,18 @@ function CommentActions({
 
   return (
     <div className="issue-comment-actions" data-comment-menu={note.id}>
-      <button className="issue-comment-action-button" type="button" title="Reply to comment" aria-label="Reply to comment" disabled={deleteMutation.isPending} onClick={onStartReply}>
-        <CornerUpLeft size={14} />
-      </button>
+      {showReply && (
+        <button
+          className="issue-comment-action-button"
+          type="button"
+          title={canReply ? "Reply to comment" : "Reply requires a synced GitLab discussion"}
+          aria-label="Reply to comment"
+          disabled={deleteMutation.isPending || !canReply}
+          onClick={onStartReply}
+        >
+          <CornerUpLeft size={14} />
+        </button>
+      )}
       <button className="issue-comment-action-button" type="button" title="Edit comment" aria-label="Edit comment" disabled={deleteMutation.isPending} onClick={onStartEdit}>
         <Pencil size={14} />
       </button>
@@ -1424,6 +1625,45 @@ function CommentActions({
       </button>
       {createPortal(floatingActions, document.body)}
     </div>
+  );
+}
+
+function DeleteCommentDialog({
+  open,
+  pending,
+  onCancel,
+  onConfirm
+}: {
+  open: boolean;
+  pending: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog.Root open={open} onOpenChange={(nextOpen) => !nextOpen && !pending && onCancel()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="confirm-dialog-overlay issue-comment-delete-overlay" />
+        <Dialog.Content className="confirm-dialog-content issue-comment-delete-dialog">
+          <div className="confirm-dialog-body">
+            <Dialog.Close className="issue-comment-delete-close" disabled={pending} aria-label="Close delete confirmation">
+              <X size={16} />
+            </Dialog.Close>
+            <Dialog.Title className="confirm-dialog-title">Delete comment?</Dialog.Title>
+            <Dialog.Description className="confirm-dialog-description">
+              Are you sure you want to delete this comment?
+            </Dialog.Description>
+            <div className="confirm-dialog-actions">
+              <button className="text-button" type="button" disabled={pending} onClick={onCancel}>
+                Cancel
+              </button>
+              <button className="text-button confirm-dialog-danger issue-comment-delete-confirm" type="button" disabled={pending} onClick={onConfirm}>
+                {pending ? "Deleting" : "Delete comment"}
+              </button>
+            </div>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 

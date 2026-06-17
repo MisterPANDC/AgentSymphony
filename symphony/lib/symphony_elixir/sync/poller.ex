@@ -109,11 +109,12 @@ defmodule SymphonyElixir.Sync.Poller do
   end
 
   defp sync_projects(projects) do
-    configured = Enum.filter(projects, &(&1.project_access_token_status == "configured"))
+    configured = Enum.filter(projects, &credential_configured?/1)
 
     if configured == [] do
-      put_error_cursor(@issue_cursor, :project_access_token_missing)
-      {:error, :project_access_token_missing}
+      reason = missing_credential_reason(projects)
+      put_error_cursor(@issue_cursor, reason)
+      {:error, reason}
     else
       results = Enum.map(configured, &sync_project/1)
 
@@ -142,10 +143,10 @@ defmodule SymphonyElixir.Sync.Poller do
   defp sync_project(project) do
     cursor_name = issue_cursor_name(project.id)
 
-    with {:ok, token} <- Store.project_access_token(project.id),
-         {:ok, config} <- Config.from_project_setting(project, token),
+    with {:ok, credential} <- Store.automation_credential(project.id),
+         {:ok, config} <- Config.from_project_setting(project, credential.token),
          :ok <- Client.validate_api_root(config),
-         {:ok, raw_project} <- Client.get_project(config, auth: {:private_token, token}),
+         {:ok, raw_project} <- Client.get_project(config, auth: {:private_token, credential.token}),
          project_setting <- upsert_project(config, raw_project),
          backfilled_issue_count = Store.backfill_issue_project_setting(project_setting),
          {:ok, issues} <- sync_issues(config, project_setting),
@@ -323,11 +324,11 @@ defmodule SymphonyElixir.Sync.Poller do
   def sync_issue_notes(issue_id) when is_binary(issue_id) do
     with %{} = issue <- Store.get_issue(issue_id),
          {:ok, config} <- config_for_issue(issue),
-         {:ok, raw_notes} <- Client.list_issue_notes(config, issue.iid, %{per_page: config.sync_page_size}, auth: {:private_token, config.token}) do
+         {:ok, raw_discussions} <- Client.list_issue_discussions(config, issue.iid, %{per_page: config.sync_page_size}, auth: {:private_token, config.token}) do
       notes =
-        Enum.map(raw_notes, fn raw ->
-          Store.upsert_note(issue_id, NoteMapper.from_gitlab(raw))
-        end)
+        raw_discussions
+        |> Enum.flat_map(&NoteMapper.from_gitlab_discussion/1)
+        |> Enum.map(&Store.upsert_note(issue_id, &1))
 
       put_success_cursor(@notes_cursor, DateTime.utc_now())
       {:ok, notes}
@@ -340,12 +341,26 @@ defmodule SymphonyElixir.Sync.Poller do
   defp config_for_issue(issue) do
     with project_id when is_binary(project_id) <- Map.get(issue, :gitlab_project_setting_id),
          %{} = project <- Store.project_by_id(project_id),
-         {:ok, token} <- Store.project_access_token(project.id) do
-      Config.from_project_setting(project, token)
+         {:ok, credential} <- Store.automation_credential(project.id) do
+      Config.from_project_setting(project, credential.token)
     else
       nil -> {:error, :project_not_found}
       {:error, reason} -> {:error, reason}
-      _ -> {:error, :project_access_token_missing}
+      _ -> {:error, :automation_credential_missing}
+    end
+  end
+
+  defp credential_configured?(%{automation_credential_status: "configured"}), do: true
+  defp credential_configured?(%{automation_credential_mode: "service_account", service_account_token_status: "configured"}), do: true
+  defp credential_configured?(%{automation_credential_mode: "service_account"}), do: false
+  defp credential_configured?(%{project_access_token_status: "configured"}), do: true
+  defp credential_configured?(_project), do: false
+
+  defp missing_credential_reason(projects) do
+    if Enum.any?(projects, &(&1[:automation_credential_mode] == "service_account")) do
+      :service_account_token_missing
+    else
+      :project_access_token_missing
     end
   end
 

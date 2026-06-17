@@ -81,8 +81,48 @@ export function createIssueNote(id: string, body: string, files: File[] = []) {
   });
 }
 
+export function createIssueNoteReply(id: string, discussionId: string, body: string, files: File[] = []) {
+  const path = `/api/issues/${id}/discussions/${encodeURIComponent(discussionId)}/notes`;
+
+  if (files.length > 0) {
+    const form = new FormData();
+    form.set("body", body);
+    files.forEach((file) => form.append("files", file));
+
+    return api<{ notes: NoteDTO[] }>(path, {
+      method: "POST",
+      body: form
+    });
+  }
+
+  return api<{ notes: NoteDTO[] }>(path, {
+    method: "POST",
+    body: JSON.stringify({ body })
+  });
+}
+
 export function createMergeRequestNote(issueId: string, mergeRequestIid: number | string, body: string, files: File[] = []) {
   const path = `/api/issues/${issueId}/merge_requests/${mergeRequestIid}/notes`;
+
+  if (files.length > 0) {
+    const form = new FormData();
+    form.set("body", body);
+    files.forEach((file) => form.append("files", file));
+
+    return api<{ notes: NoteDTO[] }>(path, {
+      method: "POST",
+      body: form
+    });
+  }
+
+  return api<{ notes: NoteDTO[] }>(path, {
+    method: "POST",
+    body: JSON.stringify({ body })
+  });
+}
+
+export function createMergeRequestNoteReply(issueId: string, mergeRequestIid: number | string, discussionId: string, body: string, files: File[] = []) {
+  const path = `/api/issues/${issueId}/merge_requests/${mergeRequestIid}/discussions/${encodeURIComponent(discussionId)}/notes`;
 
   if (files.length > 0) {
     const form = new FormData();

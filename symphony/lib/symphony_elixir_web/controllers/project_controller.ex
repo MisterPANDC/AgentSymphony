@@ -155,7 +155,10 @@ defmodule SymphonyElixirWeb.ProjectController do
       last_activity_at: nil,
       selected: project.id == selected_project_id,
       project_setting_id: project.id,
-      project_access_token_status: project.project_access_token_status || "missing"
+      project_access_token_status: project.project_access_token_status || "missing",
+      service_account_token_status: project.service_account_token_status || "missing",
+      automation_credential_mode: project.automation_credential_mode || "project_access_token",
+      automation_credential_status: project.automation_credential_status || project.project_access_token_status || "missing"
     }
   end
 
@@ -169,7 +172,10 @@ defmodule SymphonyElixirWeb.ProjectController do
       last_activity_at: raw["last_activity_at"],
       selected: stored && stored.id == selected_project_id,
       project_setting_id: stored && stored.id,
-      project_access_token_status: (stored && stored.project_access_token_status) || "missing"
+      project_access_token_status: (stored && stored.project_access_token_status) || "missing",
+      service_account_token_status: (stored && stored.service_account_token_status) || "missing",
+      automation_credential_mode: (stored && stored.automation_credential_mode) || "project_access_token",
+      automation_credential_status: (stored && stored.automation_credential_status) || (stored && stored.project_access_token_status) || "missing"
     }
   end
 

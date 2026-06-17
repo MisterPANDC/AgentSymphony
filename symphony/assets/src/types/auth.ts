@@ -1,3 +1,5 @@
+import type { AutomationCredentialMode, CredentialStatus } from "./gitlab";
+
 export interface AuthUser {
   provider: "gitlab";
   issuer?: string;
@@ -32,7 +34,10 @@ export interface AuthSession {
     name?: string;
     path_with_namespace?: string;
     web_url?: string;
-    project_access_token_status?: "configured" | "missing";
+    automation_credential_mode?: AutomationCredentialMode;
+    automation_credential_status?: CredentialStatus;
+    project_access_token_status?: CredentialStatus;
+    service_account_token_status?: CredentialStatus;
   } | null;
 }
 
@@ -45,5 +50,8 @@ export interface GitLabProject {
   last_activity_at?: string | null;
   selected: boolean;
   project_setting_id?: string | null;
-  project_access_token_status: "configured" | "missing";
+  automation_credential_mode: AutomationCredentialMode;
+  automation_credential_status: CredentialStatus;
+  project_access_token_status: CredentialStatus;
+  service_account_token_status: CredentialStatus;
 }

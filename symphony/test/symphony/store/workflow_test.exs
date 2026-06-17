@@ -251,20 +251,59 @@ defmodule SymphonyElixir.Store.WorkflowTest do
     end
   end
 
-  test "local repo path stays attached to the matching project" do
+  test "local repository path stays attached to the matching project" do
     first = Store.upsert_project(project_attrs(42, "group/project-one", "Project One"))
     assert {:ok, first_with_path} = Store.put_project_local_repo_path(first.id, "/tmp/project-one")
     assert first_with_path.local_repo_path == "/tmp/project-one"
 
     second = Store.upsert_project(project_attrs(43, "group/project-two", "Project Two"))
-    assert is_nil(second[:local_repo_path])
+    assert is_nil(second.local_repo_path)
 
     paths =
       Store.projects()
-      |> Map.new(&{&1.project_id, &1[:local_repo_path]})
+      |> Map.new(&{&1.project_id, &1.local_repo_path})
 
     assert paths[42] == "/tmp/project-one"
     assert is_nil(paths[43])
+
+    assert {:ok, cleared} = Store.put_project_local_repo_path(first.id, "")
+    assert is_nil(cleared.local_repo_path)
+  end
+
+  test "automation credential mode can use a global service account token" do
+    previous_secret = System.get_env("SYMPHONY_TOKEN_ENCRYPTION_SECRET")
+    System.put_env("SYMPHONY_TOKEN_ENCRYPTION_SECRET", "json-store-service-account-test")
+
+    try do
+      first = Store.upsert_project(project_attrs(52, "group/service-one", "Service One"))
+      second = Store.upsert_project(project_attrs(53, "group/service-two", "Service Two"))
+
+      assert {:ok, service_account} =
+               Store.put_service_account_token(first.api_root, "global-service-token", nil, %{
+                 username: "symphony-bot",
+                 gitlab_user_id: 9001
+               })
+
+      assert service_account.service_account_token_status == "configured"
+      assert service_account.username == "symphony-bot"
+
+      assert {:error, :project_access_token_missing} = Store.automation_credential(first.id)
+
+      assert {:ok, first_using_service} = Store.put_project_automation_credential_mode(first.id, "service_account")
+      assert first_using_service.automation_credential_mode == "service_account"
+      assert first_using_service.automation_credential_status == "configured"
+
+      assert {:ok, credential} = Store.automation_credential(first.id)
+      assert credential.mode == "service_account"
+      assert credential.token == "global-service-token"
+
+      second = Store.project_by_id(second.id)
+      assert second.automation_credential_mode == "project_access_token"
+      assert second.service_account_token_status == "configured"
+      assert second.automation_credential_status == "missing"
+    after
+      restore_env("SYMPHONY_TOKEN_ENCRYPTION_SECRET", previous_secret)
+    end
   end
 
   defp seed_issue(iid) do

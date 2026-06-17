@@ -295,11 +295,11 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp gitlab_config_hint do
-    "GitLab project missing. Sign in, choose a repository, then configure its Project Access Token in Symphony settings."
+    "GitLab project missing. Sign in, choose a repository, then configure a Project Access Token or Service Account credential in Symphony settings."
   end
 
   defp gitlab_token_hint do
-    "GitLab Project Access Token missing. Configure the current repository token in Symphony settings."
+    "GitLab automation credential missing. Configure the current repository Project Access Token or switch it to a configured Service Account in Symphony settings."
   end
 
   defp reconcile_running_issues(%State{} = state) do

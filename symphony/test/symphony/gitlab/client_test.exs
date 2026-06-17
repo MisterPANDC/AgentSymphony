@@ -67,6 +67,18 @@ defmodule Symphony.GitLab.ClientTest do
     assert :ok = Client.delete_issue_note(config(), 3, 44)
   end
 
+  test "lists issue discussions and creates discussion replies" do
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: issue_discussion_plug())
+
+    assert {:ok, [discussion]} = Client.list_issue_discussions(config(), 3, per_page: 1)
+    assert discussion["id"] == "discussion/one"
+    assert [%{"body" => "Parent"}] = discussion["notes"]
+
+    assert {:ok, note} = Client.create_issue_discussion_note(config(), 3, "discussion/one", "Thread reply")
+    assert note["id"] == 45
+    assert note["body"] == "Thread reply"
+  end
+
   test "lists, creates, updates, and deletes merge request notes" do
     Application.put_env(:symphony_elixir, :gitlab_req_options, plug: merge_request_note_plug())
 
@@ -82,6 +94,16 @@ defmodule Symphony.GitLab.ClientTest do
     assert note["body"] == "Updated MR note"
 
     assert :ok = Client.delete_merge_request_note(config(), 7, 55)
+  end
+
+  test "lists merge request discussions and creates discussion replies" do
+    Application.put_env(:symphony_elixir, :gitlab_req_options, plug: merge_request_discussion_plug())
+
+    assert {:ok, [discussion]} = Client.list_merge_request_discussions(config(), 7, per_page: 1)
+    assert discussion["id"] == "mr-discussion"
+
+    assert {:ok, note} = Client.create_merge_request_discussion_note(config(), 7, "mr-discussion", "MR reply")
+    assert note["body"] == "MR reply"
   end
 
   test "uploads and downloads project markdown uploads" do
@@ -184,6 +206,29 @@ defmodule Symphony.GitLab.ClientTest do
     end
   end
 
+  defp issue_discussion_plug do
+    fn conn ->
+      assert Plug.Conn.get_req_header(conn, "private-token") == ["test-token"]
+
+      case {conn.method, conn.request_path} do
+        {"GET", "/api/v4/projects/123/issues/3/discussions"} ->
+          Req.Test.json(conn, [
+            %{
+              "id" => "discussion/one",
+              "individual_note" => false,
+              "notes" => [%{"id" => 44, "body" => "Parent"}]
+            }
+          ])
+
+        {"POST", "/api/v4/projects/123/issues/3/discussions/discussion%2Fone/notes"} ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          payload = Jason.decode!(body)
+          assert payload["body"] == "Thread reply"
+          Req.Test.json(conn, %{"id" => 45, "body" => payload["body"]})
+      end
+    end
+  end
+
   defp merge_request_update_plug do
     fn conn ->
       assert conn.method == "PUT"
@@ -257,6 +302,29 @@ defmodule Symphony.GitLab.ClientTest do
 
         {"DELETE", "/api/v4/projects/123/merge_requests/7/notes/55"} ->
           Plug.Conn.send_resp(conn, 204, "")
+      end
+    end
+  end
+
+  defp merge_request_discussion_plug do
+    fn conn ->
+      assert Plug.Conn.get_req_header(conn, "private-token") == ["test-token"]
+
+      case {conn.method, conn.request_path} do
+        {"GET", "/api/v4/projects/123/merge_requests/7/discussions"} ->
+          Req.Test.json(conn, [
+            %{
+              "id" => "mr-discussion",
+              "individual_note" => false,
+              "notes" => [%{"id" => 54, "body" => "MR parent"}]
+            }
+          ])
+
+        {"POST", "/api/v4/projects/123/merge_requests/7/discussions/mr-discussion/notes"} ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          payload = Jason.decode!(body)
+          assert payload["body"] == "MR reply"
+          Req.Test.json(conn, %{"id" => 55, "body" => payload["body"]})
       end
     end
   end

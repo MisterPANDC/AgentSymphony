@@ -8,6 +8,10 @@ defmodule Symphony.GitLab.NoteMapper do
     %{
       id: "gitlab-note-#{raw["id"]}",
       note_id: raw["id"],
+      discussion_id: raw["discussion_id"],
+      discussion_reply: raw["discussion_reply"] == true,
+      discussion_individual_note: raw["discussion_individual_note"] == true,
+      discussion_position: raw["discussion_position"],
       body: raw["body"] || "",
       author: slim_user(raw["author"]),
       system: raw["system"] == true,
@@ -18,6 +22,26 @@ defmodule Symphony.GitLab.NoteMapper do
       raw_gitlab: raw
     }
   end
+
+  @spec from_gitlab_discussion(map()) :: [map()]
+  def from_gitlab_discussion(%{} = discussion) do
+    discussion_id = discussion["id"]
+    individual_note? = discussion["individual_note"] == true
+
+    discussion
+    |> Map.get("notes", [])
+    |> Enum.with_index()
+    |> Enum.map(fn {raw, index} ->
+      raw
+      |> Map.put_new("discussion_id", discussion_id)
+      |> Map.put("discussion_reply", index > 0)
+      |> Map.put("discussion_individual_note", individual_note?)
+      |> Map.put("discussion_position", index)
+      |> from_gitlab()
+    end)
+  end
+
+  def from_gitlab_discussion(_discussion), do: []
 
   defp slim_user(%{} = user) do
     %{

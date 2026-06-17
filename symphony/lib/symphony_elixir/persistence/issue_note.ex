@@ -14,6 +14,10 @@ defmodule SymphonyElixir.Persistence.IssueNote do
     belongs_to(:issue, Issue, foreign_key: :gitlab_issue_id)
 
     field(:note_id, :integer)
+    field(:discussion_id, :string)
+    field(:discussion_reply, :boolean, default: false)
+    field(:discussion_individual_note, :boolean, default: false)
+    field(:discussion_position, :integer)
     field(:body, :string)
     field(:author, :map)
     field(:system, :boolean, default: false)
@@ -26,7 +30,7 @@ defmodule SymphonyElixir.Persistence.IssueNote do
     timestamps(type: :utc_datetime_usec)
   end
 
-  @fields ~w(gitlab_issue_id note_id body author system internal resolvable gitlab_created_at gitlab_updated_at raw_gitlab)a
+  @fields ~w(gitlab_issue_id note_id discussion_id discussion_reply discussion_individual_note discussion_position body author system internal resolvable gitlab_created_at gitlab_updated_at raw_gitlab)a
   @required ~w(gitlab_issue_id note_id body system internal resolvable)a
 
   @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()

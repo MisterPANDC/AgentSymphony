@@ -21,6 +21,7 @@ defmodule SymphonyElixir.Store.Postgres do
   alias SymphonyElixir.Persistence.MergeRequest
   alias SymphonyElixir.Persistence.ProjectSetting
   alias SymphonyElixir.Persistence.RuntimeBlock
+  alias SymphonyElixir.Persistence.ServiceAccountCredential
   alias SymphonyElixir.Persistence.SyncCursor
   alias SymphonyElixir.Persistence.WorkflowState
   alias SymphonyElixir.Repo
@@ -31,6 +32,7 @@ defmodule SymphonyElixir.Store.Postgres do
   @priorities WorkflowState.priorities()
   @block_types RuntimeBlock.block_types()
   @relation_types IssueRelation.relation_types()
+  @credential_modes ~w(project_access_token service_account)
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(_opts \\ []) do
@@ -180,15 +182,6 @@ defmodule SymphonyElixir.Store.Postgres do
 
   defp normalize_access_level(_level), do: nil
 
-  defp normalize_blank(value) when is_binary(value) do
-    case String.trim(value) do
-      "" -> nil
-      trimmed -> trimmed
-    end
-  end
-
-  defp normalize_blank(_value), do: nil
-
   @spec put_project_access_token(String.t(), String.t(), String.t() | nil) :: {:ok, map()} | {:error, term()}
   def put_project_access_token(project_setting_id, token, identity_id \\ nil) do
     with %ProjectSetting{} = project <- Repo.get(ProjectSetting, project_setting_id) || {:error, :project_not_found},
@@ -220,6 +213,93 @@ defmodule SymphonyElixir.Store.Postgres do
   def project_access_token(%ProjectSetting{} = project), do: open_project_access_token(project.encrypted_project_access_token)
   def project_access_token(%{encrypted_project_access_token: encrypted}), do: open_project_access_token(encrypted)
   def project_access_token(_project), do: {:error, :project_access_token_missing}
+
+  @spec put_project_automation_credential_mode(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def put_project_automation_credential_mode(project_setting_id, mode) when mode in @credential_modes do
+    case Repo.get(ProjectSetting, project_setting_id) do
+      nil ->
+        {:error, :project_not_found}
+
+      project ->
+        project =
+          project
+          |> ProjectSetting.changeset(%{automation_credential_mode: mode})
+          |> Repo.update!()
+
+        {:ok, project_public(project)}
+    end
+  end
+
+  def put_project_automation_credential_mode(_project_setting_id, _mode), do: {:error, :invalid_automation_credential_mode}
+
+  @spec put_service_account_token(String.t(), String.t(), String.t() | nil, map()) :: {:ok, map()} | {:error, term()}
+  def put_service_account_token(api_root, token, identity_id \\ nil, attrs \\ %{})
+
+  def put_service_account_token(api_root, token, identity_id, attrs) when is_binary(api_root) and is_binary(token) do
+    with {:ok, encrypted_token} <- TokenVault.seal(token) do
+      attrs =
+        attrs
+        |> atomize_keys()
+        |> Map.merge(%{
+          api_root: api_root,
+          encrypted_service_account_token: encrypted_token,
+          service_account_token_set_by_identity_id: identity_id,
+          service_account_token_set_at: now(),
+          last_validated_at: now(),
+          last_validation_error: nil
+        })
+        |> normalize_service_account_attrs()
+
+      credential =
+        (service_account_credential_schema(api_root) || %ServiceAccountCredential{})
+        |> ServiceAccountCredential.changeset(attrs)
+        |> Repo.insert_or_update!()
+
+      {:ok, service_account_public(credential)}
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def put_service_account_token(_api_root, _token, _identity_id, _attrs), do: {:error, :missing_service_account_token}
+
+  @spec service_account_credential(String.t()) :: map() | nil
+  def service_account_credential(api_root) when is_binary(api_root) do
+    api_root
+    |> service_account_credential_schema()
+    |> maybe_service_account_public()
+  end
+
+  def service_account_credential(_api_root), do: nil
+
+  @spec service_account_token(String.t()) :: {:ok, String.t()} | {:error, term()}
+  def service_account_token(api_root) when is_binary(api_root) do
+    case service_account_credential_schema(api_root) do
+      nil -> {:error, :service_account_token_missing}
+      credential -> open_service_account_token(credential.encrypted_service_account_token)
+    end
+  end
+
+  def service_account_token(_api_root), do: {:error, :service_account_token_missing}
+
+  @spec automation_credential(map() | String.t()) :: {:ok, map()} | {:error, term()}
+  def automation_credential(project_id) when is_binary(project_id) do
+    case Repo.get(ProjectSetting, project_id) do
+      nil -> {:error, :project_not_found}
+      project -> automation_credential(project)
+    end
+  end
+
+  def automation_credential(%ProjectSetting{} = project), do: open_automation_credential(project)
+
+  def automation_credential(%{id: id}) when is_binary(id) do
+    case Repo.get(ProjectSetting, id) do
+      nil -> {:error, :project_not_found}
+      project -> open_automation_credential(project)
+    end
+  end
+
+  def automation_credential(_project), do: {:error, :project_not_found}
 
   @spec put_project_local_repo_path(String.t(), String.t() | nil) :: {:ok, map()} | {:error, term()}
   def put_project_local_repo_path(project_setting_id, local_repo_path) do
@@ -577,6 +657,8 @@ defmodule SymphonyElixir.Store.Postgres do
       |> Map.put_new(:system, false)
       |> Map.put_new(:internal, false)
       |> Map.put_new(:resolvable, false)
+      |> Map.put_new(:discussion_reply, false)
+      |> Map.put_new(:discussion_individual_note, false)
 
     note =
       Repo.one(
@@ -599,7 +681,11 @@ defmodule SymphonyElixir.Store.Postgres do
   def list_notes(issue_id) do
     from(n in IssueNote,
       where: n.gitlab_issue_id == ^issue_id,
-      order_by: [asc: coalesce(n.gitlab_created_at, n.inserted_at)]
+      order_by: [
+        asc: coalesce(n.gitlab_created_at, n.inserted_at),
+        asc: n.discussion_position,
+        asc: n.note_id
+      ]
     )
     |> Repo.all()
     |> Enum.map(&plain/1)
@@ -951,27 +1037,92 @@ defmodule SymphonyElixir.Store.Postgres do
   defp find_project_setting(_attrs), do: Repo.one(from(p in ProjectSetting, order_by: [asc: p.inserted_at], limit: 1))
 
   defp project_public(%ProjectSetting{} = project) do
+    service_account = service_account_credential_schema(project.api_root)
+    mode = credential_mode(project)
+    project_token_status = token_status(project.encrypted_project_access_token)
+    service_account_status = service_account_token_status(service_account)
+
     project
     |> plain()
     |> Map.drop([:encrypted_project_access_token, :project_access_token_set_by_identity_id])
-    |> Map.put(:project_access_token_status, token_status(project.encrypted_project_access_token))
+    |> Map.put(:automation_credential_mode, mode)
+    |> Map.put(:project_access_token_status, project_token_status)
+    |> Map.put(:service_account_token_status, service_account_status)
+    |> Map.put(:automation_credential_status, automation_credential_status(mode, project_token_status, service_account_status))
   end
 
   defp maybe_project_public(nil), do: nil
   defp maybe_project_public(project), do: project_public(project)
 
+  defp service_account_public(%ServiceAccountCredential{} = credential) do
+    credential
+    |> plain()
+    |> Map.drop([:encrypted_service_account_token, :service_account_token_set_by_identity_id])
+    |> Map.put(:service_account_token_status, token_status(credential.encrypted_service_account_token))
+  end
+
+  defp maybe_service_account_public(nil), do: nil
+  defp maybe_service_account_public(credential), do: service_account_public(credential)
+
   defp open_project_access_token(nil), do: {:error, :project_access_token_missing}
 
   defp open_project_access_token(encrypted) do
+    open_encrypted_token(encrypted, :project_access_token_missing)
+  end
+
+  defp open_service_account_token(nil), do: {:error, :service_account_token_missing}
+
+  defp open_service_account_token(encrypted) do
+    open_encrypted_token(encrypted, :service_account_token_missing)
+  end
+
+  defp open_encrypted_token(encrypted, missing_reason) do
     case TokenVault.open(encrypted) do
       {:ok, token} when is_binary(token) and token != "" -> {:ok, token}
-      {:ok, _} -> {:error, :project_access_token_missing}
+      {:ok, _} -> {:error, missing_reason}
       {:error, reason} -> {:error, reason}
     end
   end
 
   defp token_status(value) when is_binary(value) and value != "", do: "configured"
   defp token_status(_value), do: "missing"
+
+  defp service_account_token_status(%ServiceAccountCredential{} = credential), do: token_status(credential.encrypted_service_account_token)
+  defp service_account_token_status(_credential), do: "missing"
+
+  defp automation_credential_status("service_account", _project_status, service_status), do: service_status
+  defp automation_credential_status(_mode, project_status, _service_status), do: project_status
+
+  defp credential_mode(%{automation_credential_mode: mode}) when mode in @credential_modes, do: mode
+  defp credential_mode(_project), do: "project_access_token"
+
+  defp open_automation_credential(%ProjectSetting{} = project) do
+    case credential_mode(project) do
+      "service_account" ->
+        with {:ok, token} <- service_account_token(project.api_root) do
+          {:ok, %{mode: "service_account", token: token, api_root: project.api_root, project_setting_id: project.id}}
+        end
+
+      _ ->
+        with {:ok, token} <- project_access_token(project) do
+          {:ok, %{mode: "project_access_token", token: token, api_root: project.api_root, project_setting_id: project.id}}
+        end
+    end
+  end
+
+  defp service_account_credential_schema(api_root) when is_binary(api_root) do
+    Repo.one(from(c in ServiceAccountCredential, where: c.api_root == ^api_root, limit: 1))
+  end
+
+  defp normalize_service_account_attrs(attrs) do
+    attrs
+    |> Map.update(:gitlab_user_id, nil, &to_string/1)
+    |> Map.update(:scopes, [], &normalize_scopes/1)
+  end
+
+  defp normalize_scopes(scopes) when is_binary(scopes), do: String.split(scopes, ~r/[\s,]+/, trim: true)
+  defp normalize_scopes(scopes) when is_list(scopes), do: Enum.map(scopes, &to_string/1)
+  defp normalize_scopes(_scopes), do: []
 
   defp existing_refresh_token(identity_id) do
     case Repo.one(from(t in GitLabOAuthToken, where: t.identity_id == ^identity_id, limit: 1)) do
@@ -1407,6 +1558,15 @@ defmodule SymphonyElixir.Store.Postgres do
   end
 
   defp parse_int(_value), do: nil
+
+  defp normalize_blank(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp normalize_blank(_value), do: nil
 
   defp atomize_keys(map) when is_map(map) do
     Map.new(map, fn
