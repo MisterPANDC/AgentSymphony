@@ -15,6 +15,7 @@ interface IssueNoteComposerProps {
   createNote?: (body: string, files: File[]) => Promise<{ notes: NoteDTO[] }>;
   updateNote?: (noteId: number | string, body: string, files: File[]) => Promise<{ notes: NoteDTO[] }>;
   quickActions?: NoteQuickAction[];
+  quickActionButtons?: NoteQuickAction[];
   onQuickAction?: (action: NoteQuickAction) => Promise<void>;
   onCancel?: () => void;
   onSuccess?: () => void;
@@ -37,6 +38,7 @@ export function IssueNoteComposer({
   createNote = (body, files) => createIssueNote(issueId, body, files),
   updateNote = (targetNoteId, body, files) => updateIssueNote(issueId, targetNoteId, body, files),
   quickActions = [],
+  quickActionButtons = [],
   onQuickAction,
   onCancel,
   onSuccess
@@ -62,7 +64,8 @@ export function IssueNoteComposer({
   const hasChanges = mode !== "edit" || body !== initialBody || files.length > 0;
   const submitLabel = activeQuickAction ? quickActionSubmitLabel(activeQuickAction) : mode === "edit" ? "Save" : mode === "reply" ? "Reply" : "Comment";
   const pendingLabel = activeQuickAction ? "Applying" : mode === "edit" ? "Saving" : mode === "reply" ? "Replying" : "Posting";
-  const placeholder = mode === "reply" ? "Write a reply..." : "Write a comment...";
+  const placeholder = composerPlaceholder(mode, enabledQuickActions);
+  const visibleQuickActionButtons = mode === "comment" ? quickActionButtons : [];
   const notesQueryKey = queryKey ?? ["issue-notes", issueId];
 
   const mutation = useMutation<ComposerMutationResult>({
@@ -314,6 +317,17 @@ export function IssueNoteComposer({
             {mutation.isPending ? <LoaderCircle className="animate-spin" size={14} /> : mode === "edit" ? <Check size={14} /> : <SendHorizontal size={14} />}
             {mutation.isPending ? pendingLabel : submitLabel}
           </button>
+          {visibleQuickActionButtons.map((action) => (
+            <button
+              key={action.command}
+              className={`text-button issue-note-command-action ${quickActionButtonClass(action)}`}
+              type="button"
+              disabled={mutation.isPending}
+              onClick={() => selectQuickAction(action)}
+            >
+              {quickActionButtonLabel(action)}
+            </button>
+          ))}
         </div>
       </div>
     </form>
@@ -337,6 +351,27 @@ function findExactQuickAction(body: string, quickActions: NoteQuickAction[]) {
 
 function quickActionSubmitLabel(action: NoteQuickAction) {
   return action.command === "/draft" ? "Set draft" : action.command === "/ready" ? "Set ready" : "Apply";
+}
+
+function quickActionButtonLabel(action: NoteQuickAction) {
+  return action.command === "/ready" ? "Ready" : action.command === "/draft" ? "Draft" : action.command.slice(1);
+}
+
+function quickActionButtonClass(action: NoteQuickAction) {
+  return action.command === "/ready" ? "is-ready" : action.command === "/draft" ? "is-draft" : "";
+}
+
+function composerPlaceholder(mode: "comment" | "reply" | "edit", quickActions: NoteQuickAction[]) {
+  const base = mode === "reply" ? "Write a reply..." : "Write a comment...";
+  if (mode !== "comment" || quickActions.length === 0) return base;
+
+  return `${base} Type / for commands like ${quickActionHint(quickActions[0])}.`;
+}
+
+function quickActionHint(action: NoteQuickAction) {
+  if (action.command === "/ready") return "mark as ready";
+  if (action.command === "/draft") return "mark as draft";
+  return action.description.replace(/\.$/, "").toLowerCase();
 }
 
 function quickActionBody(action: NoteQuickAction) {

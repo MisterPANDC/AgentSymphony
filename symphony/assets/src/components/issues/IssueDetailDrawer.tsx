@@ -39,13 +39,14 @@ type NoteThreadTarget = {
 
 type NoteThread = { root: NoteDTO; replies: NoteDTO[] };
 
-const MERGE_REQUEST_QUICK_ACTIONS: NoteQuickAction[] = [
-  { command: "/ready", description: "Marks this merge request as ready." },
-  { command: "/draft", description: "Marks this merge request as draft." }
-];
+const MERGE_REQUEST_READY_ACTION: NoteQuickAction = { command: "/ready", description: "Mark this merge request as ready." };
+const MERGE_REQUEST_DRAFT_ACTION: NoteQuickAction = { command: "/draft", description: "Mark this merge request as draft." };
+const MERGE_REQUEST_QUICK_ACTIONS: NoteQuickAction[] = [MERGE_REQUEST_READY_ACTION, MERGE_REQUEST_DRAFT_ACTION];
 
 export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; onClose: () => void }) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
+  const issuePaneBodyRef = useRef<HTMLDivElement | null>(null);
+  const issueComposerRef = useRef<HTMLDivElement | null>(null);
   const unlockDialogHeightFrameRef = useRef<number | null>(null);
   const [expandedPane, setExpandedPane] = useState<"issue" | "merge-request" | null>(null);
   const [inlineComposer, setInlineComposer] = useState<InlineComposerState>(null);
@@ -54,6 +55,7 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
   const [mergeRequestDescriptionEditing, setMergeRequestDescriptionEditing] = useState(false);
   const [lockedDialogHeight, setLockedDialogHeight] = useState<number | null>(null);
   const [mergeRequestMenuOpen, setMergeRequestMenuOpen] = useState(false);
+  const [issuePaneAtBottom, setIssuePaneAtBottom] = useState(true);
   const [selectedMergeRequestId, setSelectedMergeRequestId] = useState<number | null>(null);
   const { data } = useQuery({
     queryKey: ["issue-notes", issue?.id],
@@ -104,6 +106,11 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
   useEffect(() => {
     return () => clearScheduledDialogHeightUnlock();
   }, []);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(updateIssuePaneScrollState);
+    return () => window.cancelAnimationFrame(frame);
+  }, [issue?.id, notes.length, inlineComposer]);
 
   function clearScheduledDialogHeightUnlock() {
     if (unlockDialogHeightFrameRef.current === null) return;
@@ -212,6 +219,14 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
     setExpandedPane("merge-request");
   }
 
+  function scrollToIssueComposer() {
+    scrollPaneToComposer(issuePaneBodyRef, issueComposerRef);
+  }
+
+  function updateIssuePaneScrollState() {
+    setIssuePaneAtBottom(isPaneScrolledToBottom(issuePaneBodyRef.current));
+  }
+
   return (
     <Dialog.Root
       open={Boolean(issue)}
@@ -235,88 +250,99 @@ export function IssueDetailDrawer({ issue, onClose }: { issue: IssueDTO | null; 
                 Issue details, description, labels, and activity for {issue.identifier}.
               </Dialog.Description>
               <div className="issue-detail-dialog-content">
-                <div className="issue-detail-dialog-body">
-                  <div className="issue-detail-dialog-header">
-                    <div className="min-w-0 flex-1">
-                      <IssueTitleEditor issue={issue} />
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <GitLabMeta issue={issue} showLink={false} />
-                        <StatusSelect issue={issue} />
-                        <MergeRequestSelector
-                          issue={issue}
-                          mergeRequests={mergeRequests}
-                          loading={mergeRequestQuery.isFetching}
-                          error={mergeRequestQuery.isError ? mergeRequestQuery.error.message : null}
-                          open={mergeRequestMenuOpen}
-                          onOpenChange={setMergeRequestMenuOpen}
-                          selectedMergeRequest={selectedMergeRequest}
-                          onSelect={(mergeRequest) => {
-                            setSelectedMergeRequestId(mergeRequest.id);
-                            setMergeRequestMenuOpen(false);
-                          }}
-                        />
-                        <IssueRelationsSummary issue={issue} />
-                        {issue.isBlocked && (
-                          <span className="status-pill blocked">
-                            <StatusIcon status="blocked" size={12} />
-                            blocked
-                          </span>
+                <div className="issue-detail-pane">
+                  <div ref={issuePaneBodyRef} className="issue-detail-dialog-body" onScroll={updateIssuePaneScrollState}>
+                    <div className="issue-detail-dialog-header">
+                      <div className="min-w-0 flex-1">
+                        <IssueTitleEditor issue={issue} />
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <GitLabMeta issue={issue} showLink={false} />
+                          <StatusSelect issue={issue} />
+                          <MergeRequestSelector
+                            issue={issue}
+                            mergeRequests={mergeRequests}
+                            loading={mergeRequestQuery.isFetching}
+                            error={mergeRequestQuery.isError ? mergeRequestQuery.error.message : null}
+                            open={mergeRequestMenuOpen}
+                            onOpenChange={setMergeRequestMenuOpen}
+                            selectedMergeRequest={selectedMergeRequest}
+                            onSelect={(mergeRequest) => {
+                              setSelectedMergeRequestId(mergeRequest.id);
+                              setMergeRequestMenuOpen(false);
+                            }}
+                          />
+                          <IssueRelationsSummary issue={issue} />
+                          {issue.isBlocked && (
+                            <span className="status-pill blocked">
+                              <StatusIcon status="blocked" size={12} />
+                              blocked
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="pane-actions issue-pane-actions" aria-label="Issue pane actions">
+                        <button
+                          className="dialog-close-button"
+                          type="button"
+                          aria-label={expandedPane === "issue" ? "Restore issue pane" : "Expand issue pane"}
+                          title={expandedPane === "issue" ? "Restore issue pane" : "Expand issue pane"}
+                          onClick={toggleIssueExpanded}
+                        >
+                          {expandedPane === "issue" ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                        </button>
+                        <button
+                          className="dialog-close-button"
+                          type="button"
+                          aria-label={selectedMergeRequest ? "Close issue pane" : "Close issue details"}
+                          title={selectedMergeRequest ? "Close issue pane" : "Close issue details"}
+                          onClick={closeIssuePane}
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
+                    </div>
+                    <IssueLabelEditor issue={issue} />
+                    <IssueDescriptionEditor issue={issue} onStartEditing={startDescriptionEditing} onFinishEditing={finishDescriptionEditing} />
+                    <section className="issue-activity-section">
+                      <div className="issue-activity-header">
+                        <h3 className="issue-activity-title">Activity</h3>
+                        <span className="issue-activity-count">
+                          {userCommentCount} {userCommentCount === 1 ? "comment" : "comments"}
+                        </span>
+                      </div>
+                      <div className="issue-activity-list" aria-label="Issue activity">
+                        {noteThreads.length > 0 ? (
+                          noteThreads.map((thread) => (
+                            <ActivityNote
+                              key={thread.root.id}
+                              thread={thread}
+                              issue={issue}
+                              activeComposer={inlineComposer}
+                              onStartReply={(noteId) => startInlineComposer(noteId, "reply")}
+                              onStartEdit={(noteId) => startInlineComposer(noteId, "edit")}
+                              onCancelInline={cancelInlineComposer}
+                            />
+                          ))
+                        ) : (
+                          <div className="issue-activity-empty">No activity yet.</div>
                         )}
                       </div>
-                    </div>
-                    <div className="pane-actions issue-pane-actions" aria-label="Issue pane actions">
-                      <button
-                        className="dialog-close-button"
-                        type="button"
-                        aria-label={expandedPane === "issue" ? "Restore issue pane" : "Expand issue pane"}
-                        title={expandedPane === "issue" ? "Restore issue pane" : "Expand issue pane"}
-                        onClick={toggleIssueExpanded}
-                      >
-                        {expandedPane === "issue" ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-                      </button>
-                      <button
-                        className="dialog-close-button"
-                        type="button"
-                        aria-label={selectedMergeRequest ? "Close issue pane" : "Close issue details"}
-                        title={selectedMergeRequest ? "Close issue pane" : "Close issue details"}
-                        onClick={closeIssuePane}
-                      >
-                        <X size={15} />
-                      </button>
-                    </div>
-                  </div>
-                  <IssueLabelEditor issue={issue} />
-                  <IssueDescriptionEditor issue={issue} onStartEditing={startDescriptionEditing} onFinishEditing={finishDescriptionEditing} />
-                  <section className="issue-activity-section">
-                    <div className="issue-activity-header">
-                      <h3 className="issue-activity-title">Activity</h3>
-                      <span className="issue-activity-count">
-                        {userCommentCount} {userCommentCount === 1 ? "comment" : "comments"}
-                      </span>
-                    </div>
-                    <div className="issue-activity-list" aria-label="Issue activity">
-                      {noteThreads.length > 0 ? (
-                        noteThreads.map((thread) => (
-                          <ActivityNote
-                            key={thread.root.id}
-                            thread={thread}
-                            issue={issue}
-                            activeComposer={inlineComposer}
-                            onStartReply={(noteId) => startInlineComposer(noteId, "reply")}
-                            onStartEdit={(noteId) => startInlineComposer(noteId, "edit")}
-                            onCancelInline={cancelInlineComposer}
-                          />
-                        ))
-                      ) : (
-                        <div className="issue-activity-empty">No activity yet.</div>
+                      {!inlineComposer && (
+                        <div ref={issueComposerRef} className="issue-activity-composer">
+                          <IssueNoteComposer issueId={issue.id} />
+                        </div>
                       )}
-                    </div>
-                    {!inlineComposer && (
-                      <div className="issue-activity-composer">
-                        <IssueNoteComposer issueId={issue.id} />
-                      </div>
-                    )}
-                  </section>
+                    </section>
+                  </div>
+                  <button
+                    className={`issue-scroll-to-composer-button${issuePaneAtBottom ? " is-hidden" : ""}`}
+                    type="button"
+                    aria-label="Scroll to comment composer"
+                    title="Scroll to comment composer"
+                    onClick={scrollToIssueComposer}
+                  >
+                    <ChevronDown size={18} />
+                  </button>
                 </div>
                 <MergeRequestDetailPanel
                   issue={issue}
@@ -484,9 +510,17 @@ function MergeRequestDetailPanel({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const mergeRequestPaneBodyRef = useRef<HTMLDivElement | null>(null);
+  const mergeRequestComposerRef = useRef<HTMLDivElement | null>(null);
+  const [mergeRequestPaneAtBottom, setMergeRequestPaneAtBottom] = useState(true);
   const notesLoaded = !notesLoading && !notesError;
   const noteThreads = groupNoteThreads(notes);
   const userCommentCount = notesLoaded ? notes.filter((note) => !note.system).length : mergeRequest?.userNotesCount ?? 0;
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(updateMergeRequestPaneScrollState);
+    return () => window.cancelAnimationFrame(frame);
+  }, [mergeRequest?.id, notes.length, activeComposer, notesLoading, notesError]);
 
   async function applyMergeRequestQuickAction(action: NoteQuickAction) {
     if (!mergeRequest) throw new Error("Merge request is required");
@@ -507,89 +541,109 @@ function MergeRequestDetailPanel({
     }
   }
 
+  function scrollToMergeRequestComposer() {
+    scrollPaneToComposer(mergeRequestPaneBodyRef, mergeRequestComposerRef);
+  }
+
+  function updateMergeRequestPaneScrollState() {
+    setMergeRequestPaneAtBottom(isPaneScrolledToBottom(mergeRequestPaneBodyRef.current));
+  }
+
   return (
     <aside className={`merge-request-detail-panel${mergeRequest ? " is-visible" : ""}`} aria-hidden={!mergeRequest}>
       {mergeRequest && (
-        <div className="merge-request-detail-body">
-          <div className="merge-request-detail-dialog-header">
-            <div className="min-w-0 flex-1">
-              <MergeRequestTitleEditor issue={issue} mergeRequest={mergeRequest} />
-              <div className="merge-request-header-meta">
-                <MergeRequestGitLabStateBadge mergeRequest={mergeRequest} />
-                <div className="merge-request-branch-strip">
-                  <span className="mono">{mergeRequest.sourceBranch || "source"}</span>
-                  <span aria-hidden="true">-&gt;</span>
-                  <span className="mono">{mergeRequest.targetBranch || "target"}</span>
+        <>
+          <div ref={mergeRequestPaneBodyRef} className="merge-request-detail-body" onScroll={updateMergeRequestPaneScrollState}>
+            <div className="merge-request-detail-dialog-header">
+              <div className="min-w-0 flex-1">
+                <MergeRequestTitleEditor issue={issue} mergeRequest={mergeRequest} />
+                <div className="merge-request-header-meta">
+                  <MergeRequestGitLabStateBadge mergeRequest={mergeRequest} />
+                  <div className="merge-request-branch-strip">
+                    <span className="mono">{mergeRequest.sourceBranch || "source"}</span>
+                    <span aria-hidden="true">-&gt;</span>
+                    <span className="mono">{mergeRequest.targetBranch || "target"}</span>
+                  </div>
+                  <MergeRequestDraftStatusText mergeRequest={mergeRequest} />
                 </div>
-                <MergeRequestDraftStatusText mergeRequest={mergeRequest} />
+              </div>
+              <div className="pane-actions merge-request-pane-actions" aria-label="Merge request pane actions">
+                <button
+                  className="dialog-close-button"
+                  type="button"
+                  aria-label={expanded ? "Restore merge request pane" : "Expand merge request pane"}
+                  title={expanded ? "Restore merge request pane" : "Expand merge request pane"}
+                  onClick={onToggleExpanded}
+                >
+                  {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                </button>
+                <button className="dialog-close-button" type="button" aria-label="Close merge request pane" title="Close merge request pane" onClick={onClose}>
+                  <X size={15} />
+                </button>
               </div>
             </div>
-            <div className="pane-actions merge-request-pane-actions" aria-label="Merge request pane actions">
-              <button
-                className="dialog-close-button"
-                type="button"
-                aria-label={expanded ? "Restore merge request pane" : "Expand merge request pane"}
-                title={expanded ? "Restore merge request pane" : "Expand merge request pane"}
-                onClick={onToggleExpanded}
-              >
-                {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-              </button>
-              <button className="dialog-close-button" type="button" aria-label="Close merge request pane" title="Close merge request pane" onClick={onClose}>
-                <X size={15} />
-              </button>
-            </div>
-          </div>
 
-          <MergeRequestLabelEditor issue={issue} mergeRequest={mergeRequest} />
+            <MergeRequestLabelEditor issue={issue} mergeRequest={mergeRequest} />
 
-          <MergeRequestDescriptionEditor
-            issue={issue}
-            mergeRequest={mergeRequest}
-            onStartEditing={onStartDescriptionEditing}
-            onFinishEditing={onFinishDescriptionEditing}
-          />
+            <MergeRequestDescriptionEditor
+              issue={issue}
+              mergeRequest={mergeRequest}
+              onStartEditing={onStartDescriptionEditing}
+              onFinishEditing={onFinishDescriptionEditing}
+            />
 
-          <section className="issue-activity-section">
-            <div className="issue-activity-header">
-              <h3 className="issue-activity-title">Activity</h3>
-              <span className="issue-activity-count">
-                {userCommentCount} {userCommentCount === 1 ? "comment" : "comments"}
-              </span>
-            </div>
-            <div className="issue-activity-list" aria-label="Merge request activity">
-              {notesError ? (
-                <div className="issue-activity-empty is-error">{notesError}</div>
-              ) : noteThreads.length > 0 ? (
-                noteThreads.map((thread) => (
-                  <ActivityNote
-                    key={thread.root.id}
-                    thread={thread}
-                    issue={issue}
-                    noteTarget={noteTarget}
-                    activeComposer={activeComposer}
-                    onStartReply={(noteId) => onStartReply(noteId)}
-                    onStartEdit={(noteId) => onStartEdit(noteId)}
-                    onCancelInline={onCancelInline}
+            <section className="issue-activity-section">
+              <div className="issue-activity-header">
+                <h3 className="issue-activity-title">Activity</h3>
+                <span className="issue-activity-count">
+                  {userCommentCount} {userCommentCount === 1 ? "comment" : "comments"}
+                </span>
+              </div>
+              <div className="issue-activity-list" aria-label="Merge request activity">
+                {notesError ? (
+                  <div className="issue-activity-empty is-error">{notesError}</div>
+                ) : noteThreads.length > 0 ? (
+                  noteThreads.map((thread) => (
+                    <ActivityNote
+                      key={thread.root.id}
+                      thread={thread}
+                      issue={issue}
+                      noteTarget={noteTarget}
+                      activeComposer={activeComposer}
+                      onStartReply={(noteId) => onStartReply(noteId)}
+                      onStartEdit={(noteId) => onStartEdit(noteId)}
+                      onCancelInline={onCancelInline}
+                    />
+                  ))
+                ) : (
+                  <div className="issue-activity-empty">{notesLoading ? "Loading activity..." : "No activity yet."}</div>
+                )}
+              </div>
+              {!activeComposer && noteTarget && (
+                <div ref={mergeRequestComposerRef} className="issue-activity-composer">
+                  <IssueNoteComposer
+                    issueId={issue.id}
+                    queryKey={noteTarget.queryKey}
+                    createNote={noteTarget.createNote}
+                    updateNote={noteTarget.updateNote}
+                    quickActions={MERGE_REQUEST_QUICK_ACTIONS}
+                    quickActionButtons={mergeRequest.draft ? [MERGE_REQUEST_READY_ACTION] : []}
+                    onQuickAction={applyMergeRequestQuickAction}
                   />
-                ))
-              ) : (
-                <div className="issue-activity-empty">{notesLoading ? "Loading activity..." : "No activity yet."}</div>
+                </div>
               )}
-            </div>
-            {!activeComposer && noteTarget && (
-              <div className="issue-activity-composer">
-                <IssueNoteComposer
-                  issueId={issue.id}
-                  queryKey={noteTarget.queryKey}
-                  createNote={noteTarget.createNote}
-                  updateNote={noteTarget.updateNote}
-                  quickActions={MERGE_REQUEST_QUICK_ACTIONS}
-                  onQuickAction={applyMergeRequestQuickAction}
-                />
-              </div>
-            )}
-          </section>
-        </div>
+            </section>
+          </div>
+          <button
+            className={`issue-scroll-to-composer-button${mergeRequestPaneAtBottom ? " is-hidden" : ""}`}
+            type="button"
+            aria-label="Scroll to comment composer"
+            title="Scroll to comment composer"
+            onClick={scrollToMergeRequestComposer}
+          >
+            <ChevronDown size={18} />
+          </button>
+        </>
       )}
     </aside>
   );
@@ -1175,6 +1229,30 @@ function groupNoteThreads(notes: NoteDTO[]): NoteThread[] {
   }
 
   return threads;
+}
+
+function scrollPaneToComposer(
+  paneRef: { current: HTMLElement | null },
+  composerRef: { current: HTMLElement | null }
+) {
+  const composer = composerRef.current;
+  if (composer) {
+    composer.scrollIntoView({ behavior: "smooth", block: "end" });
+    window.requestAnimationFrame(() => {
+      composer.querySelector<HTMLTextAreaElement>("textarea")?.focus({ preventScroll: true });
+    });
+    return;
+  }
+
+  const pane = paneRef.current;
+  if (pane) {
+    pane.scrollTo({ top: pane.scrollHeight, behavior: "smooth" });
+  }
+}
+
+function isPaneScrolledToBottom(pane: HTMLElement | null) {
+  if (!pane) return true;
+  return pane.scrollHeight - pane.scrollTop - pane.clientHeight <= 12;
 }
 
 function ActivityNote({
