@@ -3,6 +3,7 @@ import { Link, Outlet } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink, KeyRound } from "lucide-react";
 import { getAuthSession } from "../../api/auth";
+import { AiChatFloatingPanel } from "../ai/AiChatFloatingPanel";
 import { projectAccessTokenUrl, serviceAccountCreateUrl } from "../../utils/gitlabLinks";
 import { Sidebar } from "./Sidebar";
 
@@ -57,6 +58,7 @@ export function AppShell() {
           <Outlet />
         </main>
       </section>
+      <AiChatFloatingPanel />
     </div>
   );
 }

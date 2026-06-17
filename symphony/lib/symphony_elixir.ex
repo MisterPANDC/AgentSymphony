@@ -33,6 +33,7 @@ defmodule SymphonyElixir.Application do
         repo_child(),
         SymphonyElixir.Store,
         SymphonyElixir.Sync.Poller,
+        SymphonyElixir.AiChat,
         SymphonyElixir.Orchestrator,
         SymphonyElixir.HttpServer,
         SymphonyElixir.StatusDashboard

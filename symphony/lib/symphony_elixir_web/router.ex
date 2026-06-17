@@ -50,6 +50,14 @@ defmodule SymphonyElixirWeb.Router do
     get("/auth/logout", AuthController, :logout)
   end
 
+  if Mix.env() in [:dev, :test] do
+    scope "/", SymphonyElixirWeb do
+      pipe_through(:browser)
+
+      get("/dev/auth", DevAuthController, :login)
+    end
+  end
+
   scope "/", SymphonyElixirWeb do
     pipe_through(:api_session)
 
@@ -87,6 +95,7 @@ defmodule SymphonyElixirWeb.Router do
 
     get("/api/settings/gitlab", SettingsController, :gitlab)
     get("/api/settings/workflow", SettingsController, :workflow)
+    get("/api/ai_chat", AiChatController, :show)
 
     get("/api/v1/state", ObservabilityApiController, :state)
     get("/api/v1/:issue_identifier", ObservabilityApiController, :issue)
@@ -117,6 +126,9 @@ defmodule SymphonyElixirWeb.Router do
     post("/api/runs/:id/retry", RunController, :retry)
     post("/api/monitor/blocks/:id/resolve", MonitorController, :resolve_block)
     post("/api/monitor/runs/:id/cancel", MonitorController, :cancel_run)
+    post("/api/ai_chat/messages", AiChatController, :create)
+    post("/api/ai_chat/approvals/:id", AiChatController, :approve)
+    post("/api/ai_chat/reset", AiChatController, :reset)
     patch("/api/settings/workflow", SettingsController, :update_workflow)
   end
 
