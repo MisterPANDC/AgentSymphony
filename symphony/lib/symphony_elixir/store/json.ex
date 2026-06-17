@@ -18,6 +18,11 @@ defmodule SymphonyElixir.Store.Json do
   @event_sources ~w(gitlab_sync user_ui agent system)
   @relation_types ~w(relates_to)
   @credential_modes ~w(project_access_token service_account)
+  @registered_agent_providers ~w(codex)
+  @registered_agent_auth_modes ~w(subscription api auth_json)
+  @registered_agent_credential_statuses ~w(pending login_started configured failed)
+  @registered_agent_mcp_install_statuses ~w(pending installing configured failed)
+  @registered_agent_usage_statuses ~w(unknown available unavailable not_applicable)
 
   defstruct [
     :path,
@@ -28,6 +33,8 @@ defmodule SymphonyElixir.Store.Json do
     oauth_tokens: %{},
     service_account_credentials: %{},
     project_memberships: %{},
+    registered_agents: %{},
+    registered_agent_order: [],
     issues: %{},
     issue_order: [],
     issue_by_iid: %{},
@@ -123,6 +130,15 @@ defmodule SymphonyElixir.Store.Json do
   @spec put_project_local_repo_path(String.t(), String.t() | nil) :: {:ok, map()} | {:error, term()}
   def put_project_local_repo_path(project_setting_id, local_repo_path),
     do: call({:put_project_local_repo_path, project_setting_id, local_repo_path})
+
+  @spec list_registered_agents() :: [map()]
+  def list_registered_agents, do: call(:list_registered_agents)
+
+  @spec create_registered_agent(map()) :: {:ok, map()} | {:error, term()}
+  def create_registered_agent(attrs), do: call({:create_registered_agent, attrs})
+
+  @spec update_registered_agent(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def update_registered_agent(agent_id, attrs), do: call({:update_registered_agent, agent_id, attrs})
 
   @spec upsert_issue(map()) :: map()
   def upsert_issue(attrs), do: call({:upsert_issue, attrs})
@@ -498,6 +514,76 @@ defmodule SymphonyElixir.Store.Json do
       end
 
     {:reply, reply, state}
+  end
+
+  def handle_call(:list_registered_agents, _from, state) do
+    agents =
+      state.registered_agent_order
+      |> Enum.map(&Map.get(state.registered_agents, &1))
+      |> Enum.reject(&is_nil/1)
+
+    {:reply, agents, state}
+  end
+
+  def handle_call({:create_registered_agent, attrs}, _from, state) do
+    now = now()
+
+    case normalize_registered_agent(attrs, now) do
+      {:ok, agent} ->
+        if Enum.any?(Map.values(state.registered_agents), &(&1.codex_home == agent.codex_home)) do
+          {:reply, {:error, :codex_home_taken}, state}
+        else
+          state =
+            state
+            |> put_in([Access.key(:registered_agents), agent.id], agent)
+            |> update_in([Access.key(:registered_agent_order)], &(&1 ++ [agent.id]))
+            |> persist()
+
+          {:reply, {:ok, agent}, state}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:update_registered_agent, agent_id, attrs}, _from, state) do
+    case Map.get(state.registered_agents, agent_id) do
+      nil ->
+        {:reply, {:error, :agent_not_found}, state}
+
+      agent ->
+        attrs = Map.new(attrs)
+
+        updated =
+          agent
+          |> Map.merge(%{
+            credential_status: attrs[:credential_status] || attrs["credential_status"] || agent.credential_status,
+            login_started_at: attrs[:login_started_at] || attrs["login_started_at"] || agent.login_started_at,
+            last_login_exit_status: attrs[:last_login_exit_status] || attrs["last_login_exit_status"],
+            last_login_message: attrs[:last_login_message] || attrs["last_login_message"],
+            mcp_install_status: map_value(attrs, :mcp_install_status, agent[:mcp_install_status] || "pending"),
+            mcp_install_started_at: map_value(attrs, :mcp_install_started_at, agent[:mcp_install_started_at]),
+            mcp_install_finished_at: map_value(attrs, :mcp_install_finished_at, agent[:mcp_install_finished_at]),
+            mcp_install_exit_status: map_value(attrs, :mcp_install_exit_status, agent[:mcp_install_exit_status]),
+            mcp_install_message: map_value(attrs, :mcp_install_message, agent[:mcp_install_message]),
+            mcp_server_names: map_value(attrs, :mcp_server_names, agent[:mcp_server_names] || []),
+            usage_status: map_value(attrs, :usage_status, agent[:usage_status] || "unknown"),
+            usage_snapshot: map_value(attrs, :usage_snapshot, agent[:usage_snapshot]),
+            usage_checked_at: map_value(attrs, :usage_checked_at, agent[:usage_checked_at]),
+            usage_error: map_value(attrs, :usage_error, agent[:usage_error]),
+            updated_at: now()
+          })
+
+        if updated.credential_status in @registered_agent_credential_statuses and
+             updated.mcp_install_status in @registered_agent_mcp_install_statuses and
+             updated.usage_status in @registered_agent_usage_statuses do
+          state = put_in(state.registered_agents[agent_id], updated) |> persist()
+          {:reply, {:ok, updated}, state}
+        else
+          {:reply, {:error, :invalid_registered_agent_status}, state}
+        end
+    end
   end
 
   def handle_call({:upsert_issue, attrs}, _from, state) do
@@ -1050,6 +1136,17 @@ defmodule SymphonyElixir.Store.Json do
     |> update_map_values(:service_account_credentials, &hydrate_service_account_credential/1)
     |> update_map_values(:projects, &hydrate_project/1)
     |> update_map_values(:project_memberships, &hydrate_datetime_fields(&1, [:expires_at, :last_checked_at, :inserted_at, :updated_at]))
+    |> update_map_values(
+      :registered_agents,
+      &hydrate_datetime_fields(&1, [
+        :login_started_at,
+        :mcp_install_started_at,
+        :mcp_install_finished_at,
+        :usage_checked_at,
+        :inserted_at,
+        :updated_at
+      ])
+    )
     |> update_map_values(:issues, &hydrate_issue/1)
     |> update_map_values(:workflow_states, &hydrate_workflow_state/1)
     |> update_map_values(:dependencies, &hydrate_datetime_fields(&1, [:inserted_at, :updated_at]))
@@ -1450,6 +1547,59 @@ defmodule SymphonyElixir.Store.Json do
     |> Enum.reverse()
   end
 
+  defp normalize_registered_agent(attrs, now) do
+    attrs = Map.new(attrs)
+    provider = attrs[:provider] || attrs["provider"]
+    auth_mode = attrs[:auth_mode] || attrs["auth_mode"]
+    codex_home = attrs[:codex_home] || attrs["codex_home"]
+
+    cond do
+      provider not in @registered_agent_providers ->
+        {:error, :invalid_provider}
+
+      auth_mode not in @registered_agent_auth_modes ->
+        {:error, :invalid_auth_mode}
+
+      not is_binary(codex_home) or String.trim(codex_home) == "" ->
+        {:error, :codex_home_required}
+
+      (attrs[:usage_status] || attrs["usage_status"] || "unknown") not in @registered_agent_usage_statuses ->
+        {:error, :invalid_usage_status}
+
+      (attrs[:mcp_install_status] || attrs["mcp_install_status"] || "pending") not in @registered_agent_mcp_install_statuses ->
+        {:error, :invalid_mcp_install_status}
+
+      not valid_string_list?(attrs[:mcp_server_names] || attrs["mcp_server_names"] || []) ->
+        {:error, :invalid_mcp_server_names}
+
+      true ->
+        {:ok,
+         %{
+           id: attrs[:id] || attrs["id"] || Ecto.UUID.generate(),
+           provider: provider,
+           name: attrs[:name] || attrs["name"] || "Codex",
+           auth_mode: auth_mode,
+           codex_home: codex_home,
+           credential_status: attrs[:credential_status] || attrs["credential_status"] || "pending",
+           login_started_at: attrs[:login_started_at] || attrs["login_started_at"],
+           last_login_exit_status: attrs[:last_login_exit_status] || attrs["last_login_exit_status"],
+           last_login_message: attrs[:last_login_message] || attrs["last_login_message"],
+           mcp_install_status: attrs[:mcp_install_status] || attrs["mcp_install_status"] || "pending",
+           mcp_install_started_at: attrs[:mcp_install_started_at] || attrs["mcp_install_started_at"],
+           mcp_install_finished_at: attrs[:mcp_install_finished_at] || attrs["mcp_install_finished_at"],
+           mcp_install_exit_status: attrs[:mcp_install_exit_status] || attrs["mcp_install_exit_status"],
+           mcp_install_message: attrs[:mcp_install_message] || attrs["mcp_install_message"],
+           mcp_server_names: attrs[:mcp_server_names] || attrs["mcp_server_names"] || [],
+           usage_status: attrs[:usage_status] || attrs["usage_status"] || "unknown",
+           usage_snapshot: attrs[:usage_snapshot] || attrs["usage_snapshot"],
+           usage_checked_at: attrs[:usage_checked_at] || attrs["usage_checked_at"],
+           usage_error: attrs[:usage_error] || attrs["usage_error"],
+           inserted_at: now,
+           updated_at: now
+         }}
+    end
+  end
+
   defp normalize_run(issue_id, run_number, attrs, now) do
     attrs = Map.new(attrs)
     status = attrs[:status] || "queued"
@@ -1831,6 +1981,7 @@ defmodule SymphonyElixir.Store.Json do
   defp to_snapshot(state) do
     %{
       project: state.project && public_project(state.project, state),
+      registered_agents: Enum.map(state.registered_agent_order, &Map.get(state.registered_agents, &1)) |> Enum.reject(&is_nil/1),
       issues: Enum.map(state.issue_order, &(state.issues |> Map.get(&1) |> maybe_decorate_issue(state))) |> Enum.reject(&is_nil/1),
       cursors: state.cursors,
       runs: Enum.map(state.run_order, &(state.runs |> Map.get(&1) |> maybe_decorate_run(state))) |> Enum.reject(&is_nil/1),
@@ -1882,6 +2033,14 @@ defmodule SymphonyElixir.Store.Json do
     end)
   end
 
+  defp map_value(map, key, default) when is_map(map) and is_atom(key) do
+    cond do
+      Map.has_key?(map, key) -> Map.get(map, key)
+      Map.has_key?(map, Atom.to_string(key)) -> Map.get(map, Atom.to_string(key))
+      true -> default
+    end
+  end
+
   defp sort_notes(notes) do
     Enum.sort_by(notes, fn note ->
       {note_sort_time(Map.get(note, :gitlab_created_at) || Map.get(note, :inserted_at)), Map.get(note, :discussion_position) || 0, Map.get(note, :note_id) || 0}
@@ -1920,6 +2079,8 @@ defmodule SymphonyElixir.Store.Json do
   end
 
   defp parse_int(_value), do: nil
+
+  defp valid_string_list?(values), do: is_list(values) and Enum.all?(values, &is_binary/1)
 
   defp cursor_key(source, cursor_name), do: "#{source}:#{cursor_name}"
 

@@ -20,6 +20,7 @@ defmodule SymphonyElixir.Store.Postgres do
   alias SymphonyElixir.Persistence.IssueRelation
   alias SymphonyElixir.Persistence.MergeRequest
   alias SymphonyElixir.Persistence.ProjectSetting
+  alias SymphonyElixir.Persistence.RegisteredAgent
   alias SymphonyElixir.Persistence.RuntimeBlock
   alias SymphonyElixir.Persistence.ServiceAccountCredential
   alias SymphonyElixir.Persistence.SyncCursor
@@ -310,6 +311,40 @@ defmodule SymphonyElixir.Store.Postgres do
         |> Repo.update!()
 
       {:ok, project_public(project)}
+    end
+  end
+
+  @spec list_registered_agents() :: [map()]
+  def list_registered_agents do
+    RegisteredAgent
+    |> order_by([a], asc: a.inserted_at)
+    |> Repo.all()
+    |> Enum.map(&plain/1)
+  end
+
+  @spec create_registered_agent(map()) :: {:ok, map()} | {:error, term()}
+  def create_registered_agent(attrs) do
+    changeset =
+      %RegisteredAgent{}
+      |> RegisteredAgent.changeset(atomize_keys(attrs))
+
+    case Repo.insert(changeset) do
+      {:ok, agent} -> {:ok, plain(agent)}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  @spec update_registered_agent(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def update_registered_agent(agent_id, attrs) do
+    case Repo.get(RegisteredAgent, agent_id) do
+      nil ->
+        {:error, :agent_not_found}
+
+      agent ->
+        case agent |> RegisteredAgent.changeset(atomize_keys(attrs)) |> Repo.update() do
+          {:ok, agent} -> {:ok, plain(agent)}
+          {:error, changeset} -> {:error, changeset}
+        end
     end
   end
 

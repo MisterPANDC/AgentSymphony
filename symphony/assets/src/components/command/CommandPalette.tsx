@@ -7,8 +7,8 @@ const commands = [
   { label: "Dashboard", description: "Issues and runtime overview", to: "/" },
   { label: "Issues", description: "Issue list and workflow controls", to: "/issues" },
   { label: "Board", description: "Workflow status board", to: "/board" },
-  { label: "Agents", description: "Agent capacity and run history", to: "/agents" },
-  { label: "Runs", description: "Run history", to: "/runs" },
+  { label: "Agents", description: "Registered agent credentials", to: "/agents" },
+  { label: "Runs", description: "Agent capacity and run history", to: "/runs" },
   { label: "Run Monitor", description: "Runtime health and active work", to: "/monitor" },
   { label: "GitLab Settings", description: "GitLab connection settings", to: "/settings/gitlab" },
   { label: "Workflow Settings", description: "Workflow rules and limits", to: "/settings/workflow" }

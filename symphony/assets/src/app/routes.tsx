@@ -4,11 +4,13 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
+  Bot,
   CheckCircle2,
   ExternalLink,
   FolderGit2,
   Globe2,
   KeyRound,
+  Play,
   RefreshCcw,
   Save,
   Search,
@@ -27,6 +29,7 @@ import {
   updateServiceAccountToken
 } from "../api/settings";
 import { refreshSync } from "../api/sync";
+import { dispatchAgents } from "../api/agents";
 import { listRuns } from "../api/runs";
 import { getMonitorState } from "../api/monitor";
 import type { AutomationCredentialMode, CredentialStatus, GitLabSettingsDTO } from "../types/gitlab";
@@ -99,8 +102,38 @@ function Metric({ label, value }: { label: string; value: number }) {
 }
 
 function RunsPage() {
-  const { data } = useQuery({ queryKey: ["runs"], queryFn: listRuns });
-  return <RunTimeline runs={data?.runs ?? []} />;
+  const queryClient = useQueryClient();
+  const monitor = useQuery({ queryKey: ["monitor-state"], queryFn: getMonitorState });
+  const runs = useQuery({ queryKey: ["runs"], queryFn: listRuns });
+  const dispatch = useMutation({
+    mutationFn: dispatchAgents,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["monitor-state"] })
+  });
+
+  return (
+    <div className="space-y-4">
+      <section className="panel">
+        <div className="panel-header">
+          <h1 className="flex items-center gap-2 text-sm font-semibold"><Bot size={15} /> Runs</h1>
+          <button className="text-button" onClick={() => dispatch.mutate()}><Play size={14} /> Dispatch</button>
+        </div>
+        <div className="metric-grid metric-grid-four">
+          {[
+            ["Max", monitor.data?.agents.maxConcurrent ?? 0],
+            ["Queued", monitor.data?.agents.queued ?? 0],
+            ["Running", monitor.data?.agents.running ?? 0],
+            ["Blocked", monitor.data?.agents.blocked ?? 0]
+          ].map(([label, value]) => (
+            <div key={label} className="metric-cell">
+              <div className="metric-label">{label}</div>
+              <div className="metric-value">{value}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+      <RunTimeline runs={runs.data?.runs ?? []} />
+    </div>
+  );
 }
 
 function LocalRepositorySettings({ project, onSaved }: { project: GitLabSettingsDTO["project"]; onSaved: () => void }) {

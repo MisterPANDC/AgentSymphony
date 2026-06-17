@@ -62,6 +62,7 @@ cp .env.example .env.local
 SYMPHONY_BIND_HOST=127.0.0.1
 SYMPHONY_PORT=4000
 SYMPHONY_PUBLIC_URL=http://127.0.0.1:4000
+SYMPHONY_HOME=~/.symphony
 SYMPHONY_SESSION_SECRET=replace-with-a-stable-random-secret-at-least-64-bytes
 SYMPHONY_TOKEN_ENCRYPTION_SECRET=replace-with-a-stable-random-secret
 
@@ -71,6 +72,8 @@ GITLAB_OIDC_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 GITLAB_OIDC_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 SYMPHONY_DATABASE_URL=postgres://postgres:postgres@localhost:5432/symphony_dev
 ```
+
+`SYMPHONY_HOME` 默认是 `~/.symphony`。Agent 注册时会在该目录下创建独立的 agent home，例如 `~/.symphony/agent_homes/codex/codex-xxxxxxxx`；Codex 的 `auth.json` 和后续 MCP 配置会放在对应 agent home 内。
 
 在自建 GitLab 创建 OAuth application，redirect URI 填：
 

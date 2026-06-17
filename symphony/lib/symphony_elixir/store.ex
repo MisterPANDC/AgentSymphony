@@ -102,6 +102,15 @@ defmodule SymphonyElixir.Store do
   def put_project_local_repo_path(project_setting_id, local_repo_path),
     do: backend().put_project_local_repo_path(project_setting_id, local_repo_path)
 
+  @spec list_registered_agents() :: [map()]
+  def list_registered_agents, do: backend().list_registered_agents()
+
+  @spec create_registered_agent(map()) :: {:ok, map()} | {:error, term()}
+  def create_registered_agent(attrs), do: backend().create_registered_agent(attrs)
+
+  @spec update_registered_agent(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def update_registered_agent(agent_id, attrs), do: backend().update_registered_agent(agent_id, attrs)
+
   @spec upsert_issue(map()) :: map()
   def upsert_issue(attrs), do: backend().upsert_issue(attrs)
 
