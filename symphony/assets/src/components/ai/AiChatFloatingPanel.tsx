@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bot,
   ArrowUp,
+  Brain,
   Check,
   ChevronDown,
   Code2,
@@ -30,6 +31,9 @@ import { CodexMessageRenderer } from "./CodexMessageRenderer";
 type ChatMessage =
   | { id: string; role: "user"; text: string; insertedAt: string }
   | { id: string; role: "assistant"; parts: CodexRenderPart[]; status: string };
+
+type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh";
+type ReasoningEffortChoice = "default" | CodexReasoningEffort;
 
 const codexEventTypes = new Set([
   "session_started",
@@ -105,6 +109,12 @@ interface SuggestionPrompt {
   prompt: string;
 }
 
+interface SummaryPrompt {
+  id: string;
+  label: string;
+  prompt: string;
+}
+
 interface TrashPreviewEntry {
   id: string;
   title: string;
@@ -116,8 +126,17 @@ interface TrashPreviewEntry {
 
 const suggestionStorageKey = "symphony.aiChat.suggestions";
 const legacySuggestionStorageKey = "symphony.aiChat.customSuggestions";
+const summaryPromptStorageKey = "symphony.aiChat.summaryPrompts";
 const selectedAgentStorageKey = "symphony.aiChat.selectedAgentId";
+const reasoningEffortStorageKey = "symphony.aiChat.reasoningEffortByAgent";
 const suggestionIconIds: SuggestionIconId[] = ["sparkles", "code", "branch", "wand", "message", "bot"];
+const reasoningEffortOptions: Array<{ id: ReasoningEffortChoice; label: string }> = [
+  { id: "default", label: "Default" },
+  { id: "low", label: "Low" },
+  { id: "medium", label: "Medium" },
+  { id: "high", label: "High" },
+  { id: "xhigh", label: "XHigh" }
+];
 
 const suggestionIcons: Record<SuggestionIconId, LucideIcon> = {
   sparkles: Sparkles,
@@ -142,6 +161,12 @@ const seededSuggestionPrompts: SuggestionPrompt[] = [
   { id: "risky-code", label: "Find risky code paths", icon: "code", prompt: "Review the current codebase for likely bugs or risky implementation details." },
   { id: "next-change", label: "Plan next change", icon: "branch", prompt: "Help me plan the next implementation step for this project." },
   { id: "improve-ux", label: "Improve UX", icon: "wand", prompt: "Suggest focused UI/UX improvements that fit Symphony's current design language." }
+];
+
+const seededSummaryPrompts: SummaryPrompt[] = [
+  { id: "brief", label: "Brief summary", prompt: "Summarize the conversation in a concise paragraph." },
+  { id: "handoff", label: "Handoff notes", prompt: "Summarize decisions, open questions, and the next practical steps." },
+  { id: "risks", label: "Risks only", prompt: "Summarize only the risks, blockers, and unresolved assumptions." }
 ];
 
 function AiChatFabMark() {
@@ -173,6 +198,20 @@ function readSelectedAgentId() {
     return window.localStorage.getItem(selectedAgentStorageKey);
   } catch {
     return null;
+  }
+}
+
+function readReasoningEffortsByAgent() {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(reasoningEffortStorageKey) ?? "{}");
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(
+      Object.entries(value).filter((entry): entry is [string, ReasoningEffortChoice] =>
+        typeof entry[0] === "string" && reasoningEffortOptions.some((option) => option.id === entry[1])
+      )
+    );
+  } catch {
+    return {};
   }
 }
 
@@ -209,6 +248,35 @@ const readSuggestionPrompts = (): SuggestionPrompt[] => {
   } catch {
     return seededSuggestionPrompts;
   }
+};
+
+const parseSummaryPrompts = (value: unknown): SummaryPrompt[] => {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((item, index) => {
+    if (!item || typeof item !== "object") return [];
+
+    const record = item as Record<string, unknown>;
+    const label = typeof record.label === "string" ? record.label.trim() : "";
+    const prompt = typeof record.prompt === "string" ? record.prompt.trim() : "";
+    const id = typeof record.id === "string" && record.id.trim() ? record.id : `summary-${index}`;
+
+    if (!label || !prompt) return [];
+    return [{ id, label, prompt }];
+  });
+};
+
+const readSummaryPrompts = (): SummaryPrompt[] => {
+  if (typeof window === "undefined") return seededSummaryPrompts;
+
+  try {
+    const storedPrompts = window.localStorage.getItem(summaryPromptStorageKey);
+    if (storedPrompts !== null) return parseSummaryPrompts(JSON.parse(storedPrompts));
+  } catch {
+    // localStorage can be unavailable in restricted browser modes; fall back to defaults.
+  }
+
+  return seededSummaryPrompts;
 };
 
 const compactChatText = (text: string, fallback: string, maxLength: number) => {
@@ -260,25 +328,64 @@ function buildMessages(events: AiChatEventDTO[], status: string): ChatMessage[] 
   return messages;
 }
 
+const chatMessageToMarkdown = (message: ChatMessage) => {
+  if (message.role === "user") return `## User\n\n${message.text.trim() || "_No content_"}`;
+
+  const assistantText = partsToCopyText(message.parts).trim() || message.status;
+  return `## Assistant\n\n${assistantText || "_No content_"}`;
+};
+
+const chatMessagesToMarkdown = (messages: readonly ChatMessage[]) =>
+  ["# AI Chat Transcript", ...messages.map(chatMessageToMarkdown)].join("\n\n");
+
+async function writeClipboardText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+
+  if (!copied) throw new Error("Copy failed");
+}
+
 export function AiChatFloatingPanel() {
   const [open, setOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [suggestions, setSuggestions] = useState<SuggestionPrompt[]>(readSuggestionPrompts);
+  const [summaryPrompts, setSummaryPrompts] = useState<SummaryPrompt[]>(readSummaryPrompts);
   const [trashOpen, setTrashOpen] = useState(false);
   const [selectedTrashPreviewId, setSelectedTrashPreviewId] = useState<string | null>(null);
   const [suggestionEditorOpen, setSuggestionEditorOpen] = useState(false);
+  const [summaryPromptEditorOpen, setSummaryPromptEditorOpen] = useState(false);
   const [editingSuggestionId, setEditingSuggestionId] = useState<string | null>(null);
+  const [copyPanelOpen, setCopyPanelOpen] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<"copied" | "failed">("copied");
+  const [selectedSummaryPromptId, setSelectedSummaryPromptId] = useState("none");
+  const [summaryAgentId, setSummaryAgentId] = useState<string | null>(readSelectedAgentId);
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
+  const [effortMenuOpen, setEffortMenuOpen] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(readSelectedAgentId);
+  const [reasoningEffortsByAgent, setReasoningEffortsByAgent] = useState<Record<string, ReasoningEffortChoice>>(readReasoningEffortsByAgent);
   const [suggestionDraft, setSuggestionDraft] = useState<{ label: string; prompt: string; icon: SuggestionIconId }>({
     label: "",
     prompt: "",
     icon: "sparkles"
   });
+  const [summaryDraft, setSummaryDraft] = useState({ label: "", prompt: "" });
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
-  const agentSelectorRef = useRef<HTMLDivElement | null>(null);
+  const composerControlsRef = useRef<HTMLDivElement | null>(null);
+  const copyMenuRef = useRef<HTMLDivElement | null>(null);
   const queryClient = useQueryClient();
   const chat = useQuery({
     queryKey: ["ai-chat"],
@@ -312,6 +419,11 @@ export function AiChatFloatingPanel() {
   const chatData = chat.data?.chat;
   const registeredAgents = useMemo(() => agents.data?.agents ?? [], [agents.data?.agents]);
   const selectedAgent = registeredAgents.find((agent) => agent.id === selectedAgentId) ?? registeredAgents[0] ?? null;
+  const summaryAgent = registeredAgents.find((agent) => agent.id === summaryAgentId) ?? selectedAgent ?? registeredAgents[0] ?? null;
+  const selectedSummaryPrompt = summaryPrompts.find((prompt) => prompt.id === selectedSummaryPromptId) ?? null;
+  const selectedReasoningEffort = selectedAgent ? reasoningEffortsByAgent[selectedAgent.id] ?? "default" : "default";
+  const selectedSummaryReasoningEffort = summaryAgent ? reasoningEffortsByAgent[summaryAgent.id] ?? "default" : "default";
+  const selectedReasoningEffortOption = reasoningEffortOptions.find((option) => option.id === selectedReasoningEffort) ?? reasoningEffortOptions[0];
   const canUseChat = Boolean(selectedAgent);
   const messages = useMemo(() => buildMessages(chatData?.events ?? [], chatData?.status ?? "idle"), [chatData?.events, chatData?.status]);
   const isRunning = chatData?.status === "running";
@@ -366,9 +478,22 @@ export function AiChatFloatingPanel() {
   }, [suggestions]);
 
   useEffect(() => {
+    try {
+      window.localStorage.setItem(summaryPromptStorageKey, JSON.stringify(summaryPrompts));
+    } catch {
+      // localStorage can be unavailable in restricted browser modes; keep the in-memory state working.
+    }
+  }, [summaryPrompts]);
+
+  useEffect(() => {
     if (selectedAgentId && registeredAgents.some((agent) => agent.id === selectedAgentId)) return;
     setSelectedAgentId(registeredAgents[0]?.id ?? null);
   }, [registeredAgents, selectedAgentId]);
+
+  useEffect(() => {
+    if (summaryAgentId && registeredAgents.some((agent) => agent.id === summaryAgentId)) return;
+    setSummaryAgentId(selectedAgent?.id ?? registeredAgents[0]?.id ?? null);
+  }, [registeredAgents, selectedAgent?.id, summaryAgentId]);
 
   useEffect(() => {
     try {
@@ -383,16 +508,37 @@ export function AiChatFloatingPanel() {
   }, [selectedAgentId]);
 
   useEffect(() => {
-    if (!agentMenuOpen) return;
+    try {
+      window.localStorage.setItem(reasoningEffortStorageKey, JSON.stringify(reasoningEffortsByAgent));
+    } catch {
+      // localStorage can be unavailable in restricted browser modes; keep the in-memory state working.
+    }
+  }, [reasoningEffortsByAgent]);
+
+  useEffect(() => {
+    if (!agentMenuOpen && !effortMenuOpen) return;
 
     function onPointerDown(event: PointerEvent) {
-      if (event.target instanceof Node && agentSelectorRef.current?.contains(event.target)) return;
+      if (event.target instanceof Node && composerControlsRef.current?.contains(event.target)) return;
       setAgentMenuOpen(false);
+      setEffortMenuOpen(false);
     }
 
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [agentMenuOpen]);
+  }, [agentMenuOpen, effortMenuOpen]);
+
+  useEffect(() => {
+    if (!copyPanelOpen) return;
+
+    function onPointerDown(event: PointerEvent) {
+      if (event.target instanceof Node && copyMenuRef.current?.contains(event.target)) return;
+      setCopyPanelOpen(false);
+    }
+
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [copyPanelOpen]);
 
   useEffect(() => {
     if (!trashOpen) return;
@@ -417,14 +563,22 @@ export function AiChatFloatingPanel() {
   }, []);
 
   useEffect(() => {
-    if (!open || trashOpen || suggestionEditorOpen) return;
+    if (!open || trashOpen || suggestionEditorOpen || summaryPromptEditorOpen) return;
 
     function onKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key !== "Escape") return;
 
       event.preventDefault();
+      if (copyPanelOpen) {
+        setCopyPanelOpen(false);
+        return;
+      }
       if (agentMenuOpen) {
         setAgentMenuOpen(false);
+        return;
+      }
+      if (effortMenuOpen) {
+        setEffortMenuOpen(false);
         return;
       }
 
@@ -433,7 +587,7 @@ export function AiChatFloatingPanel() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [agentMenuOpen, open, suggestionEditorOpen, trashOpen]);
+  }, [agentMenuOpen, copyPanelOpen, effortMenuOpen, open, suggestionEditorOpen, summaryPromptEditorOpen, trashOpen]);
 
   useEffect(() => {
     if (!open || chat.isLoading || chat.isError || sendMutation.isPending || isRunning) return;
@@ -448,7 +602,14 @@ export function AiChatFloatingPanel() {
   const sendText = (text: string) => {
     const message = text.trim();
     if (!message || !canUseChat || sendMutation.isPending || isRunning) return;
-    sendMutation.mutate(message);
+    sendMutation.mutate({
+      message,
+      agentOptions: {
+        agentId: selectedAgent?.id,
+        provider: selectedAgent?.provider,
+        codex: selectedReasoningEffort === "default" ? undefined : { effort: selectedReasoningEffort }
+      }
+    });
   };
 
   const submit = (event: FormEvent) => {
@@ -466,6 +627,13 @@ export function AiChatFloatingPanel() {
   const chooseAgent = (agentId: string) => {
     setSelectedAgentId(agentId);
     setAgentMenuOpen(false);
+    window.requestAnimationFrame(() => composerInputRef.current?.focus({ preventScroll: true }));
+  };
+
+  const chooseReasoningEffort = (effort: ReasoningEffortChoice) => {
+    if (!selectedAgent) return;
+    setReasoningEffortsByAgent((current) => ({ ...current, [selectedAgent.id]: effort }));
+    setEffortMenuOpen(false);
     window.requestAnimationFrame(() => composerInputRef.current?.focus({ preventScroll: true }));
   };
 
@@ -535,6 +703,36 @@ export function AiChatFloatingPanel() {
     if (editingSuggestionId === suggestionId) closeSuggestionEditor();
   };
 
+  const openSummaryPromptEditor = () => {
+    setSummaryDraft({ label: "", prompt: "" });
+    setSummaryPromptEditorOpen(true);
+    setCopyPanelOpen(false);
+  };
+
+  const closeSummaryPromptEditor = () => {
+    setSummaryPromptEditorOpen(false);
+    setSummaryDraft({ label: "", prompt: "" });
+  };
+
+  const saveSummaryPrompt = (event: FormEvent) => {
+    event.preventDefault();
+
+    const label = summaryDraft.label.trim();
+    const prompt = summaryDraft.prompt.trim();
+    if (!label || !prompt) return;
+
+    setSummaryPrompts((currentPrompts) => [
+      ...currentPrompts,
+      {
+        id: `summary-${Date.now().toString(36)}-${currentPrompts.length}`,
+        label,
+        prompt
+      }
+    ]);
+    closeSummaryPromptEditor();
+    setCopyPanelOpen(true);
+  };
+
   const trashPreviewTranscript = (entry: TrashPreviewEntry) =>
     entry.messages
       .map((message) => {
@@ -548,9 +746,29 @@ export function AiChatFloatingPanel() {
     void navigator.clipboard.writeText(trashPreviewTranscript(entry));
   };
 
-  const copyLastAssistant = () => {
-    const assistant = [...messages].reverse().find((message): message is Extract<ChatMessage, { role: "assistant" }> => message.role === "assistant");
-    if (assistant) void navigator.clipboard.writeText(partsToCopyText(assistant.parts));
+  const copyTranscript = async () => {
+    try {
+      await writeClipboardText(chatMessagesToMarkdown(messages));
+      setCopyStatus("copied");
+      setSelectedSummaryPromptId("none");
+    } catch {
+      setCopyStatus("failed");
+    }
+    setCopyPanelOpen(true);
+  };
+
+  const summarizeCopiedTranscript = () => {
+    if (!selectedSummaryPrompt || !summaryAgent || sendMutation.isPending || isRunning) return;
+
+    sendMutation.mutate({
+      message: `${selectedSummaryPrompt.prompt}\n\n${chatMessagesToMarkdown(messages)}`,
+      agentOptions: {
+        agentId: summaryAgent.id,
+        provider: summaryAgent.provider,
+        codex: selectedSummaryReasoningEffort === "default" ? undefined : { effort: selectedSummaryReasoningEffort }
+      }
+    });
+    setCopyPanelOpen(false);
   };
 
   const composer = (variant: "hero" | "dock") => (
@@ -565,40 +783,83 @@ export function AiChatFloatingPanel() {
         onKeyDown={handleComposerKeyDown}
       />
       <div className="ai-chat-composer-footer">
-        <div className="ai-chat-agent-selector" ref={agentSelectorRef}>
-          <button
-            className={`ai-chat-agent-trigger${agentMenuOpen ? " open" : ""}`}
-            type="button"
-            aria-expanded={agentMenuOpen}
-            aria-haspopup="listbox"
-            disabled={registeredAgents.length === 0 || sendMutation.isPending || isRunning}
-            onClick={() => setAgentMenuOpen((value) => !value)}
-          >
-            {selectedAgent ? <AgentProviderMark agent={selectedAgent} size={16} /> : null}
-            <span>{selectedAgent?.name ?? (agents.isLoading ? "Loading agents" : "No agent")}</span>
-            {registeredAgents.length > 0 ? <ChevronDown size={15} /> : null}
-          </button>
-          {agentMenuOpen && registeredAgents.length > 0 ? (
-            <div className="ai-chat-agent-menu" role="listbox" aria-label="Choose agent">
-              {registeredAgents.map((agent) => {
-                const selected = agent.id === selectedAgent?.id;
-                return (
-                  <button
-                    key={agent.id}
-                    className={`ai-chat-agent-option${selected ? " selected" : ""}`}
-                    type="button"
-                    role="option"
-                    aria-selected={selected}
-                    onClick={() => chooseAgent(agent.id)}
-                  >
-                    <AgentProviderMark agent={agent} size={17} />
-                    <span>{agent.name}</span>
-                    {selected ? <Check size={17} /> : null}
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
+        <div className="ai-chat-composer-controls" ref={composerControlsRef}>
+          <div className="ai-chat-agent-selector">
+            <button
+              className={`ai-chat-agent-trigger${agentMenuOpen ? " open" : ""}`}
+              type="button"
+              aria-expanded={agentMenuOpen}
+              aria-haspopup="listbox"
+              disabled={registeredAgents.length === 0 || sendMutation.isPending || isRunning}
+              onClick={() => {
+                setAgentMenuOpen((value) => !value);
+                setEffortMenuOpen(false);
+              }}
+            >
+              {selectedAgent ? <AgentProviderMark agent={selectedAgent} size={16} /> : null}
+              <span>{selectedAgent?.name ?? (agents.isLoading ? "Loading agents" : "No agent")}</span>
+              {registeredAgents.length > 0 ? <ChevronDown size={15} /> : null}
+            </button>
+            {agentMenuOpen && registeredAgents.length > 0 ? (
+              <div className="ai-chat-agent-menu" role="listbox" aria-label="Choose agent">
+                {registeredAgents.map((agent) => {
+                  const selected = agent.id === selectedAgent?.id;
+                  return (
+                    <button
+                      key={agent.id}
+                      className={`ai-chat-agent-option${selected ? " selected" : ""}`}
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      onClick={() => chooseAgent(agent.id)}
+                    >
+                      <AgentProviderMark agent={agent} size={17} />
+                      <span>{agent.name}</span>
+                      {selected ? <Check size={17} /> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+          <div className="ai-chat-effort-selector">
+            <button
+              className={`ai-chat-effort-trigger${effortMenuOpen ? " open" : ""}`}
+              type="button"
+              aria-label="Choose reasoning effort"
+              aria-expanded={effortMenuOpen}
+              aria-haspopup="listbox"
+              disabled={!selectedAgent || sendMutation.isPending || isRunning}
+              onClick={() => {
+                setEffortMenuOpen((value) => !value);
+                setAgentMenuOpen(false);
+              }}
+            >
+              <Brain size={15} />
+              <span>{selectedReasoningEffortOption.label}</span>
+              <ChevronDown size={15} />
+            </button>
+            {effortMenuOpen && selectedAgent ? (
+              <div className="ai-chat-effort-menu" role="listbox" aria-label="Choose reasoning effort">
+                {reasoningEffortOptions.map((option) => {
+                  const selected = option.id === selectedReasoningEffort;
+                  return (
+                    <button
+                      key={option.id}
+                      className={`ai-chat-effort-option${selected ? " selected" : ""}`}
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      onClick={() => chooseReasoningEffort(option.id)}
+                    >
+                      <span>{option.label}</span>
+                      {selected ? <Check size={17} /> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
         </div>
         <button type="submit" disabled={!draft.trim() || !canUseChat || sendMutation.isPending || isRunning} aria-label="Send message">
           {sendMutation.isPending ? <RefreshCcw size={16} /> : <ArrowUp size={17} />}
@@ -693,9 +954,76 @@ export function AiChatFloatingPanel() {
               </div>
             </div>
             <div className="ai-chat-actions">
-              <button type="button" title="Copy latest assistant message" onClick={copyLastAssistant} disabled={!messages.some((message) => message.role === "assistant")}>
-                <Copy size={15} />
-              </button>
+              <div className="ai-chat-copy-menu" ref={copyMenuRef}>
+                <button type="button" title="Copy conversation as Markdown" onClick={() => void copyTranscript()} disabled={!hasMessages}>
+                  <Copy size={15} />
+                </button>
+                {copyPanelOpen ? (
+                  <div className="ai-chat-copy-panel" role="dialog" aria-label="Copy options">
+                    <strong className={`ai-chat-copy-state ${copyStatus}`}>
+                      {copyStatus === "copied" ? "Copied to Clipboard" : "Copy failed"}
+                    </strong>
+                    <div className="ai-chat-copy-section">
+                      <span>Summary prompt</span>
+                      <div className="ai-chat-summary-options" role="radiogroup" aria-label="Summary prompt">
+                        <button
+                          type="button"
+                          className={selectedSummaryPromptId === "none" ? "selected" : ""}
+                          role="radio"
+                          aria-checked={selectedSummaryPromptId === "none"}
+                          onClick={() => setSelectedSummaryPromptId("none")}
+                        >
+                          No summary
+                        </button>
+                        {summaryPrompts.map((prompt) => (
+                          <button
+                            type="button"
+                            key={prompt.id}
+                            className={selectedSummaryPromptId === prompt.id ? "selected" : ""}
+                            role="radio"
+                            aria-checked={selectedSummaryPromptId === prompt.id}
+                            onClick={() => setSelectedSummaryPromptId(prompt.id)}
+                          >
+                            {prompt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <label className="ai-chat-summary-agent">
+                      <span>Summary agent</span>
+                      <select
+                        value={summaryAgent?.id ?? ""}
+                        disabled={!registeredAgents.length}
+                        onChange={(event) => setSummaryAgentId(event.target.value || null)}
+                      >
+                        {registeredAgents.length ? (
+                          registeredAgents.map((agent) => (
+                            <option key={agent.id} value={agent.id}>
+                              {agent.name}
+                            </option>
+                          ))
+                        ) : (
+                          <option value="">No agent</option>
+                        )}
+                      </select>
+                    </label>
+                    <div className="ai-chat-copy-panel-actions">
+                      <button type="button" onClick={openSummaryPromptEditor}>
+                        <Plus size={13} />
+                        <span>Add prompt</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={!selectedSummaryPrompt || !summaryAgent || sendMutation.isPending || isRunning}
+                        onClick={summarizeCopiedTranscript}
+                      >
+                        Summarize
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
               <button type="button" title="Close" onClick={() => setOpen(false)}>
                 <X size={16} />
               </button>
@@ -863,6 +1191,49 @@ export function AiChatFloatingPanel() {
                   })}
                 </div>
                 <button type="submit" aria-label="Save prompt" disabled={!suggestionDraft.label.trim() || !suggestionDraft.prompt.trim()}>
+                  <Check size={14} />
+                  <span>Save</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        ) : null}
+        {summaryPromptEditorOpen ? (
+          <div className="ai-chat-prompt-dialog-layer" role="presentation">
+            <form className="ai-chat-suggestion-editor" onSubmit={saveSummaryPrompt} role="dialog" aria-modal="true" aria-label="New summary prompt">
+              <div className="ai-chat-suggestion-editor-header">
+                <strong>New summary prompt</strong>
+                <button type="button" aria-label="Close summary prompt editor" onClick={closeSummaryPromptEditor}>
+                  <X size={14} />
+                </button>
+              </div>
+              <div className="ai-chat-suggestion-editor-grid">
+                <label>
+                  <span>Name</span>
+                  <input
+                    value={summaryDraft.label}
+                    maxLength={42}
+                    placeholder="Decision recap"
+                    aria-label="Summary prompt label"
+                    autoFocus
+                    autoComplete="off"
+                    onChange={(event) => setSummaryDraft((currentDraft) => ({ ...currentDraft, label: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  <span>Prompt</span>
+                  <textarea
+                    value={summaryDraft.prompt}
+                    rows={3}
+                    placeholder="Summarize the decisions and list the next actions."
+                    aria-label="Summary prompt"
+                    onChange={(event) => setSummaryDraft((currentDraft) => ({ ...currentDraft, prompt: event.target.value }))}
+                  />
+                </label>
+              </div>
+              <div className="ai-chat-suggestion-editor-footer">
+                <span />
+                <button type="submit" aria-label="Save summary prompt" disabled={!summaryDraft.label.trim() || !summaryDraft.prompt.trim()}>
                   <Check size={14} />
                   <span>Save</span>
                 </button>

@@ -9,6 +9,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   @initialize_id 1
   @thread_start_id 2
   @turn_start_id 3
+  @thread_settings_update_id 4
   @port_line_bytes 1_048_576
   @max_stream_log_bytes 1_000
   @non_interactive_tool_input_answer "This is a non-interactive session. Operator input is unavailable."
@@ -137,6 +138,22 @@ defmodule SymphonyElixir.Codex.AppServer do
         Logger.error("Codex session failed for #{issue_context(issue)}: #{inspect(reason)}")
         emit_message(on_message, :startup_failed, %{reason: reason}, metadata)
         {:error, reason}
+    end
+  end
+
+  @spec update_thread_settings(session(), map()) :: :ok | {:error, term()}
+  def update_thread_settings(_session, settings) when settings == %{}, do: :ok
+
+  def update_thread_settings(%{port: port, thread_id: thread_id}, settings) when is_map(settings) do
+    send_message(port, %{
+      "method" => "thread/settings/update",
+      "id" => @thread_settings_update_id,
+      "params" => Map.put(settings, "threadId", thread_id)
+    })
+
+    case await_response(port, @thread_settings_update_id) do
+      {:ok, _result} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -1069,7 +1086,10 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp metadata_from_message(port, payload) do
-    port |> port_metadata(nil) |> maybe_set_usage(payload)
+    port
+    |> port_metadata(nil)
+    |> maybe_set_usage(payload)
+    |> maybe_set_rate_limits(payload)
   end
 
   defp maybe_set_usage(metadata, payload) when is_map(payload) do
@@ -1083,6 +1103,33 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp maybe_set_usage(metadata, _payload), do: metadata
+
+  defp maybe_set_rate_limits(metadata, payload) when is_map(payload) do
+    rate_limits =
+      Map.get(payload, "rate_limits") ||
+        Map.get(payload, :rate_limits) ||
+        map_at_path(payload, ["params", "rateLimits"]) ||
+        map_at_path(payload, [:params, :rateLimits])
+
+    if is_map(rate_limits) do
+      Map.put(metadata, :rate_limits, rate_limits)
+    else
+      metadata
+    end
+  end
+
+  defp maybe_set_rate_limits(metadata, _payload), do: metadata
+
+  defp map_at_path(payload, path) when is_map(payload) and is_list(path) do
+    Enum.reduce_while(path, payload, fn key, current ->
+      case current do
+        %{} -> {:cont, Map.get(current, key)}
+        _ -> {:halt, nil}
+      end
+    end)
+  end
+
+  defp map_at_path(_payload, _path), do: nil
 
   defp shell_escape(value) when is_binary(value) do
     "'" <> String.replace(value, "'", "'\"'\"'") <> "'"

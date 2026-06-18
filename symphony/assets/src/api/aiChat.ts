@@ -14,12 +14,23 @@ export interface AiChatDTO {
   events: AiChatEventDTO[];
 }
 
+export interface AiChatMessageInput {
+  message: string;
+  agentOptions?: {
+    agentId?: string;
+    provider?: string;
+    codex?: {
+      effort?: "low" | "medium" | "high" | "xhigh";
+    };
+  };
+}
+
 export const getAiChat = () => api<{ chat: AiChatDTO }>("/api/ai_chat");
 
-export const sendAiChatMessage = (message: string) =>
+export const sendAiChatMessage = (input: string | AiChatMessageInput) =>
   api<{ chat: AiChatDTO }>("/api/ai_chat/messages", {
     method: "POST",
-    body: JSON.stringify({ message })
+    body: JSON.stringify(typeof input === "string" ? { message: input } : input)
   });
 
 export const resolveAiChatApproval = (requestId: string, decision: string) =>

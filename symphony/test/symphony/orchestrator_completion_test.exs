@@ -101,6 +101,32 @@ defmodule SymphonyElixir.OrchestratorCompletionTest do
     assert MapSet.member?(state.claimed, issue.id)
   end
 
+  test "codex rate limit update is captured from camelCase account payload" do
+    issue = seed_issue(305)
+    {:ok, run} = Store.create_run(issue.id, %{status: "running", mode: "workflow", started_at: DateTime.utc_now()})
+    running_entry = running_entry(issue, run)
+
+    rate_limits = %{
+      "limitId" => "chatgpt-plus",
+      "primary" => %{"remaining" => 42, "limit" => 80},
+      "secondary" => %{"remaining" => 10, "limit" => 20}
+    }
+
+    update = %{
+      event: :event_msg,
+      timestamp: DateTime.utc_now(),
+      payload: %{
+        "method" => "account/rateLimits/updated",
+        "params" => %{"rateLimits" => rate_limits}
+      }
+    }
+
+    state = %State{running: %{issue.id => running_entry}, codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0}}
+
+    assert {:noreply, updated_state} = Orchestrator.handle_info({:codex_worker_update, issue.id, update}, state)
+    assert updated_state.codex_rate_limits == rate_limits
+  end
+
   defp claimed_state(issue_id) do
     %State{
       claimed: MapSet.new([issue_id]),
@@ -130,6 +156,7 @@ defmodule SymphonyElixir.OrchestratorCompletionTest do
       },
       worker_host: nil,
       workspace_path: nil,
+      session_id: nil,
       retry_attempt: nil,
       started_at: DateTime.utc_now()
     }

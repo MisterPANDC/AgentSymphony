@@ -10,6 +10,7 @@ defmodule SymphonyElixir.AiChat do
   alias SymphonyElixir.Workspace
 
   @max_events 400
+  @codex_reasoning_efforts ~w(low medium high xhigh)
 
   defmodule Session do
     @moduledoc false
@@ -32,9 +33,9 @@ defmodule SymphonyElixir.AiChat do
   @spec status(map()) :: map()
   def status(project), do: GenServer.call(__MODULE__, {:status, project})
 
-  @spec send_message(map(), String.t(), String.t()) :: {:ok, map()} | {:error, term()}
-  def send_message(project, text, actor) when is_binary(text) do
-    GenServer.call(__MODULE__, {:send_message, project, text, actor}, 30_000)
+  @spec send_message(map(), String.t(), String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def send_message(project, text, actor, agent_options \\ %{}) when is_binary(text) and is_map(agent_options) do
+    GenServer.call(__MODULE__, {:send_message, project, text, actor, agent_options}, 30_000)
   end
 
   @spec reset(map()) :: :ok
@@ -55,7 +56,7 @@ defmodule SymphonyElixir.AiChat do
     {:reply, session_payload(session), put_session(state, session)}
   end
 
-  def handle_call({:send_message, project, text, actor}, _from, state) do
+  def handle_call({:send_message, project, text, actor, agent_options}, _from, state) do
     text = String.trim(text)
     session = Map.get(state.sessions, project_id(project)) || new_session(project)
 
@@ -67,7 +68,7 @@ defmodule SymphonyElixir.AiChat do
         {:reply, {:error, :turn_in_progress}, put_session(state, session)}
 
       true ->
-        case ensure_codex_session(session) do
+        case ensure_codex_session(session, agent_options) do
           {:ok, session} ->
             session = append_event(session, "user_message", %{text: text, actor: actor})
             owner = self()
@@ -165,11 +166,17 @@ defmodule SymphonyElixir.AiChat do
     end
   end
 
-  defp ensure_codex_session(%Session{session: %{} = _session} = chat), do: {:ok, chat}
+  defp ensure_codex_session(%Session{session: %{} = session} = chat, agent_options) do
+    case AppServer.update_thread_settings(session, thread_settings_from_agent_options(agent_options)) do
+      :ok -> {:ok, chat}
+      {:error, reason} -> {:error, reason, chat}
+    end
+  end
 
-  defp ensure_codex_session(%Session{} = chat) do
+  defp ensure_codex_session(%Session{} = chat, agent_options) do
     with {:ok, workspace} <- Workspace.create_for_issue(workspace_identifier(chat)),
-         {:ok, session} <- AppServer.start_session(workspace) do
+         {:ok, session} <- AppServer.start_session(workspace),
+         :ok <- AppServer.update_thread_settings(session, thread_settings_from_agent_options(agent_options)) do
       chat =
         chat
         |> append_event("workspace_created", %{workspace: workspace})
@@ -182,6 +189,13 @@ defmodule SymphonyElixir.AiChat do
         {:error, reason, %{chat | status: "failed"}}
     end
   end
+
+  defp thread_settings_from_agent_options(%{"codex" => %{"effort" => effort}})
+       when effort in @codex_reasoning_efforts do
+    %{"effort" => effort}
+  end
+
+  defp thread_settings_from_agent_options(_agent_options), do: %{}
 
   defp complete_task(state, ref, status, reason \\ nil) do
     {project_id, session} =

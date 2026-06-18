@@ -1911,6 +1911,8 @@ defmodule SymphonyElixir.Orchestrator do
     rate_limits_from_payload(update[:rate_limits]) ||
       rate_limits_from_payload(Map.get(update, "rate_limits")) ||
       rate_limits_from_payload(Map.get(update, :rate_limits)) ||
+      rate_limits_from_payload(Map.get(update, "rateLimits")) ||
+      rate_limits_from_payload(Map.get(update, :rateLimits)) ||
       rate_limits_from_payload(update[:payload]) ||
       rate_limits_from_payload(Map.get(update, "payload")) ||
       rate_limits_from_payload(update)
@@ -2003,7 +2005,11 @@ defmodule SymphonyElixir.Orchestrator do
       Map.get(payload, "limit_id") ||
         Map.get(payload, :limit_id) ||
         Map.get(payload, "limit_name") ||
-        Map.get(payload, :limit_name)
+        Map.get(payload, :limit_name) ||
+        Map.get(payload, "limitId") ||
+        Map.get(payload, :limitId) ||
+        Map.get(payload, "limitName") ||
+        Map.get(payload, :limitName)
 
     has_buckets =
       Enum.any?(
