@@ -2,9 +2,11 @@ defmodule SymphonyElixirWeb.AgentController do
   use Phoenix.Controller, formats: [:json]
 
   alias Plug.Conn
+  alias SymphonyElixir.AgentAssetRegistry
   alias SymphonyElixir.AgentMcpRegistry
   alias SymphonyElixir.Config
   alias SymphonyElixir.Orchestrator
+  alias SymphonyElixir.PrivAssets
   alias SymphonyElixir.Store
 
   @available_agents [
@@ -23,6 +25,7 @@ defmodule SymphonyElixirWeb.AgentController do
     registered_agents = Store.list_registered_agents()
     rate_limits = runtime_rate_limits_for_agents(registered_agents)
     mcp = mcp_registry_dto()
+    assets = asset_registry_dto()
     registered_mcp_servers = Map.get(mcp, :mcpServers, %{})
     installed_mcp_servers_by_agent_id = installed_mcp_servers_by_agent_id(registered_agents, registered_mcp_servers)
 
@@ -36,7 +39,7 @@ defmodule SymphonyElixirWeb.AgentController do
         )
       end)
 
-    json(conn, %{agents: agents, availableAgents: @available_agents, mcp: mcp})
+    json(conn, %{agents: agents, availableAgents: @available_agents, mcp: mcp, assets: assets})
   end
 
   @spec mcp(Conn.t(), map()) :: Conn.t()
@@ -67,13 +70,32 @@ defmodule SymphonyElixirWeb.AgentController do
     end
   end
 
+  @spec assets(Conn.t(), map()) :: Conn.t()
+  def assets(conn, _params) do
+    json(conn, %{assets: asset_registry_dto()})
+  end
+
+  @spec create_assets(Conn.t(), map()) :: Conn.t()
+  def create_assets(conn, params) do
+    with {:ok, _registry} <- AgentAssetRegistry.put_registry(params) do
+      json(conn, %{assets: asset_registry_dto()})
+    else
+      {:error, reason} ->
+        conn
+        |> put_status(error_status(reason))
+        |> json(%{ok: false, error: error_payload(reason)})
+    end
+  end
+
   @spec register(Conn.t(), map()) :: Conn.t()
   def register(conn, %{"provider" => "codex", "authMode" => auth_mode} = params)
       when auth_mode in ["subscription", "api", "auth_json"] do
     with {:ok, credential} <- credential_input(auth_mode, params),
          {:ok, mcp_server_names} <- mcp_server_names_input(params),
+         {:ok, skill_names} <- agent_asset_names_input("skills", params, "skillNames"),
+         {:ok, plugin_names} <- agent_asset_names_input("plugins", params, "pluginNames"),
          {:ok, agent_name} <- agent_name_input(params),
-         {:ok, attrs} <- build_codex_agent_attrs(auth_mode, mcp_server_names, agent_name),
+         {:ok, attrs} <- build_codex_agent_attrs(auth_mode, mcp_server_names, skill_names, plugin_names, agent_name),
          :ok <- File.mkdir_p(attrs.codex_home),
          :ok <- preflight_codex_environment(attrs.codex_home),
          {:ok, agent} <- Store.create_registered_agent(attrs),
@@ -101,6 +123,23 @@ defmodule SymphonyElixirWeb.AgentController do
     })
   end
 
+  @spec update(Conn.t(), map()) :: Conn.t()
+  def update(conn, %{"id" => id} = params) do
+    agent = Enum.find(Store.list_registered_agents(), &(&1.id == id))
+
+    with %{} = agent <- agent || {:error, :agent_not_found},
+         {:ok, attrs} <- update_agent_attrs(params),
+         {:ok, agent} <- Store.update_registered_agent(agent.id, attrs),
+         {:ok, agent} <- maybe_reinstall_mcp(agent, attrs) do
+      json(conn, %{agent: agent_dto(agent)})
+    else
+      {:error, reason} ->
+        conn
+        |> put_status(error_status(reason))
+        |> json(%{ok: false, error: error_payload(reason)})
+    end
+  end
+
   @spec login(Conn.t(), map()) :: Conn.t()
   def login(conn, %{"id" => id} = params) do
     agent = Enum.find(Store.list_registered_agents(), &(&1.id == id))
@@ -109,6 +148,56 @@ defmodule SymphonyElixirWeb.AgentController do
          {:ok, credential} <- credential_input(agent.auth_mode, params),
          {:ok, login} <- bootstrap_codex_credentials(agent, credential) do
       json(conn, %{agent: agent_dto(login.agent), login: login_dto(login)})
+    else
+      {:error, reason} ->
+        conn
+        |> put_status(error_status(reason))
+        |> json(%{ok: false, error: error_payload(reason)})
+    end
+  end
+
+  @spec delete(Conn.t(), map()) :: Conn.t()
+  def delete(conn, %{"id" => id}) do
+    with {:ok, agent} <- Store.delete_registered_agent(id) do
+      json(conn, %{agent: agent_dto(agent, nil, %{}, [])})
+    else
+      {:error, reason} ->
+        conn
+        |> put_status(error_status(reason))
+        |> json(%{ok: false, error: error_payload(reason)})
+    end
+  end
+
+  @spec install_asset(Conn.t(), map()) :: Conn.t()
+  def install_asset(conn, %{"id" => id, "kind" => kind, "name" => name}) do
+    agent = Enum.find(Store.list_registered_agents(), &(&1.id == id))
+
+    with %{} = agent <- agent || {:error, :agent_not_found},
+         {:ok, kind} <- normalize_asset_kind(kind),
+         {:ok, name} <- normalize_asset_name(name),
+         {:ok, _asset} <- require_registered_asset(kind, name),
+         {:ok, agent} <- update_agent_asset_selection(agent, kind, name, :add),
+         {:ok, agent} <- start_asset_install(agent) do
+      json(conn, %{agent: agent_dto(agent)})
+    else
+      {:error, reason} ->
+        conn
+        |> put_status(error_status(reason))
+        |> json(%{ok: false, error: error_payload(reason)})
+    end
+  end
+
+  @spec remove_asset(Conn.t(), map()) :: Conn.t()
+  def remove_asset(conn, %{"id" => id, "kind" => kind, "name" => name}) do
+    agent = Enum.find(Store.list_registered_agents(), &(&1.id == id))
+
+    with %{} = agent <- agent || {:error, :agent_not_found},
+         {:ok, kind} <- normalize_asset_kind(kind),
+         {:ok, name} <- normalize_asset_name(name),
+         {:ok, agent} <- update_agent_asset_selection(agent, kind, name, :remove),
+         :ok <- remove_agent_asset_link(agent, kind, name),
+         {:ok, agent} <- start_asset_install(agent) do
+      json(conn, %{agent: agent_dto(agent)})
     else
       {:error, reason} ->
         conn
@@ -141,7 +230,7 @@ defmodule SymphonyElixirWeb.AgentController do
     json(conn, %{dispatch: Orchestrator.request_refresh()})
   end
 
-  defp build_codex_agent_attrs(auth_mode, mcp_server_names, agent_name) do
+  defp build_codex_agent_attrs(auth_mode, mcp_server_names, skill_names, plugin_names, agent_name) do
     id = Ecto.UUID.generate()
     home = codex_home(id)
 
@@ -153,7 +242,9 @@ defmodule SymphonyElixirWeb.AgentController do
        auth_mode: auth_mode,
        codex_home: home,
        credential_status: "pending",
-       mcp_server_names: mcp_server_names
+       mcp_server_names: mcp_server_names,
+       skill_names: skill_names,
+       plugin_names: plugin_names
      }}
   rescue
     reason -> {:error, reason}
@@ -212,7 +303,8 @@ defmodule SymphonyElixirWeb.AgentController do
              last_login_exit_status: 0,
              last_login_message: "auth.json imported"
            }),
-         {:ok, agent} <- start_mcp_install(agent) do
+         {:ok, agent} <- start_mcp_install(agent),
+         {:ok, agent} <- start_asset_install(agent) do
       {:ok, %{agent: agent, command: nil, startedAt: nil}}
     else
       {:error, reason} -> {:error, {:auth_json_write_failed, reason}}
@@ -282,8 +374,12 @@ defmodule SymphonyElixirWeb.AgentController do
                last_login_exit_status: 0,
                last_login_message: String.trim(output)
              }) do
-          {:ok, agent} -> start_mcp_install(agent)
-          {:error, _reason} -> :ok
+          {:ok, agent} ->
+            start_mcp_install(agent)
+            start_asset_install(agent)
+
+          {:error, _reason} ->
+            :ok
         end
 
       {output, status} ->
@@ -354,6 +450,171 @@ defmodule SymphonyElixirWeb.AgentController do
       })
   end
 
+  defp start_asset_install(agent) do
+    started_at = now()
+
+    with {:ok, agent} <-
+           Store.update_registered_agent(agent.id, %{
+             asset_install_status: "installing",
+             asset_install_started_at: started_at,
+             asset_install_finished_at: nil,
+             asset_install_exit_status: nil,
+             asset_install_message: nil
+           }) do
+      Task.start(fn -> run_asset_install(agent) end)
+      {:ok, agent}
+    end
+  end
+
+  defp run_asset_install(agent) do
+    case install_agent_assets(agent) do
+      {:ok, message} ->
+        Store.update_registered_agent(agent.id, %{
+          asset_install_status: "configured",
+          asset_install_finished_at: now(),
+          asset_install_exit_status: 0,
+          asset_install_message: message
+        })
+
+      {:error, reason} ->
+        Store.update_registered_agent(agent.id, %{
+          asset_install_status: "failed",
+          asset_install_finished_at: now(),
+          asset_install_exit_status: 1,
+          asset_install_message: inspect(reason)
+        })
+    end
+  rescue
+    error ->
+      Store.update_registered_agent(agent.id, %{
+        asset_install_status: "failed",
+        asset_install_finished_at: now(),
+        asset_install_exit_status: 1,
+        asset_install_message: Exception.message(error)
+      })
+  end
+
+  defp install_agent_assets(agent) do
+    skill_names = Map.get(agent, :skill_names) || []
+    plugin_names = Map.get(agent, :plugin_names) || []
+
+    with {:ok, skills, plugins} <- AgentAssetRegistry.selected_agent_assets(skill_names, plugin_names),
+         {:ok, skill_count} <- reconcile_agent_assets(agent, "skills", skills),
+         {:ok, plugin_count} <- reconcile_agent_assets(agent, "plugins", plugins) do
+      {:ok, "Agent asset reconcile completed: #{skill_count} skills, #{plugin_count} plugins"}
+    end
+  end
+
+  defp reconcile_agent_assets(agent, kind, desired_assets) do
+    with {:ok, registered_assets} <- AgentAssetRegistry.list_assets(kind),
+         :ok <- File.mkdir_p(asset_root(agent, kind)),
+         :ok <- remove_unselected_agent_assets(agent, kind, Map.keys(registered_assets), Map.keys(desired_assets)),
+         :ok <- install_selected_agent_assets(agent, kind, desired_assets) do
+      {:ok, map_size(desired_assets)}
+    end
+  end
+
+  defp remove_unselected_agent_assets(agent, kind, registered_names, desired_names) do
+    desired = MapSet.new(desired_names)
+
+    registered_names
+    |> Enum.reject(&MapSet.member?(desired, &1))
+    |> Enum.reduce_while(:ok, fn name, :ok ->
+      case remove_agent_asset_link(agent, kind, name) do
+        :ok -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  defp install_selected_agent_assets(agent, kind, assets) do
+    Enum.reduce_while(assets, :ok, fn {name, asset}, :ok ->
+      case install_agent_asset(agent, kind, name, asset) do
+        :ok -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  defp install_agent_asset(agent, kind, name, asset) do
+    target = asset_target(agent, kind, name)
+
+    with {:ok, source} <- agent_asset_source(kind, name, asset),
+         true <- File.dir?(source) || {:error, {:agent_asset_source_missing, source}},
+         :ok <- ensure_replaceable_agent_asset_target(target),
+         :ok <- File.ln_s(source, target) do
+      :ok
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp agent_asset_source(_kind, _name, %{"path" => source}) when is_binary(source) do
+    {:ok, Path.expand(source)}
+  end
+
+  defp agent_asset_source(kind, name, %{"git_url" => git_url}) when is_binary(git_url) do
+    source = cached_asset_source(kind, name)
+
+    cond do
+      File.dir?(source) ->
+        {:ok, source}
+
+      File.exists?(source) ->
+        {:error, {:agent_asset_target_exists, source}}
+
+      true ->
+        with git when is_binary(git) <- System.find_executable("git") || {:error, :git_not_found},
+             :ok <- File.mkdir_p(Path.dirname(source)),
+             {_, 0} <- System.cmd(git, ["clone", git_url, source], stderr_to_stdout: true) do
+          {:ok, source}
+        else
+          {:error, reason} -> {:error, reason}
+          {output, status} -> {:error, {:agent_asset_git_clone_failed, status, output}}
+        end
+    end
+  end
+
+  defp agent_asset_source(kind, name, %{"content" => content}) when is_binary(content) do
+    source = cached_asset_source(kind, name)
+    skill_path = Path.join(source, "SKILL.md")
+
+    with :ok <- File.mkdir_p(source),
+         :ok <- File.write(skill_path, content) do
+      {:ok, source}
+    end
+  end
+
+  defp agent_asset_source(_kind, _name, _asset), do: {:error, :invalid_agent_asset_path}
+
+  defp cached_asset_source(kind, name) do
+    Path.join([Config.settings!().home, "agent_asset_sources", kind, name])
+  end
+
+  defp ensure_replaceable_agent_asset_target(target) do
+    case File.lstat(target) do
+      {:ok, %File.Stat{type: :symlink}} -> File.rm(target)
+      {:ok, _stat} -> {:error, {:agent_asset_target_exists, target}}
+      {:error, :enoent} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp remove_agent_asset_link(agent, kind, name) do
+    target = asset_target(agent, kind, name)
+
+    case File.lstat(target) do
+      {:ok, %File.Stat{type: :symlink}} -> File.rm(target)
+      {:ok, _stat} -> :ok
+      {:error, :enoent} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp asset_root(agent, "skills"), do: Path.join(agent.codex_home, "skills")
+  defp asset_root(agent, "plugins"), do: Path.join(agent.codex_home, "plugins")
+  defp asset_target(agent, kind, name), do: Path.join(asset_root(agent, kind), name)
+
   defp mcp_install_payload(agent) do
     with {:ok, registered_servers} <- AgentMcpRegistry.list_servers(),
          {:ok, servers} <- AgentMcpRegistry.selected_servers(Map.get(agent, :mcp_server_names) || []) do
@@ -371,17 +632,7 @@ defmodule SymphonyElixirWeb.AgentController do
   end
 
   defp mcp_install_script do
-    priv_dir =
-      case :code.priv_dir(:symphony_elixir) do
-        {:error, _reason} -> Path.expand("priv", File.cwd!())
-        path -> to_string(path)
-      end
-
-    script = Path.join([priv_dir, "agent_mcp", "install.sh"])
-
-    if File.exists?(script),
-      do: {:ok, script},
-      else: {:error, {:mcp_install_script_missing, script}}
+    PrivAssets.agent_mcp_install_script()
   end
 
   defp credential_input("api", %{"apiKey" => api_key}) when is_binary(api_key) do
@@ -411,6 +662,37 @@ defmodule SymphonyElixirWeb.AgentController do
 
   defp agent_name_input(_params), do: {:ok, "Codex"}
 
+  defp update_agent_attrs(params) do
+    with {:ok, name_attrs} <- update_agent_name_attrs(params),
+         {:ok, mcp_attrs} <- update_agent_mcp_attrs(params) do
+      attrs = Map.merge(name_attrs, mcp_attrs)
+      if map_size(attrs) == 0, do: {:error, :invalid_agent_update}, else: {:ok, attrs}
+    end
+  end
+
+  defp update_agent_name_attrs(%{"name" => name}) when is_binary(name) do
+    name = String.trim(name)
+
+    cond do
+      name == "" -> {:error, :agent_name_required}
+      String.length(name) > 80 -> {:error, :agent_name_too_long}
+      true -> {:ok, %{name: name}}
+    end
+  end
+
+  defp update_agent_name_attrs(_params), do: {:ok, %{}}
+
+  defp update_agent_mcp_attrs(%{"mcpServerNames" => _names} = params) do
+    with {:ok, names} <- mcp_server_names_input(params) do
+      {:ok, %{mcp_server_names: names}}
+    end
+  end
+
+  defp update_agent_mcp_attrs(_params), do: {:ok, %{}}
+
+  defp maybe_reinstall_mcp(agent, %{mcp_server_names: _names}), do: start_mcp_install(agent)
+  defp maybe_reinstall_mcp(agent, _attrs), do: {:ok, agent}
+
   defp mcp_server_names_input(%{"mcpServerNames" => names}) when is_list(names) do
     names =
       names
@@ -426,6 +708,62 @@ defmodule SymphonyElixirWeb.AgentController do
   end
 
   defp mcp_server_names_input(_params), do: {:ok, []}
+
+  defp agent_asset_names_input(kind, params, param_name) do
+    names =
+      case Map.get(params, param_name) do
+        values when is_list(values) -> values
+        _value -> []
+      end
+
+    names =
+      names
+      |> Enum.filter(&is_binary/1)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+
+    case AgentAssetRegistry.selected_assets(kind, names) do
+      {:ok, _assets} -> {:ok, names}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp normalize_asset_kind(kind) when kind in ["skill", "skills"], do: {:ok, "skills"}
+  defp normalize_asset_kind(kind) when kind in ["plugin", "plugins"], do: {:ok, "plugins"}
+  defp normalize_asset_kind(_kind), do: {:error, :invalid_agent_asset_kind}
+
+  defp normalize_asset_name(name) when is_binary(name) do
+    name = String.trim(name)
+
+    if Regex.match?(~r/^[A-Za-z0-9_.-]+$/, name),
+      do: {:ok, name},
+      else: {:error, :invalid_agent_asset_name}
+  end
+
+  defp normalize_asset_name(_name), do: {:error, :invalid_agent_asset_name}
+
+  defp require_registered_asset(kind, name) do
+    with {:ok, assets} <- AgentAssetRegistry.list_assets(kind) do
+      case Map.get(assets, name) do
+        nil -> {:error, {:unknown_agent_asset, kind, name}}
+        asset -> {:ok, asset}
+      end
+    end
+  end
+
+  defp update_agent_asset_selection(agent, kind, name, action) do
+    key = if kind == "skills", do: :skill_names, else: :plugin_names
+    current = Map.get(agent, key) || []
+
+    names =
+      case action do
+        :add -> Enum.uniq(current ++ [name])
+        :remove -> Enum.reject(current, &(&1 == name))
+      end
+
+    Store.update_registered_agent(agent.id, %{key => names})
+  end
 
   defp normalize_auth_json(auth_json) when is_binary(auth_json) do
     with {:ok, decoded} <- Jason.decode(auth_json),
@@ -463,6 +801,13 @@ defmodule SymphonyElixirWeb.AgentController do
       mcpInstallMessage: Map.get(agent, :mcp_install_message),
       mcpServerNames: Map.get(agent, :mcp_server_names) || [],
       mcpInstalledServers: installed_mcp_server_dtos || installed_mcp_servers(agent, registered_mcp_servers),
+      assetInstallStatus: Map.get(agent, :asset_install_status) || "pending",
+      assetInstallStartedAt: iso(Map.get(agent, :asset_install_started_at)),
+      assetInstallFinishedAt: iso(Map.get(agent, :asset_install_finished_at)),
+      assetInstallExitStatus: Map.get(agent, :asset_install_exit_status),
+      assetInstallMessage: Map.get(agent, :asset_install_message),
+      skillNames: Map.get(agent, :skill_names) || [],
+      pluginNames: Map.get(agent, :plugin_names) || [],
       usage: usage_dto(agent, runtime_rate_limits),
       insertedAt: iso(agent.inserted_at),
       updatedAt: iso(agent.updated_at)
@@ -581,7 +926,19 @@ defmodule SymphonyElixirWeb.AgentController do
   defp error_status(:invalid_mcp_server_args), do: 400
   defp error_status(:invalid_mcp_server_env), do: 400
   defp error_status(:invalid_mcp_server_startup_timeout), do: 400
+  defp error_status(:invalid_agent_asset_registry), do: 400
+  defp error_status(:invalid_agent_asset_definition), do: 400
+  defp error_status(:invalid_agent_asset_kind), do: 400
+  defp error_status(:invalid_agent_asset_name), do: 400
+  defp error_status(:invalid_agent_asset_path), do: 400
+  defp error_status(:git_not_found), do: 500
+  defp error_status({:unknown_agent_asset, _kind, _name}), do: 400
+  defp error_status({:agent_asset_source_missing, _source}), do: 400
+  defp error_status({:agent_asset_git_clone_failed, _status, _output}), do: 400
+  defp error_status({:agent_asset_target_exists, _target}), do: 409
+  defp error_status(:agent_name_required), do: 400
   defp error_status(:agent_name_too_long), do: 400
+  defp error_status(:invalid_agent_update), do: 400
   defp error_status(:codex_cli_missing), do: 400
   defp error_status({:codex_home_not_writable, _reason}), do: 400
   defp error_status({:codex_mcp_probe_failed, _status, _output}), do: 400
@@ -624,8 +981,44 @@ defmodule SymphonyElixirWeb.AgentController do
   defp error_payload(:invalid_mcp_server_startup_timeout),
     do: %{type: :invalid_mcp_server_startup_timeout, message: "MCP startup timeout must be a positive integer."}
 
+  defp error_payload(:invalid_agent_asset_registry),
+    do: %{type: :invalid_agent_asset_registry, message: "Asset JSON must contain skills and plugins objects."}
+
+  defp error_payload(:invalid_agent_asset_definition),
+    do: %{type: :invalid_agent_asset_definition, message: "Each skill or plugin definition must be a JSON object."}
+
+  defp error_payload(:invalid_agent_asset_kind),
+    do: %{type: :invalid_agent_asset_kind, message: "Asset kind must be skills or plugins."}
+
+  defp error_payload(:invalid_agent_asset_name),
+    do: %{type: :invalid_agent_asset_name, message: "Asset names must use letters, numbers, dots, dashes, or underscores."}
+
+  defp error_payload(:invalid_agent_asset_path),
+    do: %{type: :invalid_agent_asset_path, message: "Each skill or plugin definition requires a path, git URL, or Markdown content."}
+
+  defp error_payload(:git_not_found),
+    do: %{type: :git_not_found, message: "git is required to install plugin repositories."}
+
+  defp error_payload({:unknown_agent_asset, kind, name}),
+    do: %{type: :unknown_agent_asset, message: "Unknown #{kind} asset: #{name}"}
+
+  defp error_payload({:agent_asset_source_missing, source}),
+    do: %{type: :agent_asset_source_missing, message: "Agent asset source directory does not exist: #{source}"}
+
+  defp error_payload({:agent_asset_git_clone_failed, status, output}),
+    do: %{type: :agent_asset_git_clone_failed, message: "Plugin repository clone failed with status #{status}: #{String.trim(to_string(output))}"}
+
+  defp error_payload({:agent_asset_target_exists, target}),
+    do: %{type: :agent_asset_target_exists, message: "Agent asset target already exists and is not managed by Symphony: #{target}"}
+
   defp error_payload(:agent_name_too_long),
     do: %{type: :agent_name_too_long, message: "Agent name must be 80 characters or fewer."}
+
+  defp error_payload(:agent_name_required),
+    do: %{type: :agent_name_required, message: "Agent name is required."}
+
+  defp error_payload(:invalid_agent_update),
+    do: %{type: :invalid_agent_update, message: "No supported agent settings were provided."}
 
   defp error_payload(:codex_cli_missing),
     do: %{type: :codex_cli_missing, message: "Codex CLI was not found in PATH."}
@@ -657,6 +1050,16 @@ defmodule SymphonyElixirWeb.AgentController do
     case AgentMcpRegistry.dto() do
       {:ok, dto} -> dto
       {:error, reason} -> %{path: AgentMcpRegistry.path(), mcpServers: %{}, error: inspect(reason)}
+    end
+  end
+
+  defp asset_registry_dto do
+    case AgentAssetRegistry.dto() do
+      {:ok, dto} ->
+        dto
+
+      {:error, reason} ->
+        %{path: AgentAssetRegistry.path(), skillPath: AgentAssetRegistry.skill_path(), pluginPath: AgentAssetRegistry.plugin_path(), skills: %{}, plugins: %{}, error: inspect(reason)}
     end
   end
 

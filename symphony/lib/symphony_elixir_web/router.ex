@@ -86,6 +86,7 @@ defmodule SymphonyElixirWeb.Router do
 
     get("/api/agents", AgentController, :index)
     get("/api/agents/mcp", AgentController, :mcp)
+    get("/api/agents/assets", AgentController, :assets)
 
     get("/api/monitor/state", MonitorController, :state)
     get("/api/monitor/events", MonitorController, :events)
@@ -126,8 +127,13 @@ defmodule SymphonyElixirWeb.Router do
 
     post("/api/agents/register", AgentController, :register)
     post("/api/agents/mcp", AgentController, :create_mcp)
+    post("/api/agents/assets", AgentController, :create_assets)
     post("/api/agents/:id/login", AgentController, :login)
     post("/api/agents/:id/usage", AgentController, :refresh_usage)
+    post("/api/agents/:id/assets/:kind/:name", AgentController, :install_asset)
+    patch("/api/agents/:id", AgentController, :update)
+    delete("/api/agents/:id/assets/:kind/:name", AgentController, :remove_asset)
+    delete("/api/agents/:id", AgentController, :delete)
     post("/api/agents/dispatch", AgentController, :dispatch)
     post("/api/runs/:id/cancel", RunController, :cancel)
     post("/api/runs/:id/retry", RunController, :retry)

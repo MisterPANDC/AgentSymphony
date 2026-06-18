@@ -348,6 +348,22 @@ defmodule SymphonyElixir.Store.Postgres do
     end
   end
 
+  @spec delete_registered_agent(String.t()) :: {:ok, map()} | {:error, term()}
+  def delete_registered_agent(agent_id) do
+    case Repo.get(RegisteredAgent, agent_id) do
+      nil ->
+        {:error, :agent_not_found}
+
+      agent ->
+        agent_public = plain(agent)
+
+        case Repo.delete(agent) do
+          {:ok, _agent} -> {:ok, agent_public}
+          {:error, changeset} -> {:error, changeset}
+        end
+    end
+  end
+
   @spec upsert_issue(map()) :: map()
   def upsert_issue(attrs) do
     attrs = atomize_keys(attrs)

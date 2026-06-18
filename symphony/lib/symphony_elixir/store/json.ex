@@ -22,6 +22,7 @@ defmodule SymphonyElixir.Store.Json do
   @registered_agent_auth_modes ~w(subscription api auth_json)
   @registered_agent_credential_statuses ~w(pending login_started configured failed)
   @registered_agent_mcp_install_statuses ~w(pending installing configured failed)
+  @registered_agent_asset_install_statuses ~w(pending installing configured failed)
   @registered_agent_usage_statuses ~w(unknown available unavailable not_applicable)
 
   defstruct [
@@ -139,6 +140,9 @@ defmodule SymphonyElixir.Store.Json do
 
   @spec update_registered_agent(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def update_registered_agent(agent_id, attrs), do: call({:update_registered_agent, agent_id, attrs})
+
+  @spec delete_registered_agent(String.t()) :: {:ok, map()} | {:error, term()}
+  def delete_registered_agent(agent_id), do: call({:delete_registered_agent, agent_id})
 
   @spec upsert_issue(map()) :: map()
   def upsert_issue(attrs), do: call({:upsert_issue, attrs})
@@ -558,6 +562,7 @@ defmodule SymphonyElixir.Store.Json do
         updated =
           agent
           |> Map.merge(%{
+            name: map_value(attrs, :name, agent.name),
             credential_status: attrs[:credential_status] || attrs["credential_status"] || agent.credential_status,
             login_started_at: attrs[:login_started_at] || attrs["login_started_at"] || agent.login_started_at,
             last_login_exit_status: attrs[:last_login_exit_status] || attrs["last_login_exit_status"],
@@ -568,6 +573,13 @@ defmodule SymphonyElixir.Store.Json do
             mcp_install_exit_status: map_value(attrs, :mcp_install_exit_status, agent[:mcp_install_exit_status]),
             mcp_install_message: map_value(attrs, :mcp_install_message, agent[:mcp_install_message]),
             mcp_server_names: map_value(attrs, :mcp_server_names, agent[:mcp_server_names] || []),
+            asset_install_status: map_value(attrs, :asset_install_status, agent[:asset_install_status] || "pending"),
+            asset_install_started_at: map_value(attrs, :asset_install_started_at, agent[:asset_install_started_at]),
+            asset_install_finished_at: map_value(attrs, :asset_install_finished_at, agent[:asset_install_finished_at]),
+            asset_install_exit_status: map_value(attrs, :asset_install_exit_status, agent[:asset_install_exit_status]),
+            asset_install_message: map_value(attrs, :asset_install_message, agent[:asset_install_message]),
+            skill_names: map_value(attrs, :skill_names, agent[:skill_names] || []),
+            plugin_names: map_value(attrs, :plugin_names, agent[:plugin_names] || []),
             usage_status: map_value(attrs, :usage_status, agent[:usage_status] || "unknown"),
             usage_snapshot: map_value(attrs, :usage_snapshot, agent[:usage_snapshot]),
             usage_checked_at: map_value(attrs, :usage_checked_at, agent[:usage_checked_at]),
@@ -577,12 +589,29 @@ defmodule SymphonyElixir.Store.Json do
 
         if updated.credential_status in @registered_agent_credential_statuses and
              updated.mcp_install_status in @registered_agent_mcp_install_statuses and
+             updated.asset_install_status in @registered_agent_asset_install_statuses and
              updated.usage_status in @registered_agent_usage_statuses do
           state = put_in(state.registered_agents[agent_id], updated) |> persist()
           {:reply, {:ok, updated}, state}
         else
           {:reply, {:error, :invalid_registered_agent_status}, state}
         end
+    end
+  end
+
+  def handle_call({:delete_registered_agent, agent_id}, _from, state) do
+    case Map.get(state.registered_agents, agent_id) do
+      nil ->
+        {:reply, {:error, :agent_not_found}, state}
+
+      agent ->
+        state =
+          state
+          |> update_in([Access.key(:registered_agents)], &Map.delete(&1, agent_id))
+          |> update_in([Access.key(:registered_agent_order)], &Enum.reject(&1, fn id -> id == agent_id end))
+          |> persist()
+
+        {:reply, {:ok, agent}, state}
     end
   end
 
@@ -1142,6 +1171,8 @@ defmodule SymphonyElixir.Store.Json do
         :login_started_at,
         :mcp_install_started_at,
         :mcp_install_finished_at,
+        :asset_install_started_at,
+        :asset_install_finished_at,
         :usage_checked_at,
         :inserted_at,
         :updated_at
@@ -1569,8 +1600,17 @@ defmodule SymphonyElixir.Store.Json do
       (attrs[:mcp_install_status] || attrs["mcp_install_status"] || "pending") not in @registered_agent_mcp_install_statuses ->
         {:error, :invalid_mcp_install_status}
 
+      (attrs[:asset_install_status] || attrs["asset_install_status"] || "pending") not in @registered_agent_asset_install_statuses ->
+        {:error, :invalid_asset_install_status}
+
       not valid_string_list?(attrs[:mcp_server_names] || attrs["mcp_server_names"] || []) ->
         {:error, :invalid_mcp_server_names}
+
+      not valid_string_list?(attrs[:skill_names] || attrs["skill_names"] || []) ->
+        {:error, :invalid_skill_names}
+
+      not valid_string_list?(attrs[:plugin_names] || attrs["plugin_names"] || []) ->
+        {:error, :invalid_plugin_names}
 
       true ->
         {:ok,
@@ -1590,6 +1630,13 @@ defmodule SymphonyElixir.Store.Json do
            mcp_install_exit_status: attrs[:mcp_install_exit_status] || attrs["mcp_install_exit_status"],
            mcp_install_message: attrs[:mcp_install_message] || attrs["mcp_install_message"],
            mcp_server_names: attrs[:mcp_server_names] || attrs["mcp_server_names"] || [],
+           asset_install_status: attrs[:asset_install_status] || attrs["asset_install_status"] || "pending",
+           asset_install_started_at: attrs[:asset_install_started_at] || attrs["asset_install_started_at"],
+           asset_install_finished_at: attrs[:asset_install_finished_at] || attrs["asset_install_finished_at"],
+           asset_install_exit_status: attrs[:asset_install_exit_status] || attrs["asset_install_exit_status"],
+           asset_install_message: attrs[:asset_install_message] || attrs["asset_install_message"],
+           skill_names: attrs[:skill_names] || attrs["skill_names"] || [],
+           plugin_names: attrs[:plugin_names] || attrs["plugin_names"] || [],
            usage_status: attrs[:usage_status] || attrs["usage_status"] || "unknown",
            usage_snapshot: attrs[:usage_snapshot] || attrs["usage_snapshot"],
            usage_checked_at: attrs[:usage_checked_at] || attrs["usage_checked_at"],

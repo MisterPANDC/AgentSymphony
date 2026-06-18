@@ -111,6 +111,9 @@ defmodule SymphonyElixir.Store do
   @spec update_registered_agent(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def update_registered_agent(agent_id, attrs), do: backend().update_registered_agent(agent_id, attrs)
 
+  @spec delete_registered_agent(String.t()) :: {:ok, map()} | {:error, term()}
+  def delete_registered_agent(agent_id), do: backend().delete_registered_agent(agent_id)
+
   @spec upsert_issue(map()) :: map()
   def upsert_issue(attrs), do: backend().upsert_issue(attrs)
 
